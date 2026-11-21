@@ -718,8 +718,9 @@ export function mount(host) {
     host.schedule()
     try {
       // A reviewed listing installs the commit its review read (`pinned_link`).
-      const preview = await host.pluginLoader.install({ url: entry.pinned_link ?? entry.link, via: 'market' })
+      const preview = await host.pluginLoader.install({ url: entry.pinned_link ?? entry.link, via: 'market', recognise: true })
       if (st.install?.id !== id) return
+      if (preview.adopted) { closeInstall(); await load(true); return }
       Object.assign(st.install, { preview, phase: 'ready' })
     } catch (error) {
       if (st.install?.id !== id) return
@@ -797,8 +798,9 @@ export function mount(host) {
     Object.assign(job, { phase: 'reading', error: null, read: text, repo: request?.url ?? shape.repo, ...(request ? {} : { choose: null }) })
     host.schedule()
     try {
-      const out = await host.pluginLoader.install(request ?? { url: text })
+      const out = await host.pluginLoader.install({ ...(request ?? { url: text }), recognise: true })
       if (st.install !== job || ticket !== linkTicket) return
+      if (out.adopted) { closeInstall(); await load(true); return }
       if (out.choose) Object.assign(job, { phase: 'choose', choose: out })
       else Object.assign(job, { phase: 'ready', preview: out, id: out.id, error: '', move: 'heading' })
     } catch (error) {
@@ -887,6 +889,7 @@ export function mount(host) {
         const out = await host.api('PATCH', `/plugins/${encodeURIComponent(p.id)}`,
           { review, link: p.source.url, via: link ? 'link' : 'market', version: p.version })
         if (st.install !== job) return
+        if (out.adopted) { closeInstall(); await load(true); return }
         job.phase = 'answered'
         job.answer = out.skipped ? skippedUpdate(out.skipped) : 'Your agent has the update.'
       } catch (error) { job.phase = 'ready'; job.error = error.message }

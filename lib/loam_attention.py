@@ -6,11 +6,13 @@ failure must never fail the caller.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
 import re
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -126,6 +128,31 @@ def _write(path: Path, data: dict) -> None:
     tmp.replace(path)
 
 
+@contextmanager
+def _queue_lock():
+    STATE.mkdir(parents=True, exist_ok=True)
+    fd = os.open(STATE, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
+
+
+def withdraw(keys: set[str]) -> None:
+    """Cancel these queued notices, including any retry of a claimed notice."""
+    if not keys or not STATE.is_dir():
+        return
+    with _queue_lock():
+        cancelled = [r for r in pending() if r.get("key") in keys]
+        if cancelled:
+            done(cancelled)
+            seen = _load_seen()
+            for record in cancelled:
+                seen.pop(record["key"], None)
+            _write(STATE / SEEN, seen)
+
+
 def tell(fact: str, *, by: str = "loam", key: str | None = None,
          evidence: str | None = None, detail: str | None = None,
          kick: bool = True) -> str:
@@ -146,26 +173,26 @@ def tell(fact: str, *, by: str = "loam", key: str | None = None,
         ident = f"{by}:{ident}"
         now = time.time()
         quiet = QUIET_DAYS * 86400
-        STATE.mkdir(parents=True, exist_ok=True)
-        seen = _load_seen()
-        seen = {k: v for k, v in seen.items()
-                if isinstance(v, dict) and now - float(v.get("last", 0)) < quiet}
-        prior = seen.get(ident)
-        if prior is not None:
-            prior["last"] = now
-            prior["count"] = int(prior.get("count", 1)) + 1
+        with _queue_lock():
+            seen = _load_seen()
+            seen = {k: v for k, v in seen.items()
+                    if isinstance(v, dict) and now - float(v.get("last", 0)) < quiet}
+            prior = seen.get(ident)
+            if prior is not None:
+                prior["last"] = now
+                prior["count"] = int(prior.get("count", 1)) + 1
+                _write(STATE / SEEN, seen)
+                return "repeat"
+            seen[ident] = {"told": now, "last": now, "count": 1}
             _write(STATE / SEEN, seen)
-            return "repeat"
-        seen[ident] = {"told": now, "last": now, "count": 1}
-        _write(STATE / SEEN, seen)
-        at = now_iso()
-        rid = f"{at.replace(':', '').replace('-', '')}-" + \
-            hashlib.sha1(f"{ident}{now}".encode()).hexdigest()[:8]
-        _write(STATE / f"{rid}.json", {"id": rid, "at": at, "by": by,
-                                       "key": ident, "fact": fact,
-                                       "evidence": evidence or None,
-                                       "detail": (str(detail).strip()[:DETAIL_CHARS]
-                                                  if detail else None)})
+            at = now_iso()
+            rid = f"{at.replace(':', '').replace('-', '')}-" + \
+                hashlib.sha1(f"{ident}{now}".encode()).hexdigest()[:8]
+            _write(STATE / f"{rid}.json", {"id": rid, "at": at, "by": by,
+                                           "key": ident, "fact": fact,
+                                           "evidence": evidence or None,
+                                           "detail": (str(detail).strip()[:DETAIL_CHARS]
+                                                      if detail else None)})
     except Exception as exc:  # noqa: BLE001 -- telling never fails its caller
         return f"failed: {exc}"
     if kick:
@@ -200,13 +227,16 @@ def pending() -> list[dict]:
     return sorted(out, key=lambda r: (str(r.get("at")), str(r.get("id"))))
 
 
-def mark_given(records: list[dict]) -> None:
+def mark_given(records: list[dict]) -> list[dict]:
     stamp = now_iso()
-    for record in records:
-        try:
-            _write(STATE / f"{record['id']}.json", {**record, "given": stamp})
-        except (OSError, KeyError):
-            pass
+    claimed = []
+    with _queue_lock():
+        for record in records:
+            path = STATE / f"{record['id']}.json"
+            if path.exists():
+                _write(path, {**record, "given": stamp})
+                claimed.append(record)
+    return claimed
 
 
 def due(records: list[dict], at: float | None = None) -> list[dict]:
@@ -227,15 +257,18 @@ def failed(records: list[dict], at: float | None = None) -> None:
     """The run they were handed failed: they were not heard. Each goes back
     to pending, to be handed over again after its next retry time."""
     at = time.time() if at is None else at
-    for record in records:
-        tries = int(record.get("tries") or 0) + 1
-        wait = min(RETRY_MAX_H * 3600, RETRY_MIN * 60 * 2 ** (tries - 1))
-        clean = {k: v for k, v in record.items() if k != "given"}
-        try:
-            _write(STATE / f"{record['id']}.json",
-                   {**clean, "tries": tries, "retry_at": at + wait})
-        except (OSError, KeyError):
-            pass
+    with _queue_lock():
+        for record in records:
+            if not (STATE / f"{record['id']}.json").exists():
+                continue
+            tries = int(record.get("tries") or 0) + 1
+            wait = min(RETRY_MAX_H * 3600, RETRY_MIN * 60 * 2 ** (tries - 1))
+            clean = {k: v for k, v in record.items() if k != "given"}
+            try:
+                _write(STATE / f"{record['id']}.json",
+                       {**clean, "tries": tries, "retry_at": at + wait})
+            except (OSError, KeyError):
+                pass
 
 
 def done(records: list[dict]) -> None:

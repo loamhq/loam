@@ -718,9 +718,7 @@ now does exactly this.
 A line per plugin installed from a link; `on` for every id anyone has
 switched. A Yours folder with no line is *built here*. A line whose folder is
 gone is a broken row (`it is in the installed list but its folder is gone`)
-until it is removed. `files` lets the list say a linked plugin has been
-`edited` since it was installed, so an update that would replace those edits
-says so before the yes. An unreadable `installed.json` leaves the list drawn
+until it is removed. `files` records the fingerprint of the recognised release. An unreadable `installed.json` leaves the list drawn
 (with `error` saying why) and refuses every write rather than overwrite it.
 
 ## On and off
@@ -843,7 +841,7 @@ Market and link installs default to automatic updates. About and
 `bin/settings set plugin.auto_update` change that preference. Editing the
 installed folder or placing a same-id copy in `<plugins>/_copies/<id>/`
 pauses updates. The copy takes precedence. All install routes recheck local files at the
-swap, including mode, type and content. A changed copy waits for review. Removing the copy restores the original. A different-id
+swap, including mode, type and content. Loam adopts a same-ID copy in place when it exactly matches its Market or linked release, keeps the owner’s update preference, and sends any remaining personal differences to the agent when an update is available. Removing the copy restores the original. A different-id
 plugin directly in the owner's plugins folder can run alongside the original.
 
 `loam plugin track COPY ORIGINAL` records a copy’s starting release, including

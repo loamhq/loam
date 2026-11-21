@@ -69,6 +69,82 @@ def original(data, pid):
         return {"id": pid, **{k: line.get(k) for k in ("source", "version", "files")}}
 
 
+def market_pin(pid, source, entry):
+    if not entry or entry["id"] != pid:
+        return False
+    pin = entry.get("pin") or entry
+    same_ref = (pin["ref"] == source["commit"] or not entry.get("pin")
+                and source["ref_kind"] == "tag" and pin["ref"] == source["ref"])
+    return (same_ref and entry["repo"].lower() == source["repo"].lower()
+            and pin["path"] == source["path"])
+
+
+def matches(data, pid, release, entry=None):
+    """A released tree has the same manifest id, verified contents and upstream."""
+    if (release["source"].get("kind") != "link" or pid != release["id"] or not release.get("files")
+            or p.fingerprint(target(pid)) != release["files"]):
+        return False
+    base = original(data, pid)
+    src = release["source"]
+    if base and base["id"] != pid:
+        return False
+    if base and base["source"].get("kind") == "link":
+        old = base["source"]
+        if old["repo"].lower() == src["repo"].lower() and old["path"] == src["path"]:
+            return True
+    if entry is None:
+        import loam_marketplace
+        entry = next((e for e in loam_marketplace.read()["plugins"] if e["id"] == pid), None)
+    return market_pin(pid, src, entry)
+
+
+def adopt(data, pid, release, *, entry=None, by=None, confirmed=False):
+    """Reclassify an existing tree under the install lock. Never swap or start it."""
+    if not matches(data, pid, release, entry):
+        return False
+    previous = data["plugins"].get(pid, {})
+    record = data.get("copies", {}).get(pid, {})
+    source = dict(release["source"])
+    if not original(data, pid):
+        source["via"] = "market"
+    elif "via" not in source and previous.get("source", {}).get("via"):
+        source["via"] = previous["source"]["via"]
+    line = dict(previous)
+    if target(pid) == p.copy_folder(pid) and "underlay" not in line:
+        line["underlay"] = previous
+    # Recognising existing files grants no new access. Keep the previous ceiling.
+    prior = record.get("confirmed") or previous.get("declaration") or p.declaration(
+        {"touches": {}, "overrides": []}, {})
+    declaration = release["declaration"]
+    if not confirmed and p.added(prior, declaration):
+        declaration = prior
+    if snapshot(target(pid), pid) != release["files"]:
+        refuse("Your copy changed while Loam was recognising this release.")
+    if confirmed:
+        line["confirmed"] = confirmed
+    elif source != previous.get("source"):
+        line.pop("confirmed", None)
+    line.update(source=source, version=release["version"], files=release["files"],
+                declaration=declaration, auto_update=previous.get("auto_update", True))
+    line.setdefault("installed_at", p._now())
+    line.setdefault("installed_by", by or "loam")
+    if not previous:
+        data["on"].setdefault(pid, False)
+    data["plugins"][pid] = line
+    data.get("copies", {}).pop(pid, None)
+    # Withdraw before the commit so a retry after a process exit can finish both.
+    commits = {source["commit"], record.get("told")}
+    withdraw(pid, commits)
+    p._save_list(data)
+    return True
+
+
+def withdraw(pid, commits):
+    keys = {f"plugin-updates:{pid}-{commit}{suffix}" for commit in commits if commit
+            for suffix in ("", "-copy")}
+    loam_attention.withdraw(keys)
+
+
 def shipped(pid):
     for root in p.shipped_roots():
         folder = root / pid
@@ -139,6 +215,8 @@ def offer(pid, base, candidate, *, skip=False):
         data = p.load_list()
         if original(data, pid) != base or not target(pid).is_dir():
             refuse("The local copy changed. Check for updates again.")
+        if candidate.get("declaration") and adopt(data, pid, candidate):
+            return {"adopted": candidate["version"]}
         record = data.setdefault("copies", {}).setdefault(pid, {"base": base})
         version = candidate["version"]
         if not skip and version in record.get("skipped", []):
@@ -330,10 +408,9 @@ def finish(data, pid, record, confirm):
                                "confirmed": reviewed["declaration"],
                                "skipped": record.get("skipped", [])}
         line = data["plugins"].get(pid)
-        if line and live == p.yours_root() / pid:
+        if line and live == p.install_folder(pid, line):
             line.update(source=record["offer"]["source"], version=record["offer"]["version"],
-                        files=baseline, declaration=reviewed["declaration"], confirmed=confirm,
-                        auto_update=False, updates_paused=True)
+                        files=baseline, declaration=reviewed["declaration"], confirmed=confirm)
         p._save_list(data)
     except BaseException:
         exchange(live, previous)
@@ -365,6 +442,7 @@ def action(pid, fields):
                 if preview.get("id") != origin_id or preview.get("installable") is False:
                     refuse("This version belongs to another plugin.")
                 candidate = {"id": origin_id, "version": preview["version"],
+                             "files": preview["files"], "declaration": preview["declaration"],
                              "source": {**preview["source"], "via": fields.get("via", "link")}}
                 return offer(pid, base, candidate, skip=op == "skip")
             candidate = record.get("offer")

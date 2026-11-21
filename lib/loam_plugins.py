@@ -1409,6 +1409,14 @@ def _read_list(strict: bool) -> dict:
                               f"nothing is written over it", 500)
         data, error = {}, f"the installed list ({path}) is not a JSON object"
     plugins = data.get("plugins") if isinstance(data.get("plugins"), dict) else {}
+    # Removing an adopted overlay by hand exposes its original install again.
+    for pid, line in list(plugins.items()):
+        if (isinstance(line, dict) and "underlay" in line and ID.fullmatch(pid)
+                and not os.path.lexists(copy_folder(pid))):
+            if line["underlay"]:
+                plugins[pid] = line["underlay"]
+            else:
+                del plugins[pid]
     on = data.get("on") if isinstance(data.get("on"), dict) else {}
     out = {"version": 1, "plugins": plugins,
            "on": {k: v for k, v in on.items() if isinstance(v, bool)}}
@@ -1574,10 +1582,10 @@ def copy_folder(pid: str) -> Path:
 
 def update_preference(pid: str, line: dict) -> dict:
     """The saved preference plus the state of the exact folder it would replace."""
-    folder = yours_root() / pid
-    digest = fingerprint(folder) if folder.is_dir() and not folder.is_symlink() else None
+    folder = install_folder(pid, line)
+    digest = fingerprint(folder)
     edited = not digest or digest != line.get("files")
-    copied = os.path.lexists(copy_folder(pid))
+    copied = os.path.lexists(copy_folder(pid)) and "underlay" not in line
     changed = edited or copied
     paused = changed or line.get("updates_paused", False)
     return {"auto_update": bool(line.get("auto_update", True) and not paused),
@@ -1585,18 +1593,8 @@ def update_preference(pid: str, line: dict) -> dict:
             "custom_copy": copied, "digest": digest}
 
 
-def _remember_pauses(listed: dict) -> None:
-    dirty = False
-    for pid, line in listed["plugins"].items():
-        if not isinstance(line, dict) or not ID.fullmatch(pid) or not line.get("source"):
-            continue
-        pref = update_preference(pid, line)
-        if pref["updates_paused"] and not line.get("updates_paused"):
-            line.update(auto_update=False, updates_paused=True)
-            line.pop("update_consent", None)
-            dirty = True
-    if dirty:
-        _save_list(listed)
+def install_folder(pid, line):
+    return copy_folder(pid) if "underlay" in line else yours_root() / pid
 
 
 def set_auto_update(pid: str, on, replace_changes=False) -> dict:
@@ -1648,7 +1646,7 @@ def _row(folder: Path, layer: str, listed: dict) -> dict:
             row["installed"]["confirmed"] = line.get("declaration")
             pref = update_preference(folder.name, line)
             row.update({k: v for k, v in pref.items() if k != "digest"})
-            if folder == copy_folder(folder.name):
+            if folder == copy_folder(folder.name) and "underlay" not in line:
                 row.update(source={"kind": "built"}, upstream=src)
 
         else:
@@ -1917,7 +1915,6 @@ def remove(pid: str, by: str | None = None, *, retiring_source: dict | None = No
             raise PluginError(f"no plugin {pid!r} in either layer", 404)
         folder = Path(yours["folder"])
         data = load_list()
-        _remember_pauses(data)
         if retiring_source is not None:
             line = data["plugins"].get(pid) or {}
             if (yours.get("source") != retiring_source or yours.get("edited")
@@ -1937,6 +1934,14 @@ def remove(pid: str, by: str | None = None, *, retiring_source: dict | None = No
             shutil.rmtree(trash, ignore_errors=True)
         data.get("copies", {}).pop(pid, None)
         kept_original = folder == copy_folder(pid) and (yours_root() / pid).is_dir()
+        active = data["plugins"].get(pid) or {}
+        if kept_original and "underlay" in active:
+            if active["underlay"]:
+                data["plugins"][pid] = active["underlay"]
+            else:
+                data["plugins"].pop(pid)
+        elif kept_original and active:
+            active.update(auto_update=False, updates_paused=True)
         line = None if kept_original else data["plugins"].pop(pid, None)
         # The switch is the id's: it stays for the shipped copy that takes over.
         stays = kept_original or any(r["layer"] == "shipped" and not r["broken"] for r in rows)
@@ -2441,8 +2446,9 @@ def _install_input(got):
                           f"{exc}.", 422,
                           {"reason": "no-plugin" if "no PLUGIN.md" in str(exc)
                            else "manifest", "repo": source["repo"]}) from None
+    shutil.rmtree(folder / ".git", ignore_errors=True)
     return {"source": source, "found": found, "pictures": pictures_of(folder, found["manifest"]),
-            "note": got.get("note")}
+            "note": got.get("note"), "fingerprint": fingerprint(folder)}
 
 
 def install(body: dict, by: str | None = None, *, automatic: dict | None = None) -> dict:
@@ -2481,9 +2487,6 @@ def install(body: dict, by: str | None = None, *, automatic: dict | None = None)
                 return {"installed": False, **got}
             folder = got["folder"]
             prepared = _install_input(got)
-            if asset:
-                shutil.rmtree(folder / ".git", ignore_errors=True)
-                prepared["fingerprint"] = fingerprint(folder)
         found, source = prepared["found"], prepared["source"]
         manifest = found["manifest"]
         pid = manifest["id"]
@@ -2501,22 +2504,30 @@ def install(body: dict, by: str | None = None, *, automatic: dict | None = None)
                                                == "built"),
                             "broken": mine["broken"]}
             previous = listed["plugins"].get(pid) or {}
-            if mine and mine.get("updates_paused"):
-                previous.update(auto_update=False, updates_paused=True)
             if previous and mine and mine.get("edited"):
-                replaces["files"] = fingerprint(yours_root() / pid)
+                replaces["files"] = fingerprint(Path(mine["folder"]))
             if mine and (mine.get("personal") or mine.get("custom_copy")):
                 replaces["personal"] = True
             if previous and mine and mine.get("custom_copy"):
                 # Installs always target the original, beneath the custom copy.
                 replaces.update(source=previous.get("source"), version=previous.get("version"))
+            files = prepared["fingerprint"]
+            via = body.get("via") if body.get("via") in ("market", "link") else None
+            release_source = {**source, **({"via": via} if via else {})}
+            import loam_plugin_review as review
+            release = {"id": pid, "version": manifest["version"], "files": files,
+                       "source": release_source, "declaration": decl}
+            matching = bool(mine and not mine["broken"] and review.matches(listed, pid, release))
+            if matching:
+                replaces.update(edited=False)
+                replaces.pop("personal", None)
             prior = previous.get("declaration")
             preview = {
                 "installed": False, "id": pid, "name": manifest["name"],
                 "version": manifest["version"], "author": manifest["author"],
                 "api": manifest["api"], "kind": manifest["kind"],
                 "places": manifest["places"], "source": source,
-                "declaration": decl, "added": added(prior, decl),
+                "declaration": decl, "files": files, "added": added(prior, decl),
                 "replaces": replaces,
                 "shadows": ({"layer": "shipped", "version": shipped.get("version")}
                             if shipped else None),
@@ -2537,7 +2548,8 @@ def install(body: dict, by: str | None = None, *, automatic: dict | None = None)
                 preview["installable"] = False
                 preview["why"] = (f"Loam reads and lists {listed_only[0]} packages "
                                   f"and installs none yet")
-            if confirm is None:
+            recognise = confirm is None and body.get("recognise") is True and matching and not listed_only
+            if confirm is None and not recognise:
                 if asset and prepared.get("fingerprint") and source["ref_kind"] == "commit":
                     _preview_inputs[pin] = prepared
                     _preview_inputs.move_to_end(pin)
@@ -2548,13 +2560,21 @@ def install(body: dict, by: str | None = None, *, automatic: dict | None = None)
                 raise PluginError(f"{pid} is {'an' if listed_only[0] == 'agent' else 'a'}"
                                   f" {listed_only[0]} package: {preview['why']}. "
                                   f"Nothing was installed", 409, {"preview": preview})
-            if confirm != preview["confirm"]:
+            if not recognise and confirm != preview["confirm"]:
                 raise PluginError(
                     f"`confirm` is not what {pid} answers now (its declaration, "
                     f"its commit and what it would replace give "
                     f"{preview['confirm']}). Nothing was installed; read the "
                     f"answer under `preview` and confirm it if it is a yes", 409,
                     {"preview": preview})
+            if matching:
+                if automatic and (automatic["base"] != previous.get("source")
+                                  or automatic["id"] != pid or automatic["commit"] != source["commit"]):
+                    raise PluginError("The install changed. Check for updates again.", 409)
+                if not review.adopt(listed, pid, release, by=by, confirmed=confirm if automatic is None else None):
+                    raise PluginError("Your copy changed. Review the update again.", 409)
+                return {"installed": True, "adopted": True, "id": pid, "plugin": one(pid)["plugin"],
+                        "replaced": replaces, "source": source, "server": mine.get("service")}
             if mine and (replaces["edited"] or replaces.get("personal") or mine.get("broken")):
                 raise PluginError("Your changes stay yours. Review this version with your agent.", 409)
             if automatic is not None:
@@ -2564,28 +2584,27 @@ def install(body: dict, by: str | None = None, *, automatic: dict | None = None)
                         or preview["added"] or not pref["auto_update"] or not pref["digest"]):
                     raise PluginError("The install or its update preference changed. Review the update.", 409)
             if asset:
-                release = loam_market_asset.verified(asset, work, prepared.get("fingerprint"), fingerprint)
-                if release is not None:
-                    folder = release
+                verified = loam_market_asset.verified(asset, work, files, fingerprint)
+                if verified is not None:
+                    folder = verified
             if folder is None:
                 folder = fetch(src, work)["folder"]
             shutil.rmtree(folder / ".git", ignore_errors=True)
-            files = fingerprint(folder)
+            if fingerprint(folder) != files:
+                raise PluginError("The release files changed. Check the release again.", 409)
             if files:
-                import loam_plugin_review
-                loam_plugin_review.snapshot(folder, pid)
-            target = yours_root() / pid
+                review.snapshot(folder, pid)
+            target = install_folder(pid, previous)
             from loam_files import _renameat2
-            import loam_plugin_review as review
             replaced = bool(mine)
-            if os.path.lexists(copy_folder(pid)):
+            if review.target(pid) != target:
                 raise PluginError("Your copy changed during the update.", 409)
             if replaced:
                 # Keep both trees named throughout the swap and inspect the exact
                 # old inode before recording this update or discarding anything.
                 review.exchange(folder, target)
                 if (not previous.get("files") or fingerprint(folder) != previous["files"]
-                        or os.path.lexists(copy_folder(pid))):
+                        or review.target(pid) != target):
                     review.exchange(folder, target)
                     raise PluginError("Your changes stay yours. Review this version with your agent.", 409)
             else:
@@ -2595,13 +2614,14 @@ def install(body: dict, by: str | None = None, *, automatic: dict | None = None)
                     raise PluginError("A local copy appeared during the update. Your files were kept.", 409)
             # Where the yes was given (2026-11-18): `market` or `link`, so the
             # page can mark a plugin installed from a link someone shared.
-            via = body.get("via") if body.get("via") in ("market", "link") else None
             listed["plugins"][pid] = {
-                "source": {**source, **({"via": via} if via else {})},
+                "source": release_source,
                 "version": manifest["version"],
                 "declaration": decl, "confirmed": preview["confirm"],
                 "installed_at": _now(), "installed_by": by or lc.OWNER_ID,
                 "files": files, "auto_update": previous.get("auto_update", True)}
+            if "underlay" in previous:
+                listed["plugins"][pid]["underlay"] = previous["underlay"]
             if previous.get("updates_paused"):
                 listed["plugins"][pid]["updates_paused"] = True
             if automatic is not None:

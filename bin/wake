@@ -967,12 +967,11 @@ def deliver_attention(project: Path, agent: str, vault: Path) -> str:
                     f"the system ended without its record; they are not handed "
                     f"over again: " + "; ".join(r["fact"][:120] for r in dead)))
                 la.done(dead)
-            records = la.due(records)
+            records = la.mark_given(la.due(records))
             if not records:
                 return "none"
             mark_running(agent, started, vault, lane)
             try:
-                la.mark_given(records)
                 prompt = la.input_text(records)
                 step("launch")
                 if LANE_PROVIDER == "codex":

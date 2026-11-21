@@ -25,6 +25,7 @@ try {
       auto_update: i !== 2, edited: i === 2, updates_paused: i === 2,
     }))
     const patches = [], errors = []
+    let publishedLocalCopy = false, recognised = 0
     const info = Object.fromEntries(rows.slice(0, 2).map((row, i) => [row.id, {
       via: 'market', version: '1.0.4', held: i === 1, link: 'https://github.com/' + row.source.repo + '/tree/v1.0.4',
     }]))
@@ -44,11 +45,20 @@ try {
       }
     }
     app.routes['POST /v1/plugins'] = (req, res, url, raw) => {
-      if (JSON.parse(raw).url?.includes('field-notes')) return json(res, {
+      const request = JSON.parse(raw)
+      if (publishedLocalCopy && request.url?.includes('field-notes')) {
+        assert.equal(request.recognise, true)
+        assert.equal(request.confirm, undefined)
+        Object.assign(rows[2], { version: '1.0.4', edited: false, updates_paused: false, auto_update: true })
+        delete info['field-notes']
+        recognised++
+        return json(res, { id: 'field-notes', installed: true, adopted: true, plugin: rows[2] })
+      }
+      if (request.url?.includes('field-notes')) return json(res, {
         ...rows[2], version: '1.0.4', replaces: { version: '1.0.3', edited: true },
         added: {}, declaration: {}, confirm: 'fixture', source: { url: 'https://github.com/ada-park/field-notes/tree/v1.0.4' }
       })
-      assert.deepEqual(JSON.parse(raw), { url: info['pocket-sync'].link })
+      assert.deepEqual(request, { url: info['pocket-sync'].link, via: 'market', recognise: true })
       json(res, { ...rows[1], version: '1.0.4', replaces: { version: '1.0.3' },
         added: { record: 'read' }, declaration: { touches: { record: 'read' } }, confirm: 'fixture' })
     }
@@ -107,6 +117,17 @@ try {
       await sheet.getByText(skipped, { exact: true }).waitFor()
       await shot('personal-install-skipped')
       await page.getByRole('button', { name: 'Done', exact: true }).click()
+      publishedLocalCopy = true
+      await page.evaluate(() => __review.modules.market.openLinkInstall({ link: 'https://github.com/ada-park/field-notes/tree/v1.0.4' }))
+      await page.getByRole('switch', { name: 'Update automatically' }).waitFor()
+      assert.equal(recognised, 1)
+      assert.equal(await page.getByRole('switch', { name: 'Update automatically' }).getAttribute('aria-checked'), 'true')
+      assert.equal(await page.locator('.market-install').count(), 0)
+      await shot('matched-detail')
+      await page.getByRole('button', { name: 'Back to Plugins' }).click()
+      await page.getByRole('button', { name: 'About Field notes' }).scrollIntoViewIfNeeded()
+      assert.equal(await page.getByText(reason, { exact: true }).count(), 0)
+      await shot('matched-list')
       await page.evaluate(() => { __review.closeSheet(); __review.goActivity() })
       await page.getByText('updated automatically to 1.0.3', { exact: true }).first().click()
       await page.getByText(/Version 1.0.2 → 1.0.3/).waitFor()

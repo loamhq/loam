@@ -192,7 +192,7 @@ tags daily. About lets you review an update and turn automatic updates on or
 off. Nightly updates are on by default and appear in Activity. An update
 that asks for more access waits for the owner’s yes. An agent changes the
 same switch for an unedited install with `bin/settings set plugin.auto_update` and uses
-`plugin.install` to preview and confirm a specific update on the owner’s word. Personal changes pause replacement.
+`plugin.install` to preview and confirm a specific update on the owner’s word. Loam adopts a same-ID copy in place when it exactly matches its Market or linked release, keeps the owner’s update preference, and sends any remaining personal differences to the agent when an update is available.
 Loam tells the chosen attention agent about a newer original. The agent
 uses `loam-building-a-plugin` to show what would change in chat, bring in
 what the owner wants, or keep this version and leave it quiet.

@@ -69,8 +69,12 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
   let updates = null, checking = null, updateWrite = null, reviewAnswer = null
   async function checkUpdates() {
     if (checking) return checking
-    checking = host.api('GET', '/plugin-updates').then(out => {
+    checking = host.api('GET', '/plugin-updates').then(async out => {
       updates = out
+      if (out.adopted?.length) {
+        reviewAnswer = null
+        await loader.refresh()
+      }
     }).catch(error => {
       if (error.status !== 404) st.error = error.message
     }).finally(() => { checking = null; changed() })
@@ -112,7 +116,8 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
         updateWrite = row.key; st.error = ''; changed()
         try {
           const out = await host.api('PATCH', `/plugins/${encodeURIComponent(row.id)}`, { review, version: info.version })
-          reviewAnswer = { key: row.key, version: info.version, text: out.skipped ? skippedUpdate(out.skipped) : 'Your agent has the update.' }
+          if (out.adopted) { reviewAnswer = null; await loader.refresh() }
+          else reviewAnswer = { key: row.key, version: info.version, text: out.skipped ? skippedUpdate(out.skipped) : 'Your agent has the update.' }
           await checkUpdates()
         } catch (error) { st.error = error.message }
         finally { updateWrite = null; changed() }

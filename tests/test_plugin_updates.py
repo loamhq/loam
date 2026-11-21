@@ -39,6 +39,10 @@ class Updates(unittest.TestCase):
                   patch.object(plugins, "_servers_follow"), patch.object(plugins, "_contributions_follow")):
             p.start()
             self.addCleanup(p.stop)
+        self.real_tell = updates.loam_attention.tell
+        queue = patch.object(updates.loam_attention, "STATE", root / "attention")
+        queue.start()
+        self.addCleanup(queue.stop)
         attention = patch.object(updates.loam_attention, "tell", return_value="told")
         self.tell = attention.start()
         self.addCleanup(attention.stop)
@@ -117,6 +121,175 @@ class Updates(unittest.TestCase):
         self.assertEqual(plugins.load_list()["plugins"]["notes"]["files"], old)
         self.assertEqual(edit.read_text(), "personal")
         self.tell.assert_called_once()
+
+    def publish_local(self):
+        folder = self.yours / "notes"
+        (folder / "guide.txt").write_text("my guide\n")
+        manifest = folder / "PLUGIN.md"
+        manifest.write_text(manifest.read_text().replace("1.0.0", "1.1.0"))
+        self.assertTrue(plugins.one("notes")["plugin"]["edited"])
+        for name in ("PLUGIN.md", "guide.txt"):
+            shutil.copy2(folder / name, self.repo / name)
+        self.git("add", ".")
+        self.git("commit", "-qm", "Publish the locally edited copy")
+        self.git("tag", "v1.1.0")
+        self.listing("1.1.0")
+        return folder
+
+    def assert_adopted(self, folder, *, automatic=True):
+        row = plugins.one("notes")["plugin"]
+        self.assertEqual(row["installed"]["version"], "1.1.0")
+        self.assertFalse(row["edited"] or row.get("personal") or row.get("custom_copy"))
+        self.assertEqual(row["auto_update"], automatic)
+        line = plugins.load_list()["plugins"]["notes"]
+        self.assertEqual(line["files"], plugins.fingerprint(folder))
+        self.assertEqual(line["source"]["commit"], self.git("rev-parse", "v1.1.0"))
+
+    def test_nightly_adopts_published_edits_without_swapping_or_notifying(self):
+        self.install()
+        folder = self.publish_local()
+        inode = (folder / "guide.txt").stat().st_ino
+        result = updates.check(nightly=True)
+        self.assertFalse(result["errors"] or result["plugins"])
+        self.assert_adopted(folder)
+        self.assertEqual((folder / "guide.txt").stat().st_ino, inode)
+        self.tell.assert_not_called()
+        self.assertFalse(updates.check(nightly=True)["plugins"])
+
+    def test_adoption_withdraws_pending_offer_and_restores_automatic_updates(self):
+        self.install()
+        folder = self.publish_local()
+        guide = folder / "guide.txt"
+        guide.write_text("unpublished line\n")
+        attention = updates.loam_attention
+        self.tell.side_effect = lambda *a, **kw: self.real_tell(*a, **kw, kick=False)
+        self.assertTrue(updates.check(nightly=True)["plugins"]["notes"]["personal"])
+        pending = attention.pending()
+        self.assertEqual(len(pending), 1)
+        review.action("notes", {"review": "prepare"})
+        guide.write_bytes((self.repo / "guide.txt").read_bytes())
+        self.real_tell("Another plugin's update", by="plugin-updates", key="other-release", kick=False)
+        with patch.object(plugins, "_remote", side_effect=AssertionError("used network on cached check")):
+            result = updates.check(nightly=True)
+        self.assertFalse(result["errors"] or result["plugins"])
+        self.assert_adopted(folder)
+        self.assertNotIn("notes", plugins.load_list().get("copies", {}))
+        self.assertEqual(attention.mark_given(pending), [])
+        attention.failed(pending)
+        self.assertEqual([r["key"] for r in attention.pending()], ["plugin-updates:other-release"])
+        self.tell.assert_called_once()
+
+    def test_unlisted_built_copy_joins_its_listing_without_turning_on(self):
+        folder = self.yours / "notes"
+        folder.mkdir(parents=True)
+        self.release("1.1.0")
+        shutil.copy2(self.repo / "PLUGIN.md", folder)
+        self.listfile.write_text('{"plugins":[]}')
+        self.assertFalse(updates.check(nightly=True)["plugins"])
+        self.assertEqual(plugins.one("notes")["plugin"]["source"]["kind"], "built")
+        inode = folder.stat().st_ino
+        self.listing("1.1.0")
+        with patch.object(updates.time, "time", return_value=updates.time.time() + updates.DAY + 1):
+            result = updates.check(nightly=True)
+        self.assertFalse(result["errors"] or result["plugins"])
+        self.assert_adopted(folder)
+        self.assertEqual(folder.stat().st_ino, inode)
+        row = plugins.one("notes")["plugin"]
+        self.assertFalse(row["on"])
+        self.assertEqual(row["source"]["via"], "market")
+        self.tell.assert_not_called()
+
+    def test_direct_install_adopts_built_copy_only_from_its_listing(self):
+        folder = self.yours / "notes"
+        folder.mkdir(parents=True)
+        self.release("1.1.0")
+        shutil.copy2(self.repo / "PLUGIN.md", folder)
+        inode = (folder / "PLUGIN.md").stat().st_ino
+        self.listfile.write_text('{"plugins":[]}')
+        request = {"url": "maker/notes", "ref": "v1.1.0", "via": "market"}
+        preview = plugins.install(request)
+        self.assertTrue(preview["replaces"]["edited"])
+        with self.assertRaisesRegex(plugins.PluginError, "agent"):
+            plugins.install({**request, "confirm": preview["confirm"]})
+        self.listing("1.1.0")
+        updates.market.read(refresh=True)
+        preview = plugins.install(request)
+        self.assertFalse(preview["replaces"]["edited"])
+        self.assertTrue(plugins.install({**request, "recognise": True})["adopted"])
+        self.assert_adopted(folder)
+        self.assertEqual((folder / "PLUGIN.md").stat().st_ino, inode)
+
+    def test_exact_match_preserves_disabled_updates(self):
+        self.install()
+        plugins.set_auto_update("notes", False)
+        folder = self.publish_local()
+        self.assertFalse(updates.check(nightly=True)["plugins"])
+        self.assert_adopted(folder, automatic=False)
+        self.tell.assert_not_called()
+
+    def test_exact_match_uses_reviewed_contents_without_an_asset_download(self):
+        import loam_market_asset
+        self.install()
+        folder = self.publish_local()
+        entries = json.loads(self.listfile.read_text())
+        entries["plugins"][0]["asset"] = {"tag": "v1.1.0", "sha256": "a" * 64}
+        self.listfile.write_text(json.dumps(entries))
+        entry = updates.market.read(refresh=True)["plugins"][0]
+        self.assertIn("asset", entry)
+        request = {"url": entry["pinned_link"], "via": "market"}
+        with patch.object(loam_market_asset, "download", side_effect=AssertionError("spurious download")):
+            preview = plugins.install(request)
+            with patch.object(plugins, "fetch", side_effect=AssertionError("missed verified preview cache")):
+                plugins.install({**request, "confirm": preview["confirm"]})
+        self.assert_adopted(folder)
+        self.assertFalse(updates.check(nightly=True)["errors"])
+
+    def test_matching_new_access_is_not_silently_confirmed(self):
+        self.install()
+        prior = plugins.load_list()["plugins"]["notes"]["declaration"]
+        self.release("1.1.0", "touches: {record: write}\n")
+        shutil.copy2(self.repo / "PLUGIN.md", self.yours / "notes")
+        self.listing("1.1.0")
+        self.assertFalse(updates.check(nightly=True)["plugins"])
+        self.assert_adopted(self.yours / "notes")
+        self.assertEqual(plugins.one("notes")["plugin"]["installed"]["confirmed"], prior)
+        self.release("1.2.0", "touches: {record: write}\n")
+        self.listing("1.2.0")
+        with patch.object(updates.time, "time", return_value=updates.time.time() + updates.DAY + 1):
+            self.assertTrue(updates.check(nightly=True)["plugins"]["notes"]["held"])
+
+    def test_extra_local_line_still_waits_for_agent(self):
+        self.install()
+        folder = self.publish_local()
+        guide = folder / "guide.txt"
+        guide.write_text(guide.read_text() + "still local\n")
+        result = updates.check(nightly=True)
+        self.assertTrue(result["plugins"]["notes"]["personal"])
+        self.assertEqual(plugins.load_list()["plugins"]["notes"]["version"], "1.0.0")
+        self.assertTrue(plugins.one("notes")["plugin"]["updates_paused"])
+        self.assertIn("still local", guide.read_text())
+        self.tell.assert_called_once()
+
+    def test_adopted_overlay_can_update_and_reveal_original(self):
+        self.install()
+        original = self.yours / "notes"
+        copy = plugins.copy_folder("notes")
+        copy.mkdir(parents=True)
+        self.release("1.1.0")
+        self.listing("1.1.0")
+        shutil.copy2(self.repo / "PLUGIN.md", copy)
+        self.assertFalse(updates.check(nightly=True)["errors"])
+        self.assert_adopted(copy)
+        self.release("1.2.0")
+        self.listing("1.2.0")
+        with patch.object(updates.time, "time", return_value=updates.time.time() + updates.DAY + 1):
+            self.assertFalse(updates.check(nightly=True)["errors"])
+        self.assertIn("1.2.0", (copy / "PLUGIN.md").read_text())
+        self.assertIn("1.0.0", (original / "PLUGIN.md").read_text())
+        plugins.remove("notes")
+        row = plugins.one("notes")["plugin"]
+        self.assertEqual(row["installed"]["version"], "1.0.0")
+        self.assertFalse(row["edited"])
 
     def test_reviewed_commit_wins_even_if_tag_moves_and_feed_records_once(self):
         self.install()

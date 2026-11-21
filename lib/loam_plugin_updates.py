@@ -47,12 +47,14 @@ def inspect(pid, line, entry, market_state):
             result.update(candidate=latest, version=latest["version"], commit=latest["source"]["commit"],
                           held=True)
         return result
-    # Older installs did not record the door they came through. A matching
-    # package in the same repository follows the listing even after it moves.
-    legacy_match = (not source.get("via") and entry and
+    built = source["kind"] == "built"
+    # Untracked local code can join only its same-id, immutable Market release.
+    if built and not entry:
+        return {"base": source, "via": "market"}
+    legacy_match = (not built and not source.get("via") and entry and
                     entry["repo"].lower() == source["repo"].lower() and
                     (entry.get("pin", {}).get("path") or entry["path"]) == source.get("path", ""))
-    via = "market" if (source.get("via") == "market" or line.get("update_via") == "market"
+    via = "market" if (built or source.get("via") == "market" or line.get("update_via") == "market"
                        or legacy_match) else "link"
     result = {"base": source, "via": via}
     if via == "market":
@@ -70,9 +72,7 @@ def inspect(pid, line, entry, market_state):
     if not link:
         return result
     preview = plugins.install({"url": link, "via": via})
-    if (preview.get("id") != pid or preview.get("installable") is False
-            or not version_key(line.get("version"))
-            or version_key(preview["version"]) <= version_key(line["version"])):
+    if preview.get("id") != pid or preview.get("installable") is False:
         return result
     candidate = preview["source"]
     if via == "market" and candidate["ref_kind"] != "tag" and not plugins.SHA.fullmatch(
@@ -80,10 +80,14 @@ def inspect(pid, line, entry, market_state):
         return result
     if via == "link" and candidate["ref_kind"] != "tag":
         return result
-    held = bool(preview["added"] or not line.get("declaration")
+    held = bool(built or preview["added"] or not line.get("declaration")
                 or source["repo"].lower() != candidate["repo"].lower())
     result["candidate"] = {"id": pid, "version": preview["version"],
-                           "source": {**candidate, "via": via}}
+                           "source": {**candidate, "via": via}, "files": preview["files"],
+                           "declaration": preview["declaration"]}
+    if not built and (not version_key(line.get("version"))
+                      or version_key(preview["version"]) <= version_key(line["version"])):
+        result["match_only"] = True
     result.update(commit=candidate["commit"], version=preview["version"],
                   link=candidate["url"], confirm=preview["confirm"], held=held,
                   added=preview["added"])
@@ -117,22 +121,36 @@ def check(nightly=False):
             cache = json.loads(path.read_text())
         except (OSError, ValueError):
             cache = {}
+        local_errors = {}
+        adopted = []
         with plugins.locked():
             listed = plugins.load_list()
             recognise_copies(listed)
-            plugins._remember_pauses(listed)
+            for pid, line in list(listed["plugins"].items()):
+                if (isinstance(line, dict) and plugins.ID.fullmatch(pid)
+                        and (line.get("source") or {}).get("kind") == "link" and line.get("declaration")
+                        and (pid in listed.get("copies", {}) or
+                             "underlay" not in line and os.path.lexists(plugins.copy_folder(pid)))):
+                    try:
+                        if review.adopt(listed, pid, {**line, "id": pid}):
+                            adopted.append(pid)
+                    except (plugins.PluginError, OSError) as exc:
+                        local_errors[pid] = str(exc)
         lines = {pid: line for pid, line in listed["plugins"].items()
                  if isinstance(line, dict) and plugins.ID.fullmatch(pid)
                  and (line.get("source") or {}).get("kind") == "link"}
         for pid, record in listed.get("copies", {}).items():
             if plugins.ID.fullmatch(pid) and record.get("base") and review.target(pid).is_dir():
                 lines[pid] = record["base"]
+        for folder in plugins._folders(plugins.yours_root()) + plugins._folders(plugins.yours_root() / "_copies"):
+            if plugins.ID.fullmatch(folder.name) and folder.name not in lines:
+                lines[folder.name] = {"source": {"kind": "built"}}
         new_install = lines.keys() - cache.get("plugins", {}).keys()
-        if not cache.get("review_format") or new_install or time.time() - cache.get("checked", 0) >= DAY:
+        if cache.get("review_format") != 2 or new_install or time.time() - cache.get("checked", 0) >= DAY:
             catalogue = market.read(refresh=True) if lines else {"plugins": [], "state": "empty"}
             entries = {entry["id"]: entry for entry in catalogue["plugins"]}
             cache = {"checked": time.time(), "market_state": catalogue["state"],
-                     "entries": {}, "plugins": {}, "errors": {}, "review_format": 1}
+                     "entries": {}, "plugins": {}, "errors": {}, "review_format": 2}
             for pid, line in lines.items():
                 upstream_id = line.get("id", pid)
                 entry = entries.get(upstream_id)
@@ -143,7 +161,8 @@ def check(nightly=False):
                 try:
                     record = inspect(upstream_id, line, entry, catalogue["state"])
                     cache["plugins"][pid] = record
-                    if record["via"] == "market" and not (line["source"].get("via") or line.get("update_via")):
+                    if (line["source"]["kind"] == "link" and record["via"] == "market"
+                            and not (line["source"].get("via") or line.get("update_via"))):
                         with plugins.locked():
                             current = plugins.load_list()
                             same = current["plugins"].get(pid) or {}
@@ -157,20 +176,36 @@ def check(nightly=False):
             tmp.write_text(json.dumps(cache))
             os.replace(tmp, path)
         updates = {}
-        errors = dict(cache.get("errors", {}))
+        errors = {**cache.get("errors", {}), **local_errors}
         for pid, record in cache["plugins"].items():
             line = lines.get(pid)
-            if not line or line["source"] != record["base"]:
+            if pid in local_errors or not line or line["source"] != record["base"]:
+                continue
+            built = line["source"]["kind"] == "built"
+            candidate = record.get("candidate")
+            if candidate and candidate.get("files") and candidate["id"] == pid:
+                with plugins.locked():
+                    current = plugins.load_list()
+                    base = review.original(current, pid)
+                    if (base or {"source": {"kind": "built"}})["source"] != record["base"]:
+                        continue
+                    try:
+                        if review.adopt(current, pid, candidate, entry=cache["entries"].get(pid)):
+                            adopted.append(pid)
+                            continue
+                    except (plugins.PluginError, OSError) as exc:
+                        errors[pid] = str(exc)
+                        continue
+            if built or record.get("match_only"):
                 continue
             updates[pid] = {k: record[k] for k in ("via", "version", "link", "held") if k in record}
-            candidate = record.get("candidate")
             if not candidate:
                 continue
             pref = plugins.update_preference(pid, line)
             if pid in listed.get("copies", {}) or pref["edited"] or pref["custom_copy"]:
                 try:
                     answer = review.offer(pid, review.original(listed, pid), candidate)
-                    if "skipped" in answer:
+                    if "skipped" in answer or "adopted" in answer:
                         updates.pop(pid)
                     else:
                         updates[pid].update(personal=True, held=True)
@@ -197,5 +232,5 @@ def check(nightly=False):
                     updates.pop(pid)
                 except (plugins.PluginError, OSError) as exc:
                     errors[pid] = str(exc)
-        return {"plugins": updates, "entries": cache["entries"], "market_state": cache["market_state"],
+        return {"plugins": updates, "adopted": adopted, "entries": cache["entries"], "market_state": cache["market_state"],
                 "checked": cache["checked"], "errors": errors}
