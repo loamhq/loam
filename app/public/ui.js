@@ -1,3 +1,4 @@
+import { labelFirstUse } from './first-use.js'
 import { agentFace } from './agent-face.js'
 import { variantFor } from './face-identity.js'
 
@@ -40,6 +41,7 @@ export function h(tag, props = {}, ...children) {
     else node.setAttribute(key, value)
   }
   append(node, children)
+  if (tag === 'button' || tag === 'a' || props?.role === 'button') labelFirstUse(node, props ?? {})
   return node
 }
 

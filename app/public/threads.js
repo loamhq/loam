@@ -1,3 +1,4 @@
+import { firstUseActive } from './first-use.js'
 import { cardText, applyCardText, setBoardExpiry, recoverBoard } from './board-document.js'
 import { threadOutbox } from './thread-outbox.js'
 import { createAgentDrafts } from './agent-drafts.js'
@@ -1673,7 +1674,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
             l.unseen ? button('New', () => saveBoard(editBoard(o.board.markdown, l.index, 'seen')), { class: 'quietlink tt-newtag', disabled: busy, 'aria-label': `Mark ${l.text} seen` }) : null)),
         h('div', { class: 'tt-item-actions' }, round(`Actions for ${l.text}`, icon.dots(16), () => {
           o.boardMenu = o.boardMenu === l.index ? null : l.index; o.menuPage = null; redraw()
-        }, { class: 'iconbtn content-mark', disabled: busy, 'aria-expanded': String(o.boardMenu === l.index) }),
+        }, { class: 'iconbtn content-mark tt-card-menu', disabled: busy, 'aria-expanded': String(o.boardMenu === l.index) }),
         o.boardMenu === l.index ? menuSurface(h('div', { class: 'tt-item-menu' },
           o.menuPage === 'move' ? lists.map(s => button(boardListName(s), () => moveItem(l.index, s.key), { class: 'pillbtn content-mark' })) :
           o.menuPage === 'expiry' ? h('label', { class: 'tt-expiry' }, 'Expires on', h('input', { type: 'date', value: l.until, onchange: e => setExpiry(e.target.value) })) :
@@ -1756,7 +1757,7 @@ export function createThreads({ registry = createCoreRegistry(), api, redraw, ag
       count ? h('div', { class: 'tt-seen-strip' }, h('span', { text: count + ' new from the agents' }),
         button('Mark seen', () => saveBoard(markBoardSeen(o.board.markdown)), { class: 'quietlink tt-mark-seen', disabled: busy })) : null,
       h('div', { class: 'tt-board-items' }, !lines.some(l => l.item) && !sections.some(s => s.blocks.some(b => b.text.trim())) ?
-          emptyState({ object: 'page', size: 'small', level: 'h3', title: 'Room for your first idea', body: 'Keep a thought or a next step here.', props: { key: 'board-empty' } }) : null,
+          emptyState({ object: 'page', size: 'small', level: 'h3', title: firstUseActive() ? 'Nothing here yet' : 'Room for your first idea', body: firstUseActive() ? 'Keep what matters from this chat here.' : 'Keep a thought or a next step here.', props: { key: 'board-empty' } }) : null,
           ...sections.map(sectionView)))
   }
   function emptyThread() {

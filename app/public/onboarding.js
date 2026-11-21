@@ -23,3 +23,23 @@ export function welcomeScreen({ providers, signIn, continueWith, retry, error = 
       h('div', { class: 'welcome-continue' }, h('button', { class: 'primary', disabled: !connected, text: 'Meet your first agent', onclick: continueWith }),
         h('p', { class: 'note', role: 'status', text: connected ? 'You’re connected. Let’s say hello.' : 'Connect one provider to continue.' }))]))
 }
+
+export const placesImage = '/three-places.svg'
+
+// The new preset identifies the cohort without migrating existing installs.
+export function hasPlacesGreeting(message) {
+  return message?.preset === true && message.text?.includes(`](${placesImage})`)
+}
+
+export function placesDiagram(alt) {
+  const ns = 'http://www.w3.org/2000/svg'
+  const svg = document.createElementNS(ns, 'svg')
+  svg.setAttribute('class', 'hello-places')
+  svg.setAttribute('viewBox', '0 0 360 184')
+  svg.setAttribute('role', 'img')
+  svg.setAttribute('aria-label', alt)
+  const use = document.createElementNS(ns, 'use')
+  use.setAttribute('href', placesImage + '#places')
+  svg.append(use)
+  return svg
+}

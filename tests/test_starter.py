@@ -164,7 +164,7 @@ def main() -> int:
           [(m["id"], m["author"], m["kind"], m.get("preset"), m["text"]) for m in msgs],
           [("m1", "iris", "message", True, st.read_hello()[1])])
     check("...greeting the owner by the name from setup",
-          [m["text"].startswith("Hi Sam,") for m in msgs], [True])
+          [m["text"].startswith("Welcome to your Loam, Sam 👋 I'm Iris, your first agent.\n\n![Chats.") for m in msgs], [True])
     check("...and the record's own comment says so",
           '"preset": true' in path.read_text(), True)
     check("...in the vault's conversations folder", path.parent, lc.VAULT / "Conversations")
@@ -194,6 +194,13 @@ def main() -> int:
         check("a first tick missing for a full period raises the stopped warning",
               check_runtime.current_run_status()["why"], ["Loam's own check has stopped."])
 
+    check("new starter has first-use hints", st.first_use(), [])
+    st.use_control("Board")
+    st.use_control("Settings")
+    st.use_control("Board")
+    check("using a control dismisses only its own caption, once",
+          st.first_use(), ["Board", "Settings"])
+
     personal = "## My move\n\n- [ ] Pack the kettle.\n"
     threads.write_board(meta, personal, board["revision"])
     again = st.seed(provision=fake_provision)
@@ -222,6 +229,8 @@ def main() -> int:
     # An install whose agent of that id is its own (the owner's box): nothing.
     st.marker_path().unlink()
     (ws / "soul.md").write_text("their own soul\n")
+    st.use_control("Board")
+    check("an existing install never acquires a first-use marker", st.status(), None)
     before = sorted(threads.index())
     third = st.seed(provision=fake_provision)
     check("an existing agent of the starter's id is left alone",

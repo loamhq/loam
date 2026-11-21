@@ -1,3 +1,4 @@
+import { firstUseActive } from './first-use.js'
 import { historyBackButton } from './panel-history.js'
 import { boardProjection } from './board-document.js'
 import { noteDateParts } from './time.js'
@@ -1734,7 +1735,7 @@ export function folderView(files, { go, wide, collapse = null, historyBack = nul
   } else if (st.listing.loading && st.listing.rows.length === 0) {
     body.push(h('div', { class: 'fs-quiet', text: 'Loading…' }))
   } else {
-    if (st.listing.rows.length === 0) body.push(emptyState({ object: 'folder', size: 'small', title: 'Nothing here yet', body: 'What you or your agents put in this folder shows up here.', props: { class: 'fs-quiet' } }))
+    if (st.listing.rows.length === 0) body.push(emptyState({ object: 'folder', size: 'small', title: 'Nothing here yet', body: firstUseActive() ? 'Keep files here with your agents.' : 'What you or your agents put in this folder shows up here.', props: { class: 'fs-quiet' } }))
     else if (st.listing.rows.length > 0) {
       const marksFor = openFileMarks(files, go)
       body.push(

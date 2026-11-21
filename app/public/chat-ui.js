@@ -1,3 +1,4 @@
+import { hasPlacesGreeting, placesImage, placesDiagram } from './onboarding.js'
 import { isImage, attachmentFilePath } from './attach.js'
 import { openImageView } from './image-view.js'
 import { h, kept, blob, avatarLook, icon } from './ui.js'
@@ -230,6 +231,7 @@ const refPath = (dest) => {
   return path
 }
 export function replyImages(message, key = null, { streaming = false } = {}) {
+  const presetImage = hasPlacesGreeting(message)
   const all = (message?.attachments ?? []).filter((file) => file && typeof file === 'object')
   const pictures = all.filter((file) => isImage(file.type) && attachmentFilePath(file.path) !== null)
   const placed = pictures.some((file) => Array.isArray(file.refs))
@@ -294,11 +296,13 @@ export function replyImages(message, key = null, { streaming = false } = {}) {
   }
   const images = {
     draw(alt, dest) {
+      if (presetImage && dest === placesImage) return placesDiagram(alt)
       const file = find(dest)
       if (!file) return streaming && LOCAL_PICTURE.test(String(dest ?? '').trim()) ? waiting() : null
       return placed ? figure(file, alt) : false
     },
     group(nodes) {
+      if (presetImage && nodes.length === 1 && nodes[0].getAttribute?.('class') === 'hello-places') return nodes[0]
       const ratios = nodes.map((node) => node.__ratio ?? 4 / 3)
       return h('div', { class: 'reply-figures', 'data-count': String(nodes.length) },
         h('div', { class: 'reply-figures-row', style: { '--ratio-sum': ratios.reduce((a, b) => a + b, 0).toFixed(4), '--count': String(nodes.length) } }, ...nodes))
@@ -319,7 +323,7 @@ export function replyImages(message, key = null, { streaming = false } = {}) {
     // A picture's reference goes; one that is only text stays.
     words(text) {
       if (typeof text !== 'string' || !text.includes('![')) return text
-      const out = text.replace(PICTURE_REF, (raw, alt, dest) => find(dest) || (streaming && LOCAL_PICTURE.test(dest.trim())) ? '\u0000' : raw)
+      const out = text.replace(PICTURE_REF, (raw, alt, dest) => (presetImage && dest === placesImage) || find(dest) || (streaming && LOCAL_PICTURE.test(dest.trim())) ? '\u0000' : raw)
       if (!out.includes('\u0000')) return text
       return out.split('\n').filter((line) => line.replace(/\u0000/g, '').trim() || !line.includes('\u0000'))
         .map((line) => line.replace(/[ \t]?\u0000/g, '')).join('\n').replace(/\n{3,}/g, '\n\n').trim()

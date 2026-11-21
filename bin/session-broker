@@ -69,6 +69,7 @@ import loam_plugins  # noqa: E402
 import loam_marketplace  # noqa: E402
 import loam_keys  # noqa: E402
 import loam_profile  # noqa: E402
+import loam_starter
 import loam_agents  # noqa: E402
 import loam_update  # noqa: E402
 
@@ -1211,7 +1212,20 @@ class Server:
 
         # Return the configured owner ID and the aliases recognized in existing records.
         if parts == ["v1", "owner"] and method == "GET":
-            writer.write(response(200, lc.owner()))
+            owner = lc.owner()
+            used = loam_starter.first_use()
+            if used is not None:
+                owner["used_controls"] = used
+            writer.write(response(200, owner))
+            await writer.drain()
+            return
+
+        if parts == ["v1", "owner", "used-controls"] and method == "POST":
+            try:
+                await asyncio.to_thread(loam_starter.use_control, payload.get("control"))
+                writer.write(response(200, {"saved": True}))
+            except ValueError as exc:
+                writer.write(response(400, {"error": str(exc)}))
             await writer.drain()
             return
 

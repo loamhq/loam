@@ -78,8 +78,10 @@ The handoff names the last message it covers. If a member already keeps a
 workspace summary, Loam uses that until a private handoff is ready and
 honors later edits to it.
 
-On a fresh install the owner lands in Hello with Iris. Loam posts a greeting
-as Iris using the name from setup, and Iris takes over on the first reply.
+On a fresh install, a phone opens Chats with an unread Hello. A wide screen
+opens Hello. Iris greets the owner by name and shows how Chats, Files and Apps
+fit together. Empty places explain their purpose until they fill. Icon labels
+on the first screens fold away as the owner uses each control.
 When the owner starts designing an agent in Hello or any other thread, Iris
 asks one question about what they're looking for and hears the answer
 before drafting.
@@ -89,7 +91,9 @@ once, helps with what the owner came for, and offers an idea when it fits.
 As they try things she ticks the cards in their words. After a quiet week
 she may ask once about one they might like. They can set the list aside,
 delete it, or ask her to bring it back. Iris can also help bring over
-context from another AI. `About me.md` fills in as they get to know each other.
+context from another AI. Iris can show the owner their About me in Files, then
+help with something for morning. Changing the app, building something or
+following the owner's own idea can be the whole first visit.
 
 **Wakes and crons.** An agent also runs by itself on a schedule, and each
 schedule is a file under its `crons/` saying when it runs (or once, at a set
@@ -166,7 +170,7 @@ same switch with `bin/settings set plugin.auto_update` and uses
 **History and backup.** Every fifteen minutes the vault and AI Spaces are
 each committed to their own git history on the server, so a change anyone
 regrets can be got back from it; nothing leaves the machine. First setup
-goes straight from connecting an AI provider to Iris's hello thread.
+goes straight from connecting an AI provider to Chats or the open Hello.
 Settings › Plugins shows when off-box backup is off. Open Git backup there
 to turn it on and connect private repositories for the vault and AI Spaces.
 In Files, **Download as zip** on the vault, AI Spaces or any folder gives
