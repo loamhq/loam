@@ -3,6 +3,9 @@
 Find each release's notes in `docs/releases/<version>.md`. Loam gives the
 notes to the person's agent, who decides what is worth sharing with them.
 
+- [0.2.18](docs/releases/0.2.18.md), 2026-11-20: a new first minute
+  with Iris, fixes for Back and files opened from chats, and visible
+  install progress with support for Debian 13 and Ubuntu 26.04.
 - [0.2.17](docs/releases/0.2.17.md), 2026-11-20: the first-weeks
   wording on new installs returns to its earlier form.
 - [0.2.16](docs/releases/0.2.16.md), 2026-11-20: a board of things to try
