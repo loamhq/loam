@@ -300,6 +300,7 @@
 .market-listing-who .market-kicker { margin: 0; color: var(--paper-ink-3); }
 .market-listing-title { margin: 12px 0 14px; font-size: 84px; line-height: .92; letter-spacing: -.01em; outline: none; overflow-wrap: anywhere; }
 .market-listing-desc { margin: 0; max-width: 560px; font-size: 19px; line-height: 1.5; color: var(--paper-ink-2); }
+.market-listing-downloads { margin: 8px 0 0; font-size: var(--type-caption); color: var(--paper-ink-3); }
 .market-listing-acts { display: flex; flex-direction: column; align-items: stretch; gap: 10px; min-width: 220px; }
 .market .market-listing-acts .pillbtn { height: 52px; min-height: 52px; font-size: 16px; justify-content: center; }
 /* "Try it first": a hairline pill under the one filled button. */

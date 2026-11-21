@@ -186,6 +186,10 @@ def check_entry(entry) -> tuple[dict | None, str | None]:
         out["pinned_link"] = (f"https://github.com/{out['repo']}/tree/{review['commit']}"
                               + (f"/{folder}" if folder else ""))
         out["pin"] = {"ref": review["commit"], "path": folder}
+        import loam_market_asset
+        asset = loam_market_asset.descriptor(entry.get("asset"), out["repo"], pid)
+        if asset:
+            out["asset"] = asset
     return out, None
 
 
@@ -417,10 +421,17 @@ def is_readme_path(value: str) -> bool:
 def parse(text: str) -> tuple[list[dict], list[str]]:
     """``list.json``'s text into its entries, sorted by name, and the
     reasons for any left out. A list that is not one raises ValueError."""
+    return catalog_entries(catalog_data(text))
+
+
+def catalog_data(text):
     try:
-        data = json.loads(text)
+        return json.loads(text)
     except ValueError as exc:
         raise ValueError(f"the list is not JSON ({exc})") from None
+
+
+def catalog_entries(data) -> tuple[list[dict], list[str]]:
     if not isinstance(data, dict) or not isinstance(data.get("plugins", []), list):
         raise ValueError('the list is an object with a "plugins" array')
     if data.get("version", FORMAT) != FORMAT:
@@ -449,6 +460,7 @@ def fetch(url: str) -> tuple[str, str | None]:
     no list there yet, or ``unreachable`` with the reason as the text."""
     if not url.startswith(("https://", "http://127.0.0.1", "http://localhost", "file://")):
         return "unreachable", "the marketplace's address is not an https link"
+    import http.client
     req = urllib.request.Request(url, headers={"User-Agent": "loam-marketplace",
                                                "Accept": "application/json"})
     try:
@@ -460,7 +472,7 @@ def fetch(url: str) -> tuple[str, str | None]:
         return "unreachable", f"the list's host answered {exc.code}"
     except FileNotFoundError:
         return "empty", None
-    except (urllib.error.URLError, OSError, TimeoutError) as exc:
+    except (urllib.error.URLError, OSError, TimeoutError, http.client.HTTPException) as exc:
         reason = getattr(exc, "reason", exc)
         return "unreachable", f"the list could not be fetched ({reason})"
     if len(raw) > MAX_BYTES:
@@ -484,7 +496,16 @@ def read(url: str | None = None, refresh: bool = False) -> dict:
            "checked_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     if state == "listed":
         try:
-            out["plugins"], out["skipped"] = parse(text or "")
+            catalog = catalog_data(text or "")
+            out["plugins"], out["skipped"] = catalog_entries(catalog)
+            if out["plugins"] and catalog.get("stats") == "stats.json":
+                totals = {e["id"]: e["downloads"] for e in (hit or {}).get("plugins", [])
+                          if "downloads" in e}
+                for pid, count in downloads(url).items():
+                    totals[pid] = max(totals.get(pid, 0), count)
+                for entry in out["plugins"]:
+                    if entry["id"] in totals:
+                        entry["downloads"] = totals[entry["id"]]
             if not out["plugins"]:
                 out["state"] = "empty"
         except ValueError as exc:
@@ -494,6 +515,39 @@ def read(url: str | None = None, refresh: bool = False) -> dict:
     with _lock:
         _cache[url] = {**out, "_at": time.time()}
     return out
+
+
+def asset_for(src):
+    """Resolve transport only from the configured catalog at the exact reviewed pin."""
+    try:
+        entries = read()["plugins"]
+    except (OSError, ValueError):
+        return None
+    for entry in entries:
+        if (entry.get("asset") and entry["repo"] == src["repo"]
+                and entry.get("pin") == {"ref": src["ref"], "path": src["path"]}):
+            return entry["asset"]
+    return None
+
+
+def downloads(url):
+    """Read the optional sibling stats file on the catalog's own host."""
+    from urllib.parse import urljoin
+    state, raw = fetch(urljoin(url, "stats.json"))
+    if state == "listed":
+        try:
+            return download_totals(json.loads(raw))
+        except ValueError:
+            pass
+    return {}
+
+
+def download_totals(data):
+    if not isinstance(data, dict) or data.get("version") != 1 or not isinstance(data.get("plugins"), dict):
+        return {}
+    return {pid: r["downloads"] for pid, r in data["plugins"].items()
+            if isinstance(r, dict) and type(r.get("downloads")) is int
+            and 0 <= r["downloads"] <= 2**53 - 1}
 
 
 def listing(refresh: bool = False) -> dict:
@@ -799,7 +853,7 @@ def _read_details(entry: dict) -> dict:
     import loam_plugins  # noqa: PLC0415
     # A reviewed listing is read at the commit its review read.
     src = {"repo": entry["repo"], "ref": entry["ref"], "path": entry["path"],
-           **(entry.get("pin") or {})}
+           **(entry.get("pin") or {}), "reviewed": bool(entry.get("pin"))}
     work = Path(tempfile.mkdtemp(prefix="market-", dir=loam_plugins._staging()))
     try:
         got = loam_plugins.fetch(src, work)
@@ -1054,6 +1108,7 @@ def search(q: str = "", kind: str = "all", limit: int = SEARCH_LIMIT,
         listed_only = [k for k in e["kind"] if k in loam_plugins.LISTED_ONLY]
         results.append({
             "id": pid, "name": e["name"], "author": e["author"], "kind": e["kind"],
+            **({"downloads": e["downloads"]} if "downloads" in e else {}),
             "creator": e.get("creator") or {"name": e["author"], "links": []},
             "description": e.get("description") or "",
             **({"cover": e["cover_url"]} if e.get("cover_url") else {}),
@@ -1211,31 +1266,50 @@ def share(pid: str, repository: str) -> dict:
                              f"github.com first, on the account GitHub is connected with)")
         repo = work / "repo"
         tags = _share_git(["ls-remote", "--tags", "origin", f"refs/tags/{tag}"], repo, env)
-        if tags.stdout.strip():
-            raise ShareError(f"{repository} already has the tag {tag}: raise the "
-                             f"plugin's version in its PLUGIN.md to share a new one")
+        exists = bool(tags.stdout.strip())
         if not _share_git(["rev-parse", "-q", "--verify", "HEAD"], repo, env).returncode == 0:
             _share_git(["checkout", "-q", "-b", "main"], repo, env)
+        if exists:
+            done = _share_git(["checkout", "-q", "--detach", f"refs/tags/{tag}"], repo, env)
+            if done.returncode:
+                raise ShareError(f"Could not read the existing tag {tag}. Retry sharing.")
         target = repo / pid
         shutil.rmtree(target, ignore_errors=True)
         shutil.copytree(folder, target, ignore=shutil.ignore_patterns(".git", "__pycache__"))
         ident = ["-c", "user.name=" + (manifest.get("author") or "Loam"),
                  "-c", "user.email=loam@users.noreply.github.com"]
-        _share_git(["add", "-A", pid], repo, env)
+        if _share_git(["add", "-A", "--", pid], repo, env).returncode:
+            raise ShareError("Could not stage the plugin folder for sharing.")
         if _share_git(["diff", "--cached", "--quiet"], repo, env).returncode:
+            if exists:
+                raise ShareError(f"{repository} already has the tag {tag} with different files: "
+                                 "raise the plugin’s version to share these changes")
             done = _share_git([*ident, "commit", "-q", "-m",
                                f"{manifest.get('name') or pid} {version}"], repo, env)
             if done.returncode:
                 raise ShareError(f"the commit failed: {done.stderr.strip()[-300:]}")
-        _share_git([*ident, "tag", "-a", tag, "-m", f"{manifest.get('name') or pid} {version}"],
-                   repo, env)
-        branch = _share_git(["symbolic-ref", "--short", "HEAD"], repo, env).stdout.strip() or "main"
-        pushed = _share_git(["push", "--quiet", "origin", f"HEAD:refs/heads/{branch}",
-                             f"refs/tags/{tag}"], repo, env)
-        if pushed.returncode:
-            raise ShareError(f"the push to {repository} failed: "
-                             f"{(pushed.stderr or pushed.stdout).strip()[-300:]}")
+        if not exists:
+            tagged = _share_git([*ident, "tag", "-a", tag, "-m",
+                                 f"{manifest.get('name') or pid} {version}"], repo, env)
+            if tagged.returncode:
+                raise ShareError(f"Could not tag {repository} at {tag}.")
+            branch = _share_git(["symbolic-ref", "--short", "HEAD"], repo, env).stdout.strip() or "main"
+            pushed = _share_git(["push", "--quiet", "origin", f"HEAD:refs/heads/{branch}",
+                                 f"refs/tags/{tag}"], repo, env)
+            if pushed.returncode:
+                raise ShareError(f"the push to {repository} failed: "
+                                 f"{(pushed.stderr or pushed.stdout).strip()[-300:]}")
         commit = _share_git(["rev-parse", "HEAD"], repo, env).stdout.strip()
+        if not os.environ.get("LOAM_SHARE_GIT_BASE"):
+            import loam_market_asset
+            import loam_github_app
+            import http.client
+            try:
+                loam_market_asset.publish(repository, tag, pid, repo, commit, work)
+            except (OSError, ValueError, KeyError, subprocess.SubprocessError, http.client.HTTPException,
+                    loam_github.GitHubError, loam_github_app.IntegrationError) as exc:
+                raise ShareError(f"The tag {tag} exists. Retry the same share to finish its release "
+                                 f"file ({exc}).") from None
     finally:
         shutil.rmtree(work, ignore_errors=True)
     public = None if os.environ.get("LOAM_SHARE_GIT_BASE") else is_public(repository)

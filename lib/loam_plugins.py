@@ -6,6 +6,7 @@ contracts.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 import fcntl
 import hashlib
 import json
@@ -2199,6 +2200,8 @@ def _ref_of(src: dict, refs: dict) -> tuple[str, str, str, str, str | None]:
     slash in it is the longest prefix the repository has. A branch is its
     commit now, and the note says so; the install is pinned to that commit."""
     segs = [src["ref"], *[p for p in src["path"].split("/") if p]]
+    if src.get("reviewed") and SHA.fullmatch(src["ref"]):
+        return src["ref"], src["ref"], "commit", src["path"], None
     for i in range(len(segs), 0, -1):
         name, rest = "/".join(segs[:i]), "/".join(segs[i:])
         if name in refs["tags"]:
@@ -2422,6 +2425,26 @@ def _token(pid: str, version: str, source: dict, decl: dict, replaces) -> str:
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
+# Only immutable reviewed sources use this small, process-local preview cache.
+# Every confirmation still checks current consent, edits and update preferences.
+_preview_inputs = OrderedDict()
+
+
+def _install_input(got):
+    folder, source = got["folder"], got["source"]
+    try:
+        found = read_folder(folder, None)
+    except ManifestError as exc:
+        where = f"{source['path'] or source['repo'].split('/')[1]}"
+        raise PluginError(f"The plugin in {where} has a PLUGIN.md Loam can’t read, "
+                          f"so it can’t be installed until its maker fixes it: "
+                          f"{exc}.", 422,
+                          {"reason": "no-plugin" if "no PLUGIN.md" in str(exc)
+                           else "manifest", "repo": source["repo"]}) from None
+    return {"source": source, "found": found, "pictures": pictures_of(folder, found["manifest"]),
+            "note": got.get("note")}
+
+
 def install(body: dict, by: str | None = None, *, automatic: dict | None = None) -> dict:
     """``POST /v1/plugins``: the first call answers what the plugin is and
     declares, and a ``confirm`` token; the second, with that token, installs.
@@ -2439,24 +2462,29 @@ def install(body: dict, by: str | None = None, *, automatic: dict | None = None)
     src = parse_source(body)
     work = Path(tempfile.mkdtemp(prefix="install-", dir=_staging()))
     try:
-        got = fetch(src, work)
-        if "choose" in got:
-            # Several plugins and the link names none: the ones to pick
-            # from, each a request of its own (`url`, `path`, `ref`).
-            if confirm is not None:
-                raise PluginError("That repository holds several plugins; pick one "
-                                  "first.", 409, {"reason": "choose", **got})
-            return {"installed": False, **got}
-        folder, source = got["folder"], got["source"]
-        try:
-            found = read_folder(folder, None)
-        except ManifestError as exc:
-            where = f"{source['path'] or source['repo'].split('/')[1]}"
-            raise PluginError(f"The plugin in {where} has a PLUGIN.md Loam can’t read, "
-                              f"so it can’t be installed until its maker fixes it: "
-                              f"{exc}.", 422,
-                              {"reason": "no-plugin" if "no PLUGIN.md" in str(exc)
-                               else "manifest", "repo": source["repo"]}) from None
+        import loam_market_asset
+        asset = None
+        pin = (src["repo"], src["ref"], src["path"])
+        if body.get("via") == "market" and SHA.fullmatch(src["ref"] or ""):
+            import loam_marketplace as market
+            src["reviewed"] = True
+            asset = market.asset_for(src)
+        with _threads:
+            prepared = _preview_inputs.get(pin) if asset and confirm is not None else None
+        folder = None
+        if prepared is None:
+            got = fetch(src, work)
+            if "choose" in got:
+                if confirm is not None:
+                    raise PluginError("That repository holds several plugins; pick one first.",
+                                      409, {"reason": "choose", **got})
+                return {"installed": False, **got}
+            folder = got["folder"]
+            prepared = _install_input(got)
+            if asset:
+                shutil.rmtree(folder / ".git", ignore_errors=True)
+                prepared["fingerprint"] = fingerprint(folder)
+        found, source = prepared["found"], prepared["source"]
         manifest = found["manifest"]
         pid = manifest["id"]
         decl = declaration(manifest, found["has"])
@@ -2497,11 +2525,11 @@ def install(body: dict, by: str | None = None, *, automatic: dict | None = None)
                 # What was worked out from the link, said in a line (a branch
                 # is its commit now), and the request that names exactly this
                 # one, for the yes to send back.
-                "note": got.get("note"),
+                "note": prepared["note"],
                 "request": {"url": source["repo"], "path": source["path"],
                             "ref": source["ref"]},
                 "link": pinned_link(source),
-                "pictures": pictures_of(folder, manifest),
+                "pictures": prepared["pictures"],
                 "confirm": _token(pid, manifest["version"], source, decl, replaces)}
             listed_only = [k for k in manifest["kind"] if k in LISTED_ONLY]
             if listed_only:
@@ -2510,6 +2538,11 @@ def install(body: dict, by: str | None = None, *, automatic: dict | None = None)
                 preview["why"] = (f"Loam reads and lists {listed_only[0]} packages "
                                   f"and installs none yet")
             if confirm is None:
+                if asset and prepared.get("fingerprint") and source["ref_kind"] == "commit":
+                    _preview_inputs[pin] = prepared
+                    _preview_inputs.move_to_end(pin)
+                    if len(_preview_inputs) > 8:
+                        _preview_inputs.popitem(last=False)
                 return preview
             if listed_only:
                 raise PluginError(f"{pid} is {'an' if listed_only[0] == 'agent' else 'a'}"
@@ -2530,6 +2563,12 @@ def install(body: dict, by: str | None = None, *, automatic: dict | None = None)
                         or source["commit"] != automatic["commit"] or not prior
                         or preview["added"] or not pref["auto_update"] or not pref["digest"]):
                     raise PluginError("The install or its update preference changed. Review the update.", 409)
+            if asset:
+                release = loam_market_asset.verified(asset, work, prepared.get("fingerprint"), fingerprint)
+                if release is not None:
+                    folder = release
+            if folder is None:
+                folder = fetch(src, work)["folder"]
             shutil.rmtree(folder / ".git", ignore_errors=True)
             files = fingerprint(folder)
             if files:

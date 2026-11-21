@@ -69,7 +69,7 @@ def inspect(pid, line, entry, market_state):
         link = tag_link(pid, source)
     if not link:
         return result
-    preview = plugins.install({"url": link})
+    preview = plugins.install({"url": link, "via": via})
     if (preview.get("id") != pid or preview.get("installable") is False
             or not version_key(line.get("version"))
             or version_key(preview["version"]) <= version_key(line["version"])):

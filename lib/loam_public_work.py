@@ -7,7 +7,7 @@ import re
 import tempfile
 import time
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urljoin
 from urllib.request import build_opener, HTTPRedirectHandler, Request
 
 import loam_config as config
@@ -66,10 +66,17 @@ def cached_work(path, key, result):
             catalog = get(url)
             if not isinstance(catalog, dict) or not isinstance(catalog.get("plugins"), list):
                 raise ValueError("Incomplete Market catalog")
-            rows, skipped = market.parse(json.dumps(catalog))
+            rows, skipped = market.catalog_entries(catalog)
             if skipped:
                 raise ValueError("Incomplete Market entries")
-            result["publications"] = [dict(id=p["id"], name=p["name"], url=p["link"])
+            totals = {p["id"]: p.get("downloads") for p in result["publications"] or []}
+            if catalog.get("stats") == "stats.json":
+                try:
+                    totals.update(market.download_totals(get(urljoin(url, "stats.json"))))
+                except (OSError, http.client.HTTPException, ValueError):
+                    pass
+            result["publications"] = [dict(id=p["id"], name=p["name"], url=p["link"],
+                                           downloads=totals.get(p["id"]))
                                       for p in rows if p["repo"].split("/")[0].lower() == login.lower()]
         except (OSError, http.client.HTTPException, ValueError, KeyError, TypeError, AttributeError):
             pass

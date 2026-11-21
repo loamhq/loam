@@ -78,6 +78,20 @@ class ActivityFacts(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     facts.record_open("https://unknown.example/")
 
+    def test_publication_downloads_follow_repository_owner(self):
+        import loam_public_work as work
+        url = "https://raw.githubusercontent.com/example/list/main/list.json"
+        def entry(pid, owner):
+            return dict(id=pid, name=pid.title(), author="Same display name", kind=["theme"],
+                        link=f"https://github.com/{owner}/{pid}/tree/v1.0.0")
+        catalog = dict(version=1, stats="stats.json", plugins=[entry("fern", "Tester"), entry("moss", "other")])
+        stats = dict(version=1, plugins={"fern": {"downloads": 12}, "moss": {"downloads": 4}})
+        issues = {"total_count": 0, "items": []}
+        with tempfile.TemporaryDirectory() as tmp, patch.object(work, "get", side_effect=[catalog, stats, issues, issues]):
+            result = work.cached_work(Path(tmp) / "facts.json", ["tester", "example/core", url],
+                                      dict.fromkeys(("publications", "reports", "contributions")))
+            self.assertEqual([(p["id"], p["downloads"]) for p in result["publications"]], [("fern", 12)])
+
     def test_offline_public_collections_keep_last_success_for_identity(self):
         import json
         import loam_public_work as work

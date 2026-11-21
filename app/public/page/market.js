@@ -229,6 +229,9 @@ export function mount(host) {
     const hue = hueOf(entry.id)
     return h('span', { class: `market-tile market-tile-${size}`, 'aria-hidden': 'true', style: { '--tile': `var(${hue})` }, text: (entry.name || entry.id).trim().charAt(0).toUpperCase() })
   }
+  const downloads = e => Number.isSafeInteger(e.downloads) && e.downloads > 0
+    ? `${e.downloads.toLocaleString()} ${e.downloads === 1 ? 'download' : 'downloads'}` : ''
+  const withDownloads = (text, entry) => [text, downloads(entry)].filter(Boolean).join(' · ')
   const byline = entry => [entry.author, KIND_ONE[kindOf(entry)]].filter(Boolean).join(' · ')
   function reach(entry) {
     const d = st.details.get(entry.id)
@@ -295,7 +298,7 @@ export function mount(host) {
         h('span', { class: 'market-theme-try' }, tryButton(entry, 'small', { glass: photo }))),
       h('div', { class: 'market-theme-meta', onclick: open },
         h('h3', { class: 'display market-name' }, ...marked(entry.name, q)),
-        h('span', { class: 'market-theme-by', text: creatorOf(entry) })),
+        h('span', { class: 'market-theme-by', text: withDownloads(creatorOf(entry), entry) })),
       entry.description ? h('p', { class: 'market-desc', onclick: open }, ...marked(entry.description, q)) : null)
   }
   // A section's themes, in rows of two wide then three tall (tileRows).
@@ -328,7 +331,7 @@ export function mount(host) {
         h('h3', { class: 'market-item-title' }, h('button', { type: 'button', class: 'display market-name market-item-open', onclick: () => openListing(entry.id), 'aria-label': `About ${entry.name}` }, ...marked(entry.name, q))),
         entry.description ? h('p', { class: 'market-desc' }, ...marked(entry.description, q)) : null,
         h('div', { class: 'market-item-foot' },
-          h('span', { class: 'market-by' }, by ? h('span', {}, ...marked(by, q)) : null, reach(entry)),
+          h('span', { class: 'market-by' }, by ? h('span', {}, ...marked(withDownloads(by, entry), q)) : null, reach(entry)),
           h('span', { class: 'market-item-act' }, action(entry, { size: 'small' })))))
   }
   const items = (list, q = '', opts) => h('div', { class: `market-items${list.length === 1 ? ' market-items-one' : ''}` }, ...list.map(e => item(e, q, opts)))
@@ -414,7 +417,7 @@ export function mount(host) {
           h('p', { class: 'kicker market-kicker', text: kicker }),
           h('h2', { class: 'display', id: 'market-lead-title', text: entry.name }),
           entry.description ? h('p', { class: 'market-lead-desc', text: entry.description }) : null,
-          by ? h('p', { class: 'market-lead-by', text: `by ${by}` }) : null),
+          by ? h('p', { class: 'market-lead-by', text: withDownloads(`by ${by}`, entry) }) : null),
         h('div', { class: 'market-lead-acts' }, tryButton(entry, '', { glass: Boolean(cover) }), action(entry, { from: 'lead' }))))
   }
   function section({ kind, entries: list, total }) {
@@ -455,7 +458,7 @@ export function mount(host) {
           h('p', { class: 'kicker market-kicker', text: 'Best match' }),
           h('h2', { class: 'display' }, h('button', { type: 'button', class: 'market-best-name', onclick: () => openListing(best.id) }, ...marked(best.name, q))),
           best.description ? h('p', { class: 'market-best-desc' }, ...marked(best.description, q)) : null,
-          h('p', { class: 'market-by' }, h('span', {}, ...marked(byline(best), q)), reach(best)),
+          h('p', { class: 'market-by' }, h('span', {}, ...marked(withDownloads(byline(best), best), q)), reach(best)),
           h('div', { class: 'market-lead-acts' }, action(best, { from: 'lead' }), tryButton(best)))) : null,
       rest.length ? h('section', { class: 'market-section', 'aria-labelledby': 'market-also' }, h('div', { class: 'market-section-head' }, h('div', { class: 'market-section-titles' }, h('h2', { class: 'display', id: 'market-also', text: 'Also close' }))),
         items(rest, q, { kind: true })) : null,
@@ -482,7 +485,8 @@ export function mount(host) {
         h('div', { class: 'market-listing-who' },
           h('p', { class: 'kicker market-kicker', text: [KIND_ONE[kind], version ? `version ${version}` : null].filter(Boolean).join(' · ') }),
           h('h1', { class: 'display market-listing-title', tabindex: '-1', text: entry.name }),
-          entry.description ? h('p', { class: 'market-listing-desc', text: entry.description }) : null),
+          entry.description ? h('p', { class: 'market-listing-desc', text: entry.description }) : null,
+          downloads(entry) ? h('p', { class: 'market-listing-downloads', text: downloads(entry) }) : null),
         listingActs(entry, body, kind)),
       maker(entry, body),
       theme && body?.theme && themeState(id) !== 'error' ? showcase.view({ key: `market-${id}`, look: id, name: entry.name, options: body.theme.options ?? [], palette: body.theme.palette ?? [], from: themeInstalled(id) ? 'installed' : 'market' }) : null,
@@ -714,7 +718,7 @@ export function mount(host) {
     host.schedule()
     try {
       // A reviewed listing installs the commit its review read (`pinned_link`).
-      const preview = await host.pluginLoader.install({ url: entry.pinned_link ?? entry.link })
+      const preview = await host.pluginLoader.install({ url: entry.pinned_link ?? entry.link, via: 'market' })
       if (st.install?.id !== id) return
       Object.assign(st.install, { preview, phase: 'ready' })
     } catch (error) {
@@ -1020,7 +1024,7 @@ export function mount(host) {
         h('p', { class: 'market-card-kicker' }, icon.spark(11), `Market · ${KIND_ONE[kind]}`),
         h('button', { type: 'button', class: 'market-card-name', onclick: openIt, 'aria-label': `About ${entry.name}` }, entry.name),
         entry.description ? h('span', { class: 'market-card-line', text: entry.description }) : null,
-        h('span', { class: 'market-card-by' }, h('span', { class: 'market-card-maker', text: entry.author }),
+        h('span', { class: 'market-card-by' }, h('span', { class: 'market-card-maker', text: withDownloads(entry.author, entry) }),
           r ? h('span', { class: `market-reach market-reach-${r.tone}` }, h('i', { 'aria-hidden': 'true' }), r.text) : null)),
       h('div', { class: 'market-card-acts' }, act))
   }

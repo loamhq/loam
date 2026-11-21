@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import http.server
 import json
 import os
@@ -13,12 +14,13 @@ import tempfile
 import threading
 import urllib.parse
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 TMP = Path(tempfile.mkdtemp(prefix="test-marketplace-"))
 CONFIG = TMP / "loam.toml"
 
-ANSWERS: dict[str, tuple[int, str]] = {}
+ANSWERS: dict[str, tuple[int, str | bytes]] = {}
 HITS: list[str] = []
 
 
@@ -29,7 +31,7 @@ class Host(http.server.BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
-        self.wfile.write(body.encode())
+        self.wfile.write(body if isinstance(body, bytes) else body.encode())
 
     def log_message(self, *args):
         pass
@@ -264,7 +266,7 @@ try:
                          capture_output=True, text=True, timeout=120).returncode, 0)
     check("the shipped list is the empty one",
           json.loads((ROOT / "docs" / "marketplace" / "list.json").read_text()),
-          {"version": 1, "plugins": []})
+          {"version": 1, "stats": "stats.json", "plugins": []})
 
     # -- sharing by link ---------------------------------------------------------
     os.environ.update({"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.test",
@@ -290,6 +292,9 @@ try:
     check("and the link parses as an install link",
           loam_plugins.parse_source({"url": shared["link"]}),
           {"repo": "sam/loam-dusk", "ref": "v1.0.0", "path": "dusk"})
+    check("retrying the identical share resumes the existing tag", mk.share("dusk", "sam/loam-dusk")["commit"],
+          shared["commit"])
+    (plugin / "theme.css").write_text(":root { --paper: #333; }\n")
     for args, why in ((("dusk", "sam/loam-dusk"), "already has the tag v1.0.0"),
                       (("ghost", "sam/loam-dusk"), "no plugin 'ghost'"),
                       (("dusk", "not a repo"), "is not a repository"),
@@ -543,6 +548,48 @@ try:
     check("and without the stand-in, this box's own address is refused",
           mk._remote_image(f"{BASE}/cover.webp"), None)
     check("nothing is installed by reading", (TMP / "plugins" / "dusk" / "theme.css").read_text().startswith(":root {"), True)
+    # Confirm through the same entry point as the Market sheet. One asset GET
+    # for a valid yes; an untrusted transport hint cannot change the reviewed tree.
+    import loam_market_asset as asset
+    commit = git("rev-parse", "HEAD", cwd=work).stdout.decode().strip()
+    archive = git("-C", "dusk", "archive", "--format=tar", commit, cwd=work).stdout
+    digest = hashlib.sha256(archive).hexdigest()
+    metadata = {"tag": "v1.2.0", "sha256": digest}
+    changed = archive.replace(b"Warm lamplight", b"Fake lamplight")
+    assert changed != archive
+    original_download = asset.download
+    def download_here(descriptor, dest):
+        return original_download({**descriptor, "url": BASE + "/asset"}, dest)
+    expected = loam_plugins.fingerprint(work / "dusk")
+    for case, advertised, answer, gets in (
+            ("verified", metadata, (200, archive), 1), ("missing hint", None, (404, ""), 0),
+            ("missing file", metadata, (404, ""), 1), ("wrong hash", metadata, (200, changed), 1),
+            ("wrong tree", {**metadata, "sha256": hashlib.sha256(changed).hexdigest()}, (200, changed), 1)):
+        candidate = {**listed, "review": {"commit": commit, "folder": "dusk", "note": {"summary": "Reviewed."}}}
+        if advertised:
+            candidate["asset"] = advertised
+        ANSWERS["/list.json"] = 200, json.dumps({"version": 1, "plugins": [candidate], "stats": "stats.json"})
+        ANSWERS["/stats.json"] = 200, json.dumps({"version": 1, "plugins": {"dusk": {"downloads": 3}}})
+        ANSWERS["/asset"] = answer
+        listing = mk.read(refresh=True)["plugins"][0]
+        check(f"{case}: sibling totals", listing["downloads"], 3)
+        request = {"url": listing["pinned_link"], "via": "market"}
+        with patch.dict(os.environ, LOAM_PLUGINS_DIR=str(TMP / case), LOAM_PLUGIN_UNITS="0"), \
+                patch.object(asset, "download", side_effect=download_here):
+            hits = HITS.count("/asset")
+            preview = loam_plugins.install(request)
+            try:
+                loam_plugins.install({**request, "confirm": "expired"})
+            except loam_plugins.PluginError as exc:
+                assert exc.status == 409
+            check(f"{case}: preview and invalid consent leave count alone", HITS.count("/asset"), hits)
+            result = loam_plugins.install({**request, "confirm": preview["confirm"]})
+            check(f"{case}: installed the reviewed files", loam_plugins.fingerprint(TMP / case / "dusk"), expected)
+            check(f"{case}: untouched and automatic updates available",
+                  (result["installed"], result["plugin"]["edited"], result["plugin"]["auto_update"]), (True, False, True))
+            check(f"{case}: release fetches", HITS.count("/asset") - hits, gets)
+    ANSWERS["/list.json"] = 200, json.dumps({"version": 1, "plugins": [listed, entry("ghost")]})
+    mk.read(refresh=True)
     shutil.rmtree(hub / "friend" / "loam-dusk")
     check("details are kept: a second read does not fetch", mk.details("dusk")["version"], "1.2.0")
     for args, kind, why in ((("nobody",), mk.NotListed, "not listed"),

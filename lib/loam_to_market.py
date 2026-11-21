@@ -161,10 +161,10 @@ def keep(install=None, from_release=None, link_of=None) -> dict:
         else:
             try:
                 link = link_of(pid)
-                first = install({"url": link}, by=BY)
+                first = install({"via": "market", "url": link}, by=BY)
                 if first.get("id") != pid:
                     raise loam_plugins.PluginError(f"{link} is {first.get('id')!r}, not {pid}")
-                install({"url": link, "confirm": first["confirm"]}, by=BY)
+                install({"via": "market", "url": link, "confirm": first["confirm"]}, by=BY)
                 entry.update(how="link", link=link)
             except Exception as exc:  # noqa: BLE001 - the release's copy is the fallback
                 entry["link_error"] = str(exc)[:300]
@@ -221,12 +221,12 @@ def bring_up(install=None, from_release=None, link_of=None) -> dict:
         elif source.get("kind") == "link":
             try:
                 link = link_of(pid)
-                first = install({"url": link}, by=BY)
+                first = install({"via": "market", "url": link}, by=BY)
                 if first.get("id") != pid:
                     raise loam_plugins.PluginError(f"{link} is {first.get('id')!r}, not {pid}")
                 if _version((first.get("plugin") or first).get("version")) < since:
                     raise loam_plugins.PluginError(f"the listing is still {first.get('version')}")
-                install({"url": link, "confirm": first["confirm"]}, by=BY)
+                install({"via": "market", "url": link, "confirm": first["confirm"]}, by=BY)
                 entry.update(how="link", link=link, was=row.get("version"))
             except Exception as exc:  # noqa: BLE001 - reported, tried again next start
                 entry.update(how="failed", error=str(exc)[:300])
@@ -235,7 +235,7 @@ def bring_up(install=None, from_release=None, link_of=None) -> dict:
             # have the same id and version, so they all go through review.
             try:
                 import loam_plugin_review as review
-                first = install({"url": link_of(pid)}, by=BY)
+                first = install({"via": "market", "url": link_of(pid)}, by=BY)
                 if first.get("id") != pid or _version(first.get("version")) < since:
                     raise loam_plugins.PluginError("The listing does not name the expected update.")
                 base = review.original(loam_plugins.load_list(), pid)
