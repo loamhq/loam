@@ -92,6 +92,9 @@ try:
                                                         "yosemite": {}}}})
     check("in use and chosen are wanted; Latte and untouched looks are not",
           kept.wanted(), {"foundry": "in use on phone", "autumn": "options chosen on desktop"})
+    settings({"account": {"theme": "foundry", "options": {"autumn": {"agent-shapes": "signature"}}}})
+    check("account selections and options keep moved themes too",
+          kept.wanted(), {"foundry": "in use on the account", "autumn": "options chosen on the account"})
     check("before: Appearance has only the shipped two", loam_appearance.themes(), ["latte", "plain"])
 
     # Installed from the link.
@@ -116,7 +119,9 @@ try:
     check("a theme serves its fonts.css and font files, not its other files", served,
           {"fonts.css": "text/css; charset=utf-8", "display-latin.woff2": "font/woff2",
            "OFL.txt": "a plugin s", "theme.css": "text/css; charset=utf-8"})
-    check("the phone still wears Foundry", loam_appearance.read()["phone"]["theme"], "foundry")
+    wear = loam_appearance.read()
+    check("both device kinds wear Foundry", [wear[k]["theme"] for k in ("phone", "desktop")],
+          ["foundry", "foundry"])
     check("the saved Autumn choice still stands",
           loam_appearance.read()["desktop"]["options"]["autumn"]["agent-shapes"], "signature")
 

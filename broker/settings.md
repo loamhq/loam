@@ -131,16 +131,16 @@ own `thread.*` rows cover the same things.
 | `reviewer.effort` | The reviewer's thinking level | PATCH /api/system/reviewer | persona, conversation only | no |
 | `plugin.agent` | A plugin's settings for one agent (Read aloud's voice, once loam-ui reads it) | PATCH /api/plugins/{plugin}/agents/{agent} | persona, conversation only | no |
 | `composer.send_key` | The chat send shortcut. `enter` by default, or `modifier` for Command or Control + Enter. | PATCH /api/settings/composer | persona | no |
-| `appearance.phone.mode` | The phone's mode: light, dark, sun or system (the modes loam-ui's handoff declares) | PATCH /api/settings/appearance | persona | no (was `device.theme`, in the browser) |
+| `appearance.phone.mode` | The account's mode: light, dark, sun or system | PATCH /api/settings/appearance | persona | no |
 | `appearance.phone.transition` | The phone's Sun mode transition: fast (3 s), normal (10 s) or long (20 s) | PATCH /api/settings/appearance | persona | no |
 | `appearance.phone.size` | The phone's page size, 75–150 % in 5s | PATCH /api/settings/appearance | persona | no |
-| `appearance.desktop.mode` | The desktop's mode: light, dark, sun or system (the modes loam-ui's handoff declares) | PATCH /api/settings/appearance | persona | no (was `device.theme`) |
+| `appearance.desktop.mode` | Alias for the account's mode | PATCH /api/settings/appearance | persona | no |
 | `appearance.desktop.transition` | The desktop's Sun mode transition: fast (3 s), normal (10 s) or long (20 s) | PATCH /api/settings/appearance | persona | no |
 | `appearance.desktop.size` | The desktop's page size, 75–150 % in 5s | PATCH /api/settings/appearance | persona | no |
-| `appearance.phone.theme` | The phone's theme (Latte, Plain, any installed) | PATCH /api/settings/appearance | persona | no |
-| `appearance.desktop.theme` | The desktop's theme (Latte, Plain, any installed) | PATCH /api/settings/appearance | persona | no |
+| `appearance.phone.theme` | The account's active theme (Latte, Plain or any installed theme) | PATCH /api/settings/appearance | persona | no |
+| `appearance.desktop.theme` | Alias for the account's active theme | PATCH /api/settings/appearance | persona | no |
 | `appearance.location` | The saved place Sun mode times sunrise and sunset by, one for both kinds: `{latitude, longitude, source, timeZone}` rounded to 0.1°, or null | PATCH /api/settings/appearance | persona | no |
-| `appearance.{phone,desktop}.options.<theme>.<option>` | A theme's option on that device kind, one key per installed theme option, read live from the manifests (on 2026-11-12 Latte's four: `agent-colours`, `agent-shapes`, `latte-mug`, `latte-inside`) | PATCH /api/settings/appearance | persona | no |
+| `appearance.{phone,desktop}.options.<theme>.<option>` | Two aliases for each account-wide option declared by an installed theme | PATCH /api/settings/appearance | persona | no |
 | `plugin.on` | A plugin on or off (not a theme-only plugin: that is `appearance.*.theme`) | PATCH /api/plugins/{id} | persona, conversation only | no |
 | `plugin.auto_update` | Apply updates with previously approved access at night. Resuming after edits requires confirmation that the installed folder may be replaced. | PATCH /api/plugins/{id} | persona, conversation only | no |
 | `plugin.install` | Install from a GitHub link: a preview, then the same link with its `confirm` | POST /api/plugins | persona, conversation only | no |
@@ -157,23 +157,24 @@ own `thread.*` rows cover the same things.
 
 ## Appearance: the one setting kept on the host for nobody but the owner (2026-11-11)
 
-Settings → Appearance (loam-ui `c674ecb`, its contract in loam-ui's
-`docs/appearance.md`): a mode, a size and (since `c326299`) a theme for each device kind, `phone`
-(a coarse primary pointer) and `desktop`. It replaced `device.theme`, which
-lived in each browser; the page discards that old key. The broker keeps it in
+Settings → Appearance stores the account's mode, theme and per-theme options.
+Size and Sun transition are stored by device kind, `phone` (a coarse primary
+pointer) or `desktop`. The broker keeps it in
 `state/broker/settings.json` under `appearance` (`lib/loam_appearance.py`),
 the broker's settings file for anything that belongs to no thread, session or
 schedule; the next such setting is a key beside it. `GET /v1/settings/appearance`
 fills defaults (`system`, 100, `latte`); `PATCH` merges named fields atomically and
 answers the whole value; a malformed patch is a 400 sentence and writes
-nothing. An open page reads it again when it regains focus or becomes
+nothing. Either device row edits shared fields and both rows return the same
+shared values. When old rows disagree, the desktop value wins per field and
+option, with phone-only values carried over. The first write saves the shared
+record under `appearance.account` and preserves the old choices on disk.
+Desktop also wins if one patch supplies conflicting shared values. An open page reads it again when it regains focus or becomes
 visible (no stream). The parity test also reads loam-ui's
 `docs/appearance-settings.registry.json` and fails when its keys, route,
 values or defaults part from the registry's or the store's.
 
-**Themes** (2026-11-12, loam-ui `c326299`): each device kind also has a
-`theme`, the id of an installed theme, default `latte`; a record from before
-themes reads as `latte` and its first write adds the field. The installed ids
+**Themes** use the ID of an installed theme and default to `latte`. The installed IDs
 are not listed in this repo: they are the theme plugins of the plugin host's
 one list (`lib/loam_plugins.py`, `docs/plugins.md`), in force in either
 layer. Shipped, that is the app's `public/themes/<id>/` folders, in Loam's
@@ -191,8 +192,8 @@ plugin list derives a theme's `on` from here and has no switch of its own
 for one, so there is one truth. A write of a theme not installed is a 400
 that lists the installed ones. A stored theme later uninstalled by hand is
 kept on read (the page draws Latte for an id it lacks) and comes back with
-its folder; removing one through `plugin.remove` sets the device kinds that
-used it back to `latte` unless a shipped one of that id remains. Only a value
+its folder. Removing an active theme through `plugin.remove` sets the account
+back to `latte` unless a shipped theme of that ID remains. Only a value
 not shaped like an id is replaced by `latte`.
 
 The checkout can run ahead of the deployed image: a theme merged but not yet
@@ -211,7 +212,7 @@ its own different variants"). A theme's manifest may declare `options`
 2026-11-12 (loam-ui `6100882`) is `agent-colours` (`palette`, `latte-tones`),
 `agent-shapes` (`distinct`, `circle`, `rounded-square`, `latte-art`),
 `latte-mug` (`on`, `off`) and `latte-inside` (`pour`, `initials`); Plain has
-none. Each device kind keeps
+none. The account keeps
 `options`, a map of theme to option to choice, so every theme keeps its own
 choices and switching to Plain and back keeps Latte's. A reading lists every
 installed theme that has options, each option at its stored choice or its
@@ -223,7 +224,7 @@ names only the leaves it changes, `{"desktop": {"options": {"latte":
 one lock, so concurrent writes of different leaves all land. An options value
 that is not a map or is empty, a theme without options, an unknown option,
 and a choice the theme does not offer (or one that is not text) are each a
-400 sentence that writes nothing. The registry has one key per kind and
+400 sentence that writes nothing. The registry has one alias per kind and
 installed option, `appearance.<kind>.options.<theme>.<option>`, built live
 from the catalog (`option_entries()` in `lib/loam_settings.py`): `describe`
 lists them with their choices as `allowed`, and `set`/`get` go through the
@@ -233,7 +234,7 @@ manifests in loam-ui's folders.
 
 **Sun mode and the saved place** (2026-11-13; loam-ui `29a1506`, its
 contract in loam-ui's `docs/appearance.md`, *Sun mode*; the owner asked that
-morning for a sunrise/sunset mode). A kind's `mode` may be `sun`: light from
+morning for a sunrise/sunset mode). The account's `mode` may be `sun`: light from
 30 minutes before sunrise to 30 minutes after sunset at a saved place, which
 the page computes offline. The place is one value beside the two kinds,
 `location`, **shared** so the phone and the desktop agree:

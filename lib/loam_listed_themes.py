@@ -13,10 +13,8 @@ An install that had chosen one of them must not lose it on the update. So
 once, at the broker's first start on this code, :func:`keep` installs each
 moved look that the person was using or had chosen:
 
-- **using**: a device kind's ``appearance.<kind>.theme`` names it;
-- **had chosen**: a device kind holds saved option choices for it
-  (``appearance.<kind>.options.<id>``), which only a look someone has worn
-  and changed has.
+- **using**: the account or a legacy device row names it as its theme;
+- **had chosen**: one of those rows holds saved option choices for it.
 
 Each is installed from its Market link through the normal two calls
 (``loam_plugins.install``: read, then confirm what was read), so it is an
@@ -89,17 +87,19 @@ def wanted() -> dict[str, str]:
     if not isinstance(stored, dict):
         return {}
     out: dict[str, str] = {}
-    for kind in loam_appearance.KINDS:
+    for kind in (*loam_appearance.KINDS, loam_appearance.ACCOUNT):
         row = stored.get(kind)
         if not isinstance(row, dict):
             continue
-        if row.get("theme") in MOVED:
-            out[row["theme"]] = f"in use on {kind}"
+        where = "on the account" if kind == loam_appearance.ACCOUNT else f"on {kind}"
+        theme = row.get("theme")
+        if isinstance(theme, str) and theme in MOVED:
+            out[theme] = f"in use {where}"
         opts = row.get("options")
         if isinstance(opts, dict):
             for pid, chosen in opts.items():
                 if pid in MOVED and isinstance(chosen, dict) and chosen:
-                    out.setdefault(pid, f"options chosen on {kind}")
+                    out.setdefault(pid, f"options chosen {where}")
     return out
 
 

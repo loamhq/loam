@@ -359,9 +359,10 @@ ok, said = refuses(lambda: P.set_on("notes", "yes"), "`on` is true or false")
 check("`on` is a boolean", ok, said)
 appearance.update({"desktop": {"theme": "midnight"}})
 mid = row("midnight", "yours")
-check("a theme is on where Appearance chose it: one truth",
-      mid["on"] is True and mid["in_use"] == ["desktop"] and mid["switch"] == "appearance"
-      and row("latte", "yours")["in_use"] == ["phone"], (mid, row("latte", "yours")))
+check("the account's active theme is on across devices",
+      mid["on"] is True and mid["in_use"] == ["phone", "desktop"]
+      and mid["switch"] == "appearance" and row("latte", "yours")["in_use"] == [],
+      (mid, row("latte", "yours")))
 
 
 # -- install from a link --------------------------------------------------------
@@ -705,9 +706,9 @@ check("a shipped plugin cannot be removed: turn it off", ok, said)
 ok, said = refuses(lambda: P.remove("ghost"), "no plugin 'ghost'")
 check("removing an unknown id: 404", ok, said)
 gone = P.remove("midnight")
-check("removing a theme in use sets that device kind back to Latte",
-      gone["appearance_reset"] == ["desktop"] and not (YOURS / "midnight").exists()
-      and appearance.read()["desktop"]["theme"] == "latte", gone)
+check("removing the active theme sets both device kinds back to Latte",
+      gone["appearance_reset"] == ["phone", "desktop"] and not (YOURS / "midnight").exists()
+      and all(v["theme"] == "latte" for v in appearance.read_base().values()), gone)
 appearance.update({"desktop": {"theme": "latte"}, "phone": {"theme": "latte"}})
 gone = P.remove("latte")
 check("removing a Yours copy of a shipped theme: the shipped one takes over, "
@@ -909,7 +910,7 @@ async def main():
         status, body = await http(port, "GET", "/v1/plugins/solar")
         check("a persona's appearance.desktop.theme is the theme plugin's `on`",
               out.get("value") == "solar" and body["plugin"]["on"] is True
-              and body["plugin"]["in_use"] == ["desktop"], (out, body["plugin"]))
+              and body["plugin"]["in_use"] == ["phone", "desktop"], (out, body["plugin"]))
     finally:
         tcp.close()
         await tcp.wait_closed()

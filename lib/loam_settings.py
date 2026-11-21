@@ -548,15 +548,15 @@ ENTRIES: list[Entry] = [
           pick=lambda a, m: a["send_key"]),
 
     # -- Settings: Appearance (2026-11-11), kept on the host ---------------
-    # One value for each device kind (the page's primary pointer: coarse is
-    # the phone), stored by lib/loam_appearance.py. A persona's set changes
-    # it for every browser of that kind; an open page reads it again when it
-    # comes back into focus. The theme (2026-11-12) takes the ids of the
+    # Mode and theme keys are aliases for account settings. Size and Sun
+    # transition still follow the primary pointer (coarse is phone).
+    # Open pages refresh when they regain focus. Theme takes the ids of the
     # installed themes, which `describe` lists live from the plugin host's
     # list (options "themes"; lib/loam_plugins.py), so a theme added to
     # either layer needs no line here.
     *[Entry(f"appearance.{kind}.{field}", "setting",
-            f"{'The phone' if kind == 'phone' else 'The desktop'}'s "
+            ("The owner's " if field in ("mode", "theme") else
+             f"The {kind}'s ")
             + {"mode": "mode: light, dark, by the sun, or the system's",
                "transition": "Sun mode transition: how long the shift "
                              "between light and dark takes",
@@ -578,7 +578,9 @@ ENTRIES: list[Entry] = [
                      "transition": "transitions"}.get(field),
             body=(lambda v, m, kind=kind, field=field: {kind: {field: v}}),
             read="GET /v1/settings/appearance",
-            pick=(lambda a, m, kind=kind, field=field: a[kind][field]))
+            pick=(lambda a, m, kind=kind, field=field: a[kind][field]),
+            note=("shared across all devices; phone and desktop keys are aliases"
+                  if field in ("mode", "theme") else ""))
       for kind in ("phone", "desktop")
       for field in ("mode", "transition", "size", "theme")],
     # The saved place Sun mode reads (2026-11-13; loam-ui 29a1506), one for
@@ -693,8 +695,7 @@ def _option_entry(kind: str, theme: str, opt: dict) -> Entry:
     ids = [c["id"] for c in opt["choices"]]
     return Entry(
         f"appearance.{kind}.options.{theme}.{opt['id']}", "setting",
-        f"{'The phone' if kind == 'phone' else 'The desktop'}'s {theme} theme: "
-        f"{opt['label']}",
+        f"The owner's {theme} theme: {opt['label']}",
         "PATCH /api/settings/appearance", route="PATCH /v1/settings/appearance",
         values=(", ".join(f"{c['id']} ({c['label']})" for c in opt["choices"])
                 + f"; default {opt['default']}"),
@@ -704,13 +705,13 @@ def _option_entry(kind: str, theme: str, opt: dict) -> Entry:
         read="GET /v1/settings/appearance",
         pick=(lambda a, m, kind=kind, theme=theme, o=opt["id"]:
               ((a.get(kind) or {}).get("options") or {}).get(theme, {}).get(o)),
-        note=f"kept per theme: choosing another theme keeps it ({len(ids)} choices "
-             f"from the theme's manifest)")
+        note=f"shared across all devices; phone and desktop keys are aliases; "
+             f"kept per theme ({len(ids)} choices from the theme's manifest)")
 
 
 def option_entries() -> list[Entry]:
-    """Appearance's theme options (2026-11-12): one setting per device kind,
-    installed theme and option, ``appearance.<kind>.options.<theme>.<option>``,
+    """Appearance's theme options: phone and desktop aliases for each
+    installed theme option, ``appearance.<kind>.options.<theme>.<option>``,
     read live from the themes' manifests (lib/loam_plugins.py,
     ``theme_options``), so a theme installed with options is settable with
     no line here. Unreadable theme folders give none."""

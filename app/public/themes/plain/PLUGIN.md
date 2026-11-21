@@ -17,8 +17,7 @@ touches:
 ---
 
 Plain takes the colour out of Loam: greys in light and in dark, so the page
-is only your words and your agents'. Choose it in Settings › Appearance,
-separately for your phone and your desktop.
+is only your words and your agents'. Choose it in Settings › Appearance.
 
 ---
 

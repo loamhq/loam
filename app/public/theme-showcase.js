@@ -1,11 +1,5 @@
-// A theme shown before it is worn (2026-11-19): the scene of Loam wearing it
-// (theme-scene.html, framed), Light and Dark, each of its own options, and
-// its palette under it, named from the theme's story. The owner, 11-19: "a
-// preview type thing within the description of the theme and the different
-// color schemas that it has so users can see it without having to try it or
-// install it." Drawn on a theme's Market listing (page/market.js) and on a
-// theme's page in Settings › Plugins (plugin-settings.js), for any theme:
-// nothing here knows one look from another.
+// The framed theme scene, its options and its palette. Market listings keep
+// preview choices here. Installed themes in Settings supply account settings.
 //
 // What a theme says (`options`, `palette` from its PLUGIN.md) is all it
 // takes. Its palette is `{token, name, name_dark?}`; a theme that names none
@@ -50,7 +44,7 @@ export function createThemeShowcase({ schedule = () => {}, mode = () => 'light' 
       schedule()
     } catch { /* a frame between pages answers nothing; the next ready will */ }
   }
-  function showOf(key, look) {
+  function showOf(key) {
     let show = shows.get(key)
     if (!show) {
       const frame = document.createElement('iframe')
@@ -59,46 +53,50 @@ export function createThemeShowcase({ schedule = () => {}, mode = () => 'light' 
       frame.setAttribute('scrolling', 'no')
       frame.setAttribute('inert', '')
       frame.addEventListener('load', () => read(show))
-      show = { key, look, frame, mode: mode(), values: {}, colours: {}, tokens: [], loaded: false, ready: null }
+      show = { frame, mode: mode(), values: {}, colours: {}, tokens: [], loaded: false, ready: null }
       shows.set(key, show)
     }
     return show
   }
-  function address(show, from, options) {
-    const q = new URLSearchParams({ look: show.look, mode: show.mode, from })
-    for (const option of options) q.set(`o.${option.id}`, show.values[option.id] ?? option.default)
+  function address(look, displayMode, from, values) {
+    const q = new URLSearchParams({ look, mode: displayMode, from })
+    for (const [id, value] of Object.entries(values)) q.set(`o.${id}`, value)
     return `/theme-scene.html#${q}`
   }
   // `key` names one preview (a listing, a plugin page); `from` is where its
   // tokens come from: `market` (the listing's link) or `installed`.
-  function view({ key, look, name, options = [], palette = [], from = 'market' }) {
-    const show = showOf(key, look)
+  function view({ key, look, name, options = [], palette = [], from = 'market', settings }) {
+    const show = showOf(key)
     const named = palette.length ? palette : PLAIN_PALETTE
     show.tokens = named.map(p => p.token)
-    const src = address(show, from, options)
+    const displayMode = settings ? mode() : show.mode
+    const choices = settings ? settings.options : show.values
+    const values = Object.fromEntries(options.map(o => [o.id, choices?.[o.id] ?? o.default]))
+    const src = address(look, displayMode, from, values)
     if (show.src !== src) {
       show.src = src
       if (!show.frame.getAttribute('src')) show.frame.setAttribute('src', src)
       else show.frame.contentWindow?.location.replace(src)
     }
-    show.frame.title = `${name} in Loam, ${show.mode}`
+    show.frame.title = `${name} in Loam, ${displayMode}`
     const set = patch => { Object.assign(show, patch); schedule() }
-    const want = `${look}:${show.mode}:`
+    const want = `${look}:${displayMode}:`
     const current = show.loaded && show.ready?.startsWith(want)
-    const values = Object.fromEntries(options.map(o => [o.id, show.values[o.id] ?? o.default]))
     return h('section', { class: 'theme-show', 'aria-label': `${name}, previewed`, key: `show:${key}` },
-      h('div', { class: `theme-show-stage${show.loaded ? '' : ' is-loading'}`, role: 'img', 'aria-label': `Loam wearing ${name}, in ${show.mode === 'dark' ? 'dark' : 'light'} mode` }, kept(show.frame)),
+      h('div', { class: `theme-show-stage${show.loaded ? '' : ' is-loading'}`, role: 'img', 'aria-label': `Loam wearing ${name}, in ${displayMode} mode` }, kept(show.frame)),
       h('div', { class: 'theme-show-controls' },
         h('div', { class: 'theme-show-control' }, h('span', { class: 'theme-show-label', id: `${key}-mode`, text: 'Mode' }),
-          segmentedControl({ label: 'Mode', options: MODES, value: show.mode, choose: id => set({ mode: id }), props: { class: 'theme-show-choices', 'aria-labelledby': `${key}-mode` } })),
+          segmentedControl({ label: 'Mode', options: MODES, value: settings?.mode ?? show.mode,
+            choose: id => settings ? settings.set({ mode: id }) : set({ mode: id }), props: { class: 'theme-show-choices', 'aria-labelledby': `${key}-mode` } })),
         ...shownOptions(options, values).map(option => h('div', { class: 'theme-show-control', key: option.id },
           h('span', { class: 'theme-show-label', id: `${key}-o-${option.id}`, text: option.label }),
           segmentedControl({ label: option.label, options: option.choices, value: values[option.id],
-            choose: id => set({ values: { ...show.values, [option.id]: id } }), props: { class: 'theme-show-choices', 'aria-labelledby': `${key}-o-${option.id}` } })))),
-      h('ul', { class: `theme-palette${current ? '' : ' is-loading'}`, 'aria-label': `${name}’s colours in ${show.mode === 'dark' ? 'dark' : 'light'} mode` },
+            choose: id => settings ? settings.set({ options: { [look]: { [option.id]: id } } }) : set({ values: { ...show.values, [option.id]: id } }),
+            props: { class: 'theme-show-choices', 'aria-labelledby': `${key}-o-${option.id}` } })))),
+      h('ul', { class: `theme-palette${current ? '' : ' is-loading'}`, 'aria-label': `${name}’s colours in ${displayMode} mode` },
         ...named.map(p => {
           const colour = show.colours[p.token], hex = current ? hexOf(colour) : null
-          const label = (show.mode === 'dark' && p.name_dark) || p.name
+          const label = (displayMode === 'dark' && p.name_dark) || p.name
           return h('li', { class: 'theme-swatch', key: p.token, tabindex: '0', title: hex ?? '', 'aria-label': hex ? `${label}, ${hex}` : label },
             h('span', { class: 'theme-swatch-chip', 'aria-hidden': 'true', style: { background: current && colour ? colour : '' } }),
             h('span', { class: 'theme-swatch-name', text: label }),

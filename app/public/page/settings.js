@@ -158,7 +158,7 @@ function settingsAppearance({ back = true } = {}) {
     status.error ? h('button', { class: 'quietlink', type: 'button', text: 'Try again', onclick: () => status.saving ? host.theme.save() : host.theme.refresh() }) : null)
   return [
     back ? settingsBack('Settings', 'root') : null,
-    settingsHead('Appearance', 'Synced across browsers, with separate phone and desktop preferences.'),
+    settingsHead('Appearance', 'Theme and mode sync across devices. Phone and desktop keep their own size and Sun transition.'),
     status.error ? feedback : null,
     h('section', { class: 'card appearance-card', 'aria-labelledby': 'appearance-theme' },
       h('h3', { class: 'kicker', id: 'appearance-theme', text: 'Theme' }),

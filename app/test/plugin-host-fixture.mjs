@@ -4,6 +4,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { oneProductFixture } from './one-product-fixture.mjs'
 import { shippedPlugins } from '../src/shipped-plugins.js'
+import { mergeAppearance } from '../public/theme-options.js'
 export async function pluginHostFixture({ mode = 'light', look = 'latte' } = {}) {
   const remote = http.createServer((req, res) => { res.writeHead(200, { 'content-type': 'text/plain', 'access-control-allow-origin': '*' }); res.end('A plugin can read another origin.') })
   remote.listen(0, '127.0.0.1'); await once(remote, 'listening')
@@ -11,7 +12,17 @@ export async function pluginHostFixture({ mode = 'light', look = 'latte' } = {})
   const app = await oneProductFixture(), writes = [], json = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)) }
   const appearance = { phone: { mode, size: 100, theme: look }, desktop: { mode, size: 100, theme: look } }
   app.routes['GET /v1/settings/appearance'] = (req, res) => json(res, 200, appearance)
-  app.routes['PATCH /v1/settings/appearance'] = (req, res, url, raw) => { for (const [kind, patch] of Object.entries(JSON.parse(raw))) Object.assign(appearance[kind], patch); json(res, 200, appearance) }
+  app.routes['PATCH /v1/settings/appearance'] = (req, res, url, raw) => {
+    const patch = JSON.parse(raw)
+    for (const kind of ['phone', 'desktop']) {
+      if (!patch[kind]) continue
+      const { size, transition, ...shared } = patch[kind]
+      if (size !== undefined) appearance[kind].size = size
+      if (transition !== undefined) appearance[kind].transition = transition
+      for (const device of ['phone', 'desktop']) appearance[device] = mergeAppearance(appearance[device], shared)
+    }
+    json(res, 200, appearance)
+  }
   const base = await shippedPlugins('public')
   const source = { kind: 'link', repo: 'example/proof', ref: 'v1.0.0', ref_kind: 'tag', commit: '1'.repeat(40), url: 'https://github.com/example/proof/tree/' + '1'.repeat(40) }
   const proof = { id: 'proof', name: 'Proof plugin', version: '1.0.0', author: 'Fixture contributors', api: 0, kind: ['extension', 'override'], places: ['rail.section', 'app.overlay', 'command', 'message.renderer'], overrides: ['core.message'], touches: { network: [], record: 'read', memory: 'none', server: false }, source,

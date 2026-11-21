@@ -449,13 +449,14 @@ async def main():
         status, body = await http(port, "PATCH", "/v1/settings/appearance",
                                   {"phone": {"mode": "dark", "size": 125},
                                    "desktop": {"mode": "light"}})
-        check("PATCH both kinds at once: merged, desktop size still 90",
-              body == full(("dark", 125, "latte"), ("light", 90, "latte")), body)
+        check("PATCH both kinds at once: shared mode uses desktop on conflict",
+              body == full(("light", 125, "latte"), ("light", 90, "latte")), body)
         stored = json.loads(Path(os.environ["LOAM_HOST_SETTINGS"]).read_text())
         check("persisted under `appearance` in the host settings file",
-              base(stored.get("appearance")) == base(body)
-              and all(stored["appearance"][k]["options"] == {}
-                      for k in ("phone", "desktop")),
+              stored["appearance"]["account"]
+              == {"mode": "light", "theme": "latte", "options": {}}
+              and stored["appearance"]["phone"]["size"] == 125
+              and stored["appearance"]["desktop"]["size"] == 90,
               stored)
         for patch, says in (({}, "name what"),
                             ({"tablet": {"size": 90}}, "not a device kind"),
@@ -488,15 +489,15 @@ async def main():
               "(latte, midnight, plain, sepia-night)" in body.get("error", ""), body)
         status, body = await http(port, "GET", "/v1/settings/appearance")
         check("nothing a refused patch named was written (not even its valid half)",
-              body == full(("dark", 125, "latte"), ("light", 90, "latte")), body)
+              body == full(("light", 125, "latte"), ("light", 90, "latte")), body)
         status, _ = await http(port, "DELETE", "/v1/settings/appearance")
         check("DELETE appearance: 405", status == 405, status)
 
         # -- Themes ----------------------------------------------------------
         status, body = await http(port, "PATCH", "/v1/settings/appearance",
                                   {"desktop": {"theme": "plain"}})
-        check("PATCH desktop theme plain: mode, size and the phone untouched",
-              status == 200 and body == full(("dark", 125, "latte"),
+        check("PATCH desktop theme plain: both themes change, mode and size kept",
+              status == 200 and body == full(("light", 125, "plain"),
                                              ("light", 90, "plain")), body)
         status, body = await http(port, "PATCH", "/v1/settings/appearance",
                                   {"phone": {"theme": "sepia-night", "mode": "light"}})
@@ -515,25 +516,23 @@ async def main():
             "phone": {"mode": "system", "size": 100},
             "desktop": {"mode": "light", "size": 90}}, "other": {"kept": True}}))
         status, body = await http(port, "GET", "/v1/settings/appearance")
-        check("a record from before themes reads as latte, mode and size as stored",
-              body == full(("system", 100, "latte"), ("light", 90, "latte")), body)
+        check("a record from before themes reads as Latte with shared desktop mode",
+              body == full(("light", 100, "latte"), ("light", 90, "latte")), body)
         status, body = await http(port, "PATCH", "/v1/settings/appearance",
                                   {"phone": {"theme": "plain"}})
         stored = json.loads(settings_file.read_text())
         check("its first theme write merges in; the file's other sections kept",
-              base(stored["appearance"]) == base(full(("system", 100, "plain"),
-                                                      ("light", 90, "latte")))
+              base(body) == base(full(("light", 100, "plain"), ("light", 90, "plain")))
               and stored.get("other") == {"kept": True}, stored)
         # A theme removed from the folders after it was chosen: kept on read
         # (the page draws Latte), so it comes back with the folder.
-        stored["appearance"]["desktop"]["theme"] = "gone-away"
+        stored["appearance"]["account"]["theme"] = "gone-away"
         stored["appearance"]["phone"]["theme"] = "../../etc"
         settings_file.write_text(json.dumps(stored))
         status, body = await http(port, "GET", "/v1/settings/appearance")
-        check("a stored theme no longer installed is kept; one not shaped "
-              "like an id reads as latte",
+        check("a stored account theme no longer installed is kept on both devices",
               body["desktop"]["theme"] == "gone-away"
-              and body["phone"]["theme"] == "latte", body)
+              and body["phone"]["theme"] == "gone-away", body)
         status, body = await http(port, "PATCH", "/v1/settings/appearance",
                                   {"desktop": {"size": 100}})
         check("...and an unrelated write does not throw it away",
@@ -563,21 +562,21 @@ async def main():
                                   {"desktop": {"options": {"latte": {
                                       "agent-shapes": "cleo"}}}})
         check("PATCH one desktop option: 200, the other option and all else kept",
-              status == 200 and body == full(("system", 100, "latte"),
+              status == 200 and body == full(("light", 100, "latte"),
                                              ("light", 90, "latte"),
+                                             popts=opts(shapes="cleo"),
                                              dopts=opts(shapes="cleo")), body)
         status, body = await http(port, "PATCH", "/v1/settings/appearance",
                                   {"desktop": {"options": {"latte": {
                                       "agent-colours": "latte-tones"}}}})
-        check("...then the other: both kept, the phone untouched",
-              body == full(("system", 100, "latte"), ("light", 90, "latte"),
-                           dopts=opts("latte-tones", "cleo")), body)
+        check("...then the other: both choices are shared",
+              body == full(("light", 100, "latte"), ("light", 90, "latte"),
+                           popts=opts("latte-tones", "cleo"), dopts=opts("latte-tones", "cleo")), body)
         stored = json.loads(settings_file.read_text())
-        check("only what was chosen is stored, under the kind and the theme",
-              stored["appearance"]["desktop"]["options"]
+        check("only what was chosen is stored, under the account and the theme",
+              stored["appearance"]["account"]["options"]
               == {"latte": {"agent-shapes": "cleo",
-                            "agent-colours": "latte-tones"}}
-              and stored["appearance"]["phone"]["options"] == {}, stored)
+                            "agent-colours": "latte-tones"}}, stored)
         await http(port, "PATCH", "/v1/settings/appearance",
                    {"desktop": {"theme": "plain"}})
         status, body = await http(port, "PATCH", "/v1/settings/appearance",
@@ -589,19 +588,19 @@ async def main():
                                       "agent-shapes": "rounded-square"}}}})
         check("a theme and another theme's option in one write",
               body["phone"]["theme"] == "plain"
-              and body["phone"]["options"] == opts(shapes="rounded-square"), body)
+              and body["phone"]["options"] == opts("latte-tones", "rounded-square"), body)
         # Concurrent writes of different leaves: none lost.
         leaves = [("phone", "agent-colours", "latte-tones"),
                   ("phone", "agent-shapes", "cleo"),
-                  ("desktop", "agent-shapes", "distinct"),
-                  ("desktop", "agent-colours", "palette")]
+                  ("desktop", "latte-mug", "off"),
+                  ("desktop", "latte-inside", "initials")]
         await asyncio.gather(*(http(port, "PATCH", "/v1/settings/appearance",
                                     {k: {"options": {"latte": {o: c}}}})
                                for k, o, c in leaves))
         status, body = await http(port, "GET", "/v1/settings/appearance")
         check("four concurrent writes of different leaves: all four kept",
-              body["phone"]["options"] == opts("latte-tones", "cleo")
-              and body["desktop"]["options"] == opts("palette", "distinct"), body)
+              body["phone"]["options"] == body["desktop"]["options"]
+              == opts("latte-tones", "cleo", "off", "initials"), body)
         before = body
         for patch, says in (
                 ({"desktop": {"options": {}}}, "naming at least one"),
@@ -629,21 +628,21 @@ async def main():
               body)
         # A choice the theme no longer offers, and a theme no longer installed.
         stored = json.loads(settings_file.read_text())
-        stored["appearance"]["phone"]["options"]["latte"]["agent-shapes"] = "triangle"
-        stored["appearance"]["phone"]["options"]["gone-away"] = {"tint": "blue"}
+        stored["appearance"]["account"]["options"]["latte"]["agent-shapes"] = "triangle"
+        stored["appearance"]["account"]["options"]["gone-away"] = {"tint": "blue"}
         settings_file.write_text(json.dumps(stored))
         status, body = await http(port, "GET", "/v1/settings/appearance")
         check("a choice no longer offered reads as the default; a gone theme's "
               "choices are not shown",
-              body["phone"]["options"] == opts("latte-tones", "distinct"), body)
+              body["phone"]["options"] == opts("latte-tones", "distinct", "off", "initials"), body)
         await http(port, "PATCH", "/v1/settings/appearance",
                    {"phone": {"options": {"latte": {"agent-colours": "palette"}}}})
         stored = json.loads(settings_file.read_text())
         check("...and both are kept in the file, for when they come back",
-              stored["appearance"]["phone"]["options"].get("gone-away")
+              stored["appearance"]["account"]["options"].get("gone-away")
               == {"tint": "blue"}
-              and stored["appearance"]["phone"]["options"]["latte"]["agent-shapes"]
-              == "triangle", stored["appearance"]["phone"])
+              and stored["appearance"]["account"]["options"]["latte"]["agent-shapes"]
+              == "triangle", stored["appearance"]["account"])
         # Every choice of every option Latte's PLUGIN.md declares, both kinds:
         # through the page's route, then read back by a fresh GET (a reload),
         # then through a persona's `set` (the parity rule), then read back.
@@ -654,7 +653,8 @@ async def main():
                     status, body = await http(port, "PATCH", "/v1/settings/appearance",
                                               {kind: {"options": {"latte": {o["id"]: c}}}})
                     _, again = await http(port, "GET", "/v1/settings/appearance")
-                    if (status != 200 or body[kind]["options"]["latte"][o["id"]] != c
+                    if (status != 200 or any(body[k]["options"]["latte"][o["id"]] != c
+                                             for k in ("phone", "desktop"))
                             or again != body):
                         missed.append(("page", kind, o["id"], c, status, body))
         check("every choice of every Latte option, both kinds, saves through "
@@ -709,7 +709,27 @@ async def main():
             "desktop": {"mode": "light", "size": 90, "theme": "latte"}}}))
         status, body = await http(port, "GET", "/v1/settings/appearance")
         check("a record from before options: every default, the rest as stored",
-              body == full(("dark", 110, "latte"), ("light", 90, "latte")), body)
+              body == full(("light", 110, "latte"), ("light", 90, "latte")), body)
+
+        legacy_phone = {"mode": "dark", "size": 110, "theme": "plain",
+                        "options": {"latte": {"agent-colours": "latte-tones", "agent-shapes": "cleo"}}}
+        legacy_desktop = {"size": 90, "theme": "latte",
+                          "options": {"latte": {"agent-shapes": "rounded-square"}}}
+        settings_file.write_text(json.dumps({"appearance": {
+            "phone": legacy_phone, "desktop": legacy_desktop}}))
+        status, body = await http(port, "GET", "/v1/settings/appearance")
+        migrated = opts("latte-tones", "rounded-square")
+        check("legacy migration merges phone-only fields and prefers desktop on conflict",
+              status == 200 and body == full(("dark", 110, "latte"), ("dark", 90, "latte"),
+                                             popts=migrated, dopts=migrated), body)
+        await http(port, "PATCH", "/v1/settings/appearance", {"phone": {"mode": "light"}})
+        stored = json.loads(settings_file.read_text())
+        check("the first account write keeps the legacy theme and options on disk",
+              all(stored["appearance"][k][field] == old[field]
+                  for k, old in (("phone", legacy_phone), ("desktop", legacy_desktop))
+                  for field in ("theme", "options")), stored)
+        await http(port, "PATCH", "/v1/settings/appearance",
+                   {"desktop": {"options": {"latte": {"agent-colours": "palette"}}}})
 
         out = await cli(port, "describe")
         keys = [r["key"] for r in out.get("settings") or []]
@@ -729,7 +749,8 @@ async def main():
               out.get("ok") and out.get("value") == "rounded-square", out)
         status, body = await http(port, "GET", "/v1/settings/appearance")
         check("...the same value the page's GET reads, the other option kept",
-              body["desktop"]["options"] == opts("palette", "rounded-square"), body)
+              body["phone"]["options"] == body["desktop"]["options"]
+              == opts("palette", "rounded-square"), body)
         out = await cli(port, "get", "appearance.phone.options.latte.agent-colours")
         check("get the phone's own option", out.get("value") == "palette", out)
         out = await cli(port, "set", "appearance.phone.options.latte.agent-shapes",
@@ -768,10 +789,10 @@ async def main():
         check("the page's Sun body: desktop mode sun and the place in one PATCH, "
               "rounded to tenths half up as the page rounds",
               status == 200 and body["desktop"]["mode"] == "sun"
-              and body["location"] == home and body["phone"]["mode"] == "system",
+              and body["location"] == home and body["phone"]["mode"] == "sun",
               (status, body))
         status, again = await http(port, "GET", "/v1/settings/appearance")
-        check("...read back by a fresh GET, the phone's mode its own",
+        check("...read back by a fresh GET, the phone shares Sun mode",
               again == body, again)
         status, body = await http(port, "PATCH", "/v1/settings/appearance",
                                   {"phone": {"size": 105}})
@@ -992,8 +1013,8 @@ async def main():
         check("...and the desktop size it did not name is still 90",
               out.get("value") == 90, out)
         out = await cli(port, "get", "appearance.phone.theme")
-        check("...and the phone's theme is its own (latte since the write that "
-              "dropped its malformed id)", out.get("value") == "latte", out)
+        check("...and the phone theme key reads the same choice",
+              out.get("value") == "plain", out)
         out = await cli(port, "set", "appearance.phone.theme", "mocha")
         check("set appearance.phone.theme mocha: the broker's refusal",
               out.get("ok") is False and "installed theme" in out.get("error", ""), out)

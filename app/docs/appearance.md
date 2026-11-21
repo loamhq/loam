@@ -12,13 +12,15 @@ shapes (Each its own, Circle, Rounded square or Latte art). Circle is the
 default; Latte art reveals its Inside and In a mug controls. Mode offers Light, Dark, Sun and
 System; the duplicate rail toggle is removed. Size changes
 live from 75% to 150%, in 5% steps; Reset restores 100%. Desktop Ctrl/Cmd plus,
-minus and zero use the same setting, including while composing.
+minus and zero use the same setting, including while composing. The installed
+theme's page in Settings › Plugins also saves mode and theme options.
 
 The device kind is the primary pointer: coarse is `phone`, everything else is
 `desktop`. Tablets with a coarse primary pointer share phone preferences. A
 resized desktop window keeps desktop preferences. This classification is separate
-from the page's width-based responsive layout. Both modes default to `system`,
-both sizes to 100, and both themes to `latte`; 90% is a choice, not a new default.
+from the page's width-based responsive layout. Size and Sun transition use those
+device kinds. Theme (default `latte`), mode (default `system`) and all theme
+options are account settings shared across devices.
 
 Theme cards support optional package-relative `image` and `image_position`,
 plus `image_dark` and `image_position_dark`. Dark covers follow the resolved
@@ -63,7 +65,7 @@ Autumn alone has separate daylight and evening photographs.
 
 Theme selection, `options.<theme-id>.agent-shapes` and
 `options.<theme-id>.face-content` use the existing
-`GET/PATCH /api/settings/appearance` route for each device kind. Regenerate
+`GET/PATCH /api/settings/appearance` route through either device alias. Regenerate
 the persona handoff with `node tools/appearance-registry.js --write`; verify it
 with `--check`. [Palette derivations, captures and verification](evidence/five-themes/README.md)
 record the original approved colours and deployment limits. The subsequent
@@ -131,13 +133,16 @@ Authenticated `GET /v1/settings/appearance` returns the whole appearance value:
 ```
 
 Authenticated `PATCH /v1/settings/appearance` atomically merges named fields in
-one or both device kinds and returns **200 with the whole value**. For example:
+one or both device rows and returns **200 with the whole value**. For example:
 
 ```json
 { "desktop": { "size": 90 } }
 ```
 
-This must retain the desktop mode and both phone values. Reject unknown device
+This preserves the shared mode, theme and options, and the phone's size. Both
+device rows read back the same shared fields. A PATCH may name either row for a
+shared field. If both rows name different values for a shared field or option,
+the desktop value wins. Reject unknown device
 kinds/fields, an empty patch, modes outside `light|dark|sun|system`, theme IDs outside the installed catalog, booleans or
 non-integer sizes, and sizes outside 75–150 or not divisible by 5 with 400 and
 `{"error":"a sentence"}`. Both routes use bearer authentication and no-store.
@@ -219,9 +224,9 @@ occurs on load, on a timer or when choosing Sun again with a saved location.
 reverse-geocoding request. A persona selecting Sun without a location uses the
 time-zone fallback without opening a browser permission prompt.
 
-Mode remains per device kind. **Location is shared**, so phone and desktop use
-one home location, including its calendar/time zone, rather than taking competing
-GPS readings. The precise host extension uses `PATCH /api/settings/appearance`:
+**Mode and location are shared**, so phone and desktop use the same mode and
+home location, including its calendar and time zone. System mode still follows
+each device's colour scheme. The route is `PATCH /api/settings/appearance`:
 
 ```json
 {
@@ -299,14 +304,11 @@ registry. No deployment belongs to this change.
 
 A theme uses the existing route, for example
 `PATCH /v1/settings/appearance {"desktop":{"theme":"plain"}}`.
-The host must accept/persist this field for each device kind, fill `latte` for
-older records, merge it without changing mode/size, and expose the two new
-registry entries through the same persona settings tool. Unknown theme IDs
-should produce the host's ordinary 400 sentence. The installed IDs currently
-are `latte` and `plain`; future external theme installation must register new
-IDs with the host using the same catalog. This job changes no host files and
-cannot verify whether that extension is installed. A refusal remains visible
-and retryable in Appearance, as with any failed settings write.
+The host accepts either device alias, defaults to `latte`, and keeps the mode
+and sizes when the theme changes. The persona settings tool uses the same route.
+The installed catalog contains `latte`, `plain`, and available installed themes.
+The host rejects an unknown ID with 400. The UI shows refused writes and offers
+a retry.
 
 The public pre-paint script includes only sanitized appearance fields and the
 installed manifest catalog. Unknown/stale saved IDs fall back to Latte. Both
@@ -329,7 +331,7 @@ instant switches without CSS requests, host writes and fresh-navigation reads.
 
 ## Per-theme options
 
-`options` is a per-device map keyed by theme id, then option id. It retains each
+`options` is an account-wide map keyed by theme id, then option id. It retains each
 theme’s choices while other themes are selected. Missing or obsolete values use
 manifest defaults; unknown fields never enter the public boot script. Root
 `data-option-<id>` attributes apply the active theme’s choices before paint and
@@ -368,7 +370,7 @@ tints change by mode. See [restoration evidence](evidence/original-agent-palette
 Latte's fourth **Agent shapes** choice is **Latte art**. It hides **Agent
 colours** and reveals **In a mug** (on by default) and **Inside: Pour / Initials**
 (Pour by default). Other shapes retain the saved colour choice. Switching themes
-retains all three art preferences, separately for phone and desktop.
+retains all three art preferences across devices.
 
 `public/latte-avatar.js` draws eight static inline SVG pours: heart, tulip,
 rosetta, monk's head, swirl, twin hearts, leaf and plain round. FNV-1a over the
