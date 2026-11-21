@@ -321,7 +321,7 @@ const RECORD = {
 const posted = []
 // The vault's terms as the host answers them. `null` is a host older than the
 // route, which says `405`; a string is a 404's words — a host without the
-// route yet, or no note; an object is the answer. `NOTE` is the host that
+// route yet, or no note; an object is the JSON answer. `NOTE` is the host that
 // parses the note and sends its terms; `WHOLE_NOTE` is the host of
 // 2026-09-30, which sends the note whole for the page to read.
 const NOTE = {
@@ -381,7 +381,7 @@ const termsAnswer = (req, res) => {
       res.writeHead(404, { 'content-type': 'application/json', 'cache-control': 'no-store' })
       return res.end(JSON.stringify({ error: termsNote }))
     }
-    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+    res.writeHead(termsNote.error ? 404 : 200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
     res.end(JSON.stringify(termsNote))
   }
 const termsSeen = []
@@ -1592,7 +1592,8 @@ test('the Names and terms card: the note’s path, how many terms, when they wer
   assert.equal(find(terms(), 'termsnote').nodeName, 'DIV')
   assert.equal(text(find(terms(), 'termsnote')), 'Notes/Dictation terms.md')
   assert.equal(text(find(terms(), 'termsmeta')), '11 terms · read under a minute ago')
-  assert.equal(text(terms()), 'Names and termsNotes/Dictation terms.md11 terms · read under a minute agoEdit the note in Obsidian; every take reads it fresh.')
+  assert.match(text(terms()), /Record first sends these terms to the transcriber/)
+  assert.match(text(terms()), /Add one name or term per line. Each recording reads the note fresh\./)
   assert.deepEqual(inputsIn(terms()), [], 'there is still a field to type terms in')
   assert.equal(all(terms(), 'chip').length, 0)
   assert.equal(find(terms(), 'oldterms'), null)
@@ -1603,7 +1604,7 @@ test('the Names and terms card: the note’s path, how many terms, when they wer
   before = asked()
   await openDictation()
   await until(() => asked() > before && find(terms(), 'termsnote')?.nodeName === 'A')
-  assert.equal(find(terms(), 'termsnote').getAttribute('href'), WHOLE_NOTE.obsidian_url)
+  assert.equal(find(terms(), 'termsnote').getAttribute('href'), '/files/vault/System/Dictation%20terms.md')
   assert.equal(text(find(terms(), 'termsmeta')), '11 terms · read under a minute ago')
   await closeSettings()
 
@@ -1612,11 +1613,16 @@ test('the Names and terms card: the note’s path, how many terms, when they wer
   for (const answer of ['no such route', null]) {
     termsNote = answer
     await openDictation()
-    await until(() => /No names and terms note yet/.test(text(card('Names and terms'))))
-    assert.equal(text(card('Names and terms')), 'Names and termsNo names and terms note yet. Add one to your vault to help dictation spell your names.')
+    await until(() => /This install has no terms note location in Files/.test(text(terms())))
+    assert.equal(find(terms(), 'pillbtn'), null)
     assert.equal(find(card('Names and terms'), 'warn'), null, `a missing route (${answer ?? 405}) was drawn as a fault`)
     await closeSettings()
   }
+  termsNote = { error: 'No dictation terms note', path: 'System/Dictation terms.md' }
+  await openDictation()
+  await until(() => text(find(terms(), 'pillbtn')) === 'Create terms note')
+  assert.match(text(terms()), /Create the note at System\/Dictation terms\.md/)
+  await closeSettings()
   termsNote = NOTE
 })
 
@@ -1678,9 +1684,11 @@ test('Live makes the next press the browser’s recogniser, and Record and clean
   const modes = () => all(card('Mode'), 'segmented')[0].childNodes
   assert.deepEqual(modes().map(text), ['Record first', 'As you speak'])
   assert.equal(modes()[0].getAttribute('class'), 'on')
+  const recordingChoices = held()
   modes()[1].fire('click')
   await until(() => modes()[1].getAttribute('class') === 'on')
-  assert.equal(held().mode, 'browser')
+  assert.deepEqual(cards().map(c => text(find(c, 'kicker'))), ['Mode'])
+  assert.deepEqual(held(), { ...recordingChoices, mode: 'browser' })
   await closeSettings()
 
   const recorders = FakeRecorder.last
@@ -1696,7 +1704,9 @@ test('Live makes the next press the browser’s recogniser, and Record and clean
 
   await openDictation()
   modes()[0].fire('click')
-  await until(() => held().mode === 'record')
+  await until(() => held().mode === 'record' && card('Polish'))
+  assert.deepEqual(cards().map(c => text(find(c, 'kicker'))), ['Mode', 'Polish', 'Longest recording', 'Microphone', 'Names and terms'])
+  assert.deepEqual(held(), recordingChoices)
   await closeSettings()
   mic().fire('click')
   await until(() => FakeRecorder.last !== recorders && FakeRecorder.last.state === 'recording')
@@ -1711,7 +1721,7 @@ test('removing the last key sends the next mic press to browser recognition and 
   try {
     await openDictation()
     await until(() => text(find(root, 'speech-provider')).includes('Using this browser'))
-    assert.equal(find(card('Polish'), 'segmented'), null)
+    assert.deepEqual(cards().map(c => text(find(c, 'kicker'))), ['Mode'])
     assert.equal(held().mode, 'record')
     await closeSettings()
     field().value = ''

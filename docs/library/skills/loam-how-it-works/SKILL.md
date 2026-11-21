@@ -71,6 +71,8 @@ shows the latest board with a button to reapply the edit.
 
 **Dictation and Read aloud.** These Market plugins work without a key in browsers that support speech recognition or speech synthesis, respectively. With a server key, they select Google first and OpenAI second. A provider error stays with that provider. Each plugin’s settings show the active provider. The Gemini key guide walks through creating, checking and saving a shared key. Dictation can suggest it once after a take that used browser recognition. Record first and Polish, spoken Briefs and generated table descriptions need a server key.
 
+From Dictation 1.2.3, Record first shows Polish, the recording limit, microphone selection and Names and terms. Create or open the terms note in Files from that card. Add one name or term per line. Record first reads it fresh for each take and sends the terms to the transcriber. As you speak uses browser recognition and keeps your Record first preferences for when you switch back.
+
 The session host runs the provider and records its
 output as it arrives. The thread worker turns that output into the reply the
 app shows. Before sending a turn, the worker saves the input, the bound

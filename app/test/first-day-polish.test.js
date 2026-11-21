@@ -219,7 +219,7 @@ test('4. dictation without a key says a Gemini key is needed and goes to where i
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { language: 'en-GB', mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }), enumerateDevices: async () => [], addEventListener() {}, removeEventListener() {} } } })
   const field = h('textarea')
   const state = { rec: null, takeNotice: null, dictation: { mode: 'record', maxMinutes: 5, deviceId: null, polish: 'light', terms: [] }, mics: { loaded: false, list: [], named: false, error: '' },
-    termsNote: { loaded: true, found: false, path: null, url: null, terms: [], readAt: null, error: '' } }
+    termsNote: { loaded: true, found: false, path: null, vaultPath: null, terms: [], readAt: null, error: '' } }
   const host = { ...helpers, h, icon: new Proxy({}, { get: () => () => h('span') }), draft: field, editorDraft: field, fileField: field, root: h('div'), state, store: { dictation: state.dictation },
     schedule() {}, captureStarted() {}, audioSessionType() {}, sense() {}, screen: { hold() {}, release() {}, shown() {} }, caretPoint: () => ({ x: 0, y: 0 }), readField: (f) => ({ value: f.value, caret: f.value.length }), setMarkdown() {},
     activeThread: () => null, threads: { defaultName: () => null }, longAgo: () => 'a moment',
@@ -236,8 +236,10 @@ test('4. dictation without a key says a Gemini key is needed and goes to where i
     assert.doesNotMatch(text(notice), /Couldn’t clean/)
     find(notice, 'noticerow-act').fire('click')
     assert.deepEqual(went, [['plugins', 'dictation']], 'straight to the Dictation plugin, where its key goes')
-    assert.equal(service.TERMS_NOT_CONNECTED, 'No names and terms note yet. Add one to your vault to help dictation spell your names.')
-    assert.doesNotMatch(service.TERMS_NOT_CONNECTED, /not connected/)
+    state.termsNote = { loaded: true, found: false, vaultPath: 'System/Dictation terms.md', error: '' }
+    const terms = service.termsCard()
+    assert.equal(text(find(terms, 'pillbtn')), 'Create terms note')
+    assert.match(text(terms), /Create the note at System\/Dictation terms\.md/)
   } finally {
     service.discardTake?.(); service.stopLive?.(); service.dispose?.()
     globalThis.MediaRecorder = realRecorder

@@ -36,7 +36,9 @@ test('GET /terms answers the note whole and uncached, fresh each time; 404 when 
   t.after(() => shut(app.server))
   let res = await fetch(`${app.url}/terms`)
   assert.equal(res.status, 404)
-  assert.match((await res.json()).error, /no dictation terms note/)
+  const missing = await res.json()
+  assert.match(missing.error, /no dictation terms note/)
+  assert.equal(missing.path, '99_SYSTEM/Dictation terms.md')
 
   await fsp.writeFile(note, '# Dictation terms\n\nAda, Grace Hopper\n')
   res = await fetch(`${app.url}/terms`)
