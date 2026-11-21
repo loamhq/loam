@@ -41,8 +41,6 @@
 .side-pane .tt-head .agentbtn { flex:none; }
 .side-pane .tt-head .agentbtn .blob { width:32px !important; height:32px !important; }
 .side-pane .tt-head .headspace { display:none; }
-.side-pane .apps-frame { min-height:0; }
-.side-pane .apps-toolbar { display:none; }
 .side-pane .fs-edtitle,.side-pane .fs-titles > .fs-sub { display:none; }
 .side-pane .fs-file > .fs-titles { padding-block:0; }
 .row-side-action { opacity:0; transition:opacity 160ms; flex:none; color:var(--paper-ink-3); }

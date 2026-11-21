@@ -72,7 +72,8 @@ test('plugin apps use local paths, all three source groups and icons; unavailabl
     apps.open({ ...plugin, ...patch }, null, { routed: true })
     assert.equal(all(apps.view(), 'apps-embed').length, 0)
     assert.match(text(apps.view()), /Off|Failing|Starting|Stopped/)
-    assert.doesNotMatch(text(apps.view()), /Open in browser/)
+    all(find(apps.view(), 'apps-toolbar'), 'iconbtn').find(node => node.getAttribute('aria-label') === 'App actions').fire('click')
+    assert.equal(all(apps.view(), 'setrow').map(text).join(''), 'Copy link')
   }
   assert.deepEqual(opened, [])
 })

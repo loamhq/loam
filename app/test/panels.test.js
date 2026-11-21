@@ -165,3 +165,9 @@ test('one navigation model covers Places, links, overlays, deep links and reload
   assert.deepEqual(stdout.trim().split('\n'), ['1440 light passed', '1440 dark passed', '390 light passed', '390 dark passed'])
   t.diagnostic(stdout.trim())
 })
+
+test('open apps keep one header row, share menu dismissal and return to the opening panel in Chromium', { skip: !process.env.LOAM_PLAYWRIGHT, timeout: 90000 }, async t => {
+  const { stdout } = await promisify(execFile)(process.execPath, ['test/app-viewer-browser.mjs'], { timeout: 80000 })
+  assert.deepEqual(stdout.trim().split('\n'), ['390 light passed', '390 dark passed', '1440 light passed', '1440 dark passed'])
+  t.diagnostic(stdout.trim())
+})

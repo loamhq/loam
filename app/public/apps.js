@@ -5,6 +5,7 @@ import { formatCalendarDate } from './time.js'
 import { h, icon } from './ui.js'
 import { emptyState } from './empty-state.js'
 import { menuSurface } from './menu-surface.js'
+import { historyBackButton } from './panel-history.js'
 import { AGENT_COLOURS } from './avatar-colours.js'
 
 export function appURL(value) {
@@ -68,9 +69,10 @@ export function buildAppThread(threads, agents = []) {
 }
 
 export function createApps({ registry = createCoreRegistry(), api, redraw, wide, avatar, agentName, newThread,
-  openBrowser = url => globalThis.open(url, '_blank', 'noopener,noreferrer'), copy, side = () => null, navigate = null, isCurrent = () => true, leave = null, historyButton = () => null }) {
-  const st = { details: null, media: new Map(), readyImages: new Set(), failedImages: new Set(), apps: [], loaded: false, loading: false, error: '', selected: null, copied: false, copyError: '' }
-  let request = 0, returnTo = null, mediaRequest = 0, mediaTimer, pressTimer, press, suppressedURL, suppressedUntil = 0
+  openBrowser = url => globalThis.open(url, '_blank', 'noopener,noreferrer'), copy, side = () => null, navigate = null, isCurrent = () => true, leave = null,
+  historyButton = () => null, panel = 'main', panelControls = null }) {
+  const st = { details: null, actionsFor: null, media: new Map(), readyImages: new Set(), failedImages: new Set(), apps: [], loaded: false, loading: false, error: '', selected: null, copied: false, copyError: '' }
+  let request = 0, copyRequest = 0, returnTo = null, mediaRequest = 0, mediaTimer, pressTimer, press, suppressedURL, suppressedUntil = 0
   async function load({ list = false } = {}) {
     const ticket = ++request
     st.loading = true; st.error = ''; redraw()
@@ -86,22 +88,32 @@ export function createApps({ registry = createCoreRegistry(), api, redraw, wide,
     } finally { if (ticket === request) { st.loading = false; redraw() } }
   }
   function open(app, node, { routed = false } = {}) {
-    if (appUnavailable(app) && !wide()) return
+    if (appUnavailable(app) && !wide() && !routed) return
     if (!routed && !appUnavailable(app)) Promise.resolve(api('POST', '/apps/open', { url: app.url })).catch(() => {})
     const embeddedPlugin = app.kind === 'plugin' && canFrame(app) && navigate
     if ((!wide() && !routed && !embeddedPlugin) || !canFrame(app)) return openBrowser(appURL(app.url))
     if (navigate && !routed) return navigate({ kind: 'app', app })
-    st.selected = app; st.copied = false; st.copyError = ''; returnTo = node; redraw()
+    st.selected = app; st.actionsFor = null; returnTo = node; resetCopy(); redraw()
   }
   function back() {
     if (leave) return leave()
     st.selected = null; redraw()
     requestAnimationFrame(() => (returnTo?.isConnected ? returnTo : document.querySelector('.apps-row'))?.focus?.())
   }
-  async function copyLink(app = st.details ?? st.selected) {
+  function resetCopy() {
     st.copyError = ''; st.copied = false
-    try { const url = appURL(app.url); st.copied = await copy(url.startsWith('/') ? new URL(url, globalThis.location.origin).href : url); if (!st.copied) st.copyError = 'The link could not be copied.' }
-    catch { st.copyError = 'The link could not be copied.' }
+    return ++copyRequest
+  }
+  async function copyLink(app = st.details ?? st.selected) {
+    const ticket = resetCopy()
+    let copied = false
+    try {
+      const url = appURL(app.url)
+      copied = await copy(url.startsWith('/') ? new URL(url, globalThis.location.origin).href : url)
+    } catch { /* Report a failed clipboard write in the menu. */ }
+    if (ticket !== copyRequest) return
+    st.copied = copied
+    st.copyError = copied ? '' : 'The link could not be copied.'
     redraw()
   }
   async function loadMedia(attempt = 0, ticket = ++mediaRequest) {
@@ -170,7 +182,14 @@ export function createApps({ registry = createCoreRegistry(), api, redraw, wide,
     return { label: days < 0 ? 'Ended' : days === 0 ? 'Ends today' : `${days}d left`, date: formatCalendarDate(expiry, { month: 'short', day: 'numeric', year: 'numeric' }) }
   }
   const accessLabel = app => ({ private: 'Private', public: 'Public', shared: 'Shared' }[app.access] || app.access)
-  function showDetails(app) { st.details = app; st.copied = false; st.copyError = ''; redraw() }
+  function showDetails(app) { st.details = app; resetCopy(); redraw() }
+  function actionItems(app, className, onBrowse = null) {
+    return [!appUnavailable(app) ? h('a', { class: className, href: appURL(app.url), target: '_blank', rel: 'noopener noreferrer', onclick: onBrowse }, icon.external(16), 'Open in browser') : null,
+      h('button', { class: className, type: 'button', onclick: () => copyLink(app) }, icon.copy(16), 'Copy link')]
+  }
+  function copyStatus() {
+    return h('p', { class: 'apps-copy-status', role: 'status', text: st.copyError || (st.copied ? 'Copied' : '') })
+  }
   function row(app) {
     const unavailable = appUnavailable(app), expiry = expiresSoon(app)
     const selected = wide() && isCurrent() && st.selected?.url === app.url
@@ -205,25 +224,41 @@ export function createApps({ registry = createCoreRegistry(), api, redraw, wide,
       h('div', { class: 'apps-details-identity' }, appPicture(app), h('div', {}, h('p', { class: 'apps-details-author' }, ...author(app)), h('p', { class: 'muted', text: [accessLabel(app), appUnavailable(app)].filter(Boolean).join(' · ') }))),
       h('p', { class: 'apps-details-address', text: appAddress(app.url) }),
       date ? h('p', { class: 'apps-details-date', text: `${app.expires ? 'Ends' : 'Shared until'} ${date}` }) : null,
-      h('div', { class: 'apps-details-actions' },
-        !appUnavailable(app) ? h('a', { class: 'pillbtn', href: appURL(app.url), target: '_blank', rel: 'noopener noreferrer' }, icon.external(16), 'Open in browser') : null,
-        h('button', { class: 'pillbtn', text: 'Copy link', onclick: () => copyLink(app) })),
-      h('p', { class: 'apps-copy-status', role: 'status', text: st.copyError || (st.copied ? 'Copied' : '') })),
+      h('div', { class: 'apps-details-actions' }, ...actionItems(app, 'pillbtn')),
+      copyStatus()),
       { title: app.name, width: 360, anchor: `[data-app-details=${JSON.stringify(app.url)}]`, close: () => { st.details = null; redraw() } })
   }
+  function frameView(app, url) {
+    const name = app?.name?.trim() || url, unavailable = app && appUnavailable(app)
+    const hasActions = Boolean(app || panelControls)
+    const menuOpen = st.actionsFor === url
+    const anchor = `app-actions-${panel}`
+    const closeMenu = () => { st.actionsFor = null; redraw() }
+    return h('div', { class: 'apps-frame', key: `app:${url}`, 'aria-label': name },
+      h('header', { class: 'panel-history-head apps-toolbar' },
+        historyButton() ?? historyBackButton({ title: 'Back', go: back, shortcut: false }),
+        h('span', { class: 'apps-frame-name', text: name, title: name }),
+        hasActions ? h('button', { id: anchor, class: 'iconbtn ghost', type: 'button', title: 'App actions', 'aria-label': 'App actions',
+          'aria-haspopup': 'dialog', 'aria-expanded': String(menuOpen), onclick: () => {
+            st.actionsFor = menuOpen ? null : url; resetCopy(); redraw()
+          } }, icon.dots(18)) : null),
+      app && !unavailable ? h('iframe', { class: 'apps-embed', key: app.url, src: appURL(app.url), title: name, referrerpolicy: 'strict-origin-when-cross-origin', sandbox: 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads' })
+        : h('div', { class: 'apps-empty', role: 'status' },
+          h('p', { text: unavailable ? `${name} · ${unavailable}` : st.error || 'Opening app…' }),
+          unavailable ? h('p', { class: 'note', text: 'Manage this plugin in Settings › Plugins.' }) : null),
+      menuOpen && hasActions ? menuSurface(h('div', { class: 'popover apps-actions-menu' },
+        ...(app ? actionItems(app, 'setrow', closeMenu) : []),
+        app && panelControls ? h('div', { class: 'popdiv' }) : null,
+        ...(panelControls?.(closeMenu) ?? []), copyStatus()),
+      { title: 'App actions', width: 280, anchor: `#${anchor}`, close: closeMenu }) : null)
+  }
   function view(options = {}) { return registry.component('core.apps', { args: [options], variant: options.list ? 'list' : 'pane', state: st, defaultView: () => builtinView(options) }) }
-  function builtinView({ list = false, collapse = null, empty = false, embedded = false } = {}) {
+  function builtinView({ list = false, collapse = null, empty = false, embedded = false, url = null } = {}) {
     const app = empty ? null : st.selected
-    if (!list && app && (wide() || embedded)) return h('div', { class: 'apps-frame', key: `app:${app.url}`, 'aria-label': app.name },
-      h('div', { class: 'apps-toolbar' },
-        historyButton(),
-        h('span', { class: 'apps-frame-name', text: app.name, title: app.name }),
-        !appUnavailable(app) ? h('a', { class: 'pillbtn apps-frame-action', href: appURL(app.url), target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Open in browser', title: 'Open in browser' }, icon.external(16), h('span', { text: 'Open in browser' })) : null,
-        h('button', { class: 'pillbtn apps-frame-action', title: 'Copy link', 'aria-label': 'Copy link', onclick: () => copyLink(app) }, icon.copy(16), h('span', { text: 'Copy link' })),
-        h('button', { class: 'iconbtn ghost', title: 'Close app', 'aria-label': 'Close app', onclick: back }, icon.close(16)),
-        h('span', { class: 'apps-copy-status', role: 'status', text: st.copyError || (st.copied ? 'Copied' : '') })),
-      appUnavailable(app) ? h('div', { class: 'apps-empty', role: 'status' }, h('p', { text: `${app.name} · ${appUnavailable(app)}` }), h('p', { class: 'note', text: 'Manage this plugin in Settings › Plugins.' }))
-        : h('iframe', { class: 'apps-embed', key: app.url, src: appURL(app.url), title: app.name, referrerpolicy: 'strict-origin-when-cross-origin', sandbox: 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads' }))
+    if (!list && (url || app && (wide() || embedded))) {
+      const address = url ?? app.url
+      return frameView(app?.url === address ? app : null, address)
+    }
     const none = st.loaded && !st.apps.length && !st.error
     const noApps = () => emptyState({ object: 'window', title: 'No apps yet', body: firstUseActive() ? 'The apps you build and install live here.' : 'An agent can build an app for you.',
       action: h('button', { class: 'pillbtn primary', text: 'Build an app', onclick: newThread }), props: { class: 'apps-empty' } })

@@ -126,18 +126,27 @@ card with a 44px target. Long-press and right-click also open the shared details
 sheet/menu:
 author, access, address, full end date, Open in browser and Copy link. No
 ownership/access/end-date information is removed from that details view.
-The toolbar anchor and button share the same
-aligned, non-underlined pill layout. Unknown owners retain
-their supplied ID. An empty catalog offers to start a thread to build an app.
+Unknown owners retain their supplied ID. An empty catalog offers to start a
+thread to build an app.
 404/405 shows an unavailable message and retry, rather than the empty catalog.
 
 At desktop width the catalog occupies the left list column, beside an empty
 “Pick an app” main pane or the selected app. A frameable HTTPS site on a
 subdomain of the configured apps domain opens in the main pane; its row's
 panel icon or Alt/Option-click opens it to the side, following the shared
-[panel rules](wide-panels.md). Its bar shows Back when the panel has history, the app address, Open in browser,
-Copy link and Close app. Closing returns to the catalog. Copying reports its result. Other origins, `frame:false`, and
-all phone rows open a separate browser tab. Unsafe protocols and credentialed
+[panel rules](wide-panels.md). Installed plugin apps with a local `/x/` URL
+also open in the phone workspace. The app viewer has a single row with Back,
+the catalog name (or the URL if the name is missing), and **App actions**.
+Long names truncate in the header. The viewer menu shares **Open in browser**
+and **Copy link** with the Apps card menu. On a phone it opens as a bottom
+sheet, and on desktop it anchors at the button. Opening in a browser closes
+the menu. Copy feedback appears in the menu. Back returns to the previous
+panel item or the list that opened the app.
+The side viewer menu includes **Open as the main panel**, **Swap the two
+panels**, and **Close side panel**. [Browser captures](evidence/app-viewer/README.md)
+
+Sites outside the configured Apps domain and rows with `frame:false` open in
+a browser tab. Phone rows for sites also open in a browser tab. Unsafe protocols and credentialed
 URLs are rejected. Frames have accessible titles and a sandbox permitting
 scripts, same-origin site storage, forms, downloads and external links, while
 preventing navigation of this app's top-level page.

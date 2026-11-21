@@ -155,7 +155,7 @@ function mainPane() {
   const empty = at ? null : h('div', { class: 'pane-body', key: 'empty-main' },
     host.registry.draw('app.overlay', { slot: 'player' }),
     emptyState({ object: 'window', title: 'Choose an item', body: 'Open a chat, file or app from the list.' }))
-  const back = at && (!['file', 'thread', 'profile', 'app', 'directory'].includes(at.kind) || (at.kind === 'app' && !host.apps.st.selected)) ? host.backButton('main') : null
+  const back = at && !['file', 'thread', 'profile', 'app', 'directory'].includes(at.kind) ? host.backButton('main') : null
   return renderPanel({ host, item: at, empty, header: back ? h('header', { class: 'panel-history-head' }, back) : null,
     before: host.state.collapsed ? [h('button', { class: 'iconbtn showbar', key: 'show-sidebar', title: 'Show sidebar', onclick: () => setCollapsed(false) }, icon.panelLeft(18))] : [] })
 }

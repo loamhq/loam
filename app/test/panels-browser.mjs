@@ -403,6 +403,7 @@ try {
         await page.evaluate(() => { document.documentElement.style.setProperty('--ui-scale', '1'); __panels.schedule() })
         await side.waitFor()
       }
+      await side.getByRole('button', { name: 'App actions', exact: true }).click()
       await side.getByRole('button', { name: 'Open as the main panel', exact: true }).click()
       await main.locator('.apps-embed').waitFor()
       await page.evaluate(b => __panels.panels.openSide({ kind: 'thread', id: b }), b)

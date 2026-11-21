@@ -18,6 +18,9 @@ have never met.
 - **Panel and list navigation** is specified in the [workspace navigation guide](../docs/wide-panels.md#back-and-forward).
   The phone tab bar belongs to the visible list root, even when a panel stays mounted behind it.
   Keep navigation changes in the surface history. Reconstructing a whole workspace from a tab or the address bar can tear down another pane's live editor.
+- **App viewers** share the card’s browser and copy actions in the same menu
+  shell. Back walks the owning panel’s history. The side viewer’s menu can
+  close the full panel from any step in that history. See the [browser captures](../docs/evidence/app-viewer/README.md).
 - **Vault file deletion** requires the broker capability and endpoint in
   [the Files deletion contract](../docs/files-deletion.md). After confirmation
   from the broker, remove the file from both panels’ visit trails so Back and

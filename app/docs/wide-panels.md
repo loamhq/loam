@@ -21,7 +21,8 @@ the chat. Ordinary web links open in a new tab. Links in a Files preview
 navigate the containing panel.
 Either pane can open the same item independently. Promote and Swap are available for distinct destinations. Opening a row in main
 leaves the side document mounted, even when both now show that row.
-The side header offers Promote, Swap, item actions and Close. The file menu
+The side header offers Promote, Swap, item actions and Close. The app viewer
+groups those actions in its ⋯ menu. The file menu
 contains view modes, copy and download actions where available. For HTML
 previews it also offers **Reload**, plus **Open in new tab** when a live URL
 is available. On a phone these HTML actions are in **This file** when the preview
@@ -32,7 +33,8 @@ Apps uses the same list column as Chats and Files. Its grouped inventory stays
 on the left while a chosen app fills main. An empty main panel offers the same
 invitation to choose an item across all lists. The selected row identifies main and a quiet panel mark identifies
 side. Opening main's app in side creates an independently mounted frame. A site which could not be embedded in main cannot be embedded in side.
-Phone Apps retains its catalog and browser-tab behavior.
+Phone Apps embeds installed plugin apps with a local `/x/` URL. Site rows
+open a browser tab.
 On desktop, Activity and Settings open as app-wide dialogs above both panels.
 Their links out use main-panel navigation and its save guard.
 Board and Tasks retain their existing sheet components.

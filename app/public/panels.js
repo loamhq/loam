@@ -119,7 +119,14 @@ export function createPanels({ main, side, width = () => layoutPixels(globalThis
   function showSidebar() { st.sidebar = true; notify() }
   function split(value) { st.split = Math.max(32, Math.min(68, value)); notify() }
   const action = (label, glyph, run, disabled = false) => h('button', { class: 'iconbtn ghost', type: 'button', title: label, 'aria-label': label, onclick: run, disabled }, glyph)
-  function controls() { return [action('Open as the main panel', icon.arrowLeft(18), promote, sameItem()), action('Swap the two panels', icon.swap(18), swap, sameItem() || main.pending?.() || side.pending?.()), action('Close side panel', icon.close(16), closeAnimated)] }
+  function controls({ closeMenu } = {}) {
+    const control = (label, glyph, run, disabled) => closeMenu
+      ? h('button', { class: 'setrow', type: 'button', disabled, onclick: () => { closeMenu(); run() } }, glyph, label)
+      : action(label, glyph, run, disabled)
+    return [control('Open as the main panel', icon.arrowLeft(18), promote, sameItem()),
+      control('Swap the two panels', icon.swap(18), swap, sameItem() || main.pending?.() || side.pending?.()),
+      control('Close side panel', icon.close(16), closeAnimated)]
+  }
   function affordance(item) {
     if (!available()) return null
     return action('Open to the side', icon.panelRight(16), event => { event.stopPropagation(); openSide(item) })

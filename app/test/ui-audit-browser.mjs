@@ -986,7 +986,7 @@ try {
             n.src = n.src
           })
           await shot('app-framed-error')
-          await page.getByRole('button', { name: 'Close app', exact: true }).click()
+          await page.locator('.apps-toolbar').getByRole('button', { name: 'Back', exact: true }).click()
         } else {
           const popup = page.waitForEvent('popup')
           await page.locator('.apps-row').first().click()

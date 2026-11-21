@@ -15,7 +15,7 @@ export function registerPage(loam) {
   for (const entry of [
     { id: 'thread', render: ({ host }) => host.threads.pane() },
     { id: 'file', render: ({ host, panel, fileTools }) => panel === 'main' ? host.filesPane() : host.filePanelView(fileTools) },
-    { id: 'app', render: ({ host }) => host.apps.view() },
+    { id: 'app', render: ({ host, item }) => host.apps.view({ url: item.url ?? item.app?.url }) },
     { id: 'directory', render: ({ host, item }) => host.directoryView(item.id) },
     { id: 'catalog', render: ({ host }) => host.apps.view({ list: true }) },
     { id: 'profile', render: ({ host }) => host.profilePane() },

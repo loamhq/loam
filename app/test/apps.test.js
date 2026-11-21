@@ -85,16 +85,33 @@ test('fallback letters use the distinguishing part of a family name', () => {
   const names = ['Atlas', 'Atlas-bench', 'Atlas demo', 'Atlas_design', 'Atlas.maps'].map((name, i) => ({ name, url: `https://app-${i}.example.org` }))
   assert.deepEqual(names.map(app => appLetter(app, names)), ['A', 'B', 'D', 'S', 'M'])
 })
-test('wide framing keeps one iframe, names it, and offers copy and browser escape', async () => {
+test('the app viewer names its iframe and offers browser and copy actions in the shared menu', async () => {
   const { apps, opened, copied } = setup(); await apps.load()
   apps.open(catalog.apps[0])
   const view = apps.view(), frame = all(view, 'apps-embed')[0]
   assert.ok(frame); assert.equal(frame.getAttribute('title'), 'Garden')
   assert.equal(text(all(view, 'apps-frame-name')[0]), 'Garden')
   assert.equal(frame.getAttribute('src'), catalog.apps[0].url)
-  assert.match(text(view), /Open in browserCopy link/)
-  await apps.copyLink(); assert.deepEqual(copied, [catalog.apps[0].url]); assert.match(text(apps.view()), /Copied/)
+  const toolbar = find(view, 'apps-toolbar')
+  assert.deepEqual(all(toolbar, 'iconbtn').map(node => node.getAttribute('aria-label')), ['Back', 'App actions'])
+  assert.doesNotMatch(text(view), /Open in browser|Copy link/)
+  all(toolbar, 'iconbtn')[1].fire('click')
+  const menu = find(apps.view(), 'apps-actions-menu')
+  assert.equal(menu.getAttribute('data-menu-anchor'), '#app-actions-main')
+  assert.match(text(menu), /Open in browserCopy link/)
+  all(menu, 'setrow').find(node => text(node) === 'Copy link').fire('click')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(copied, [catalog.apps[0].url]); assert.match(text(apps.view()), /Copied/)
+  menu.fire('menudismiss')
+  assert.equal(find(apps.view(), 'apps-actions-menu'), null)
   apps.open(catalog.apps[1]); assert.deepEqual(opened, [catalog.apps[1].url])
+})
+test('a route uses the path while the catalog resolves and for a missing display name', () => {
+  const { apps } = setup({ wide: false }), url = '/x/example/'
+  assert.equal(text(find(apps.view({ url }), 'apps-frame-name')), url)
+  assert.match(text(apps.view({ url })), /Opening app…/)
+  apps.open({ name: '', url, kind: 'plugin', on: true, state: 'running' }, null, { routed: true })
+  assert.equal(find(apps.view({ url }), 'apps-embed').getAttribute('title'), url)
 })
 test('desktop list stays available beside the chosen app; the empty main never repeats the catalog', async () => {
   const { apps } = setup(); await apps.load()
@@ -113,7 +130,8 @@ test('all phone rows open in a separate browser and copy failures remain visible
   for (const app of catalog.apps) apps.open(app)
   assert.deepEqual(opened, catalog.apps.map(app => app.url)); assert.equal(all(apps.view(), 'apps-embed').length, 0)
   const failed = setup({ copy: async () => { throw new Error('clipboard denied') } })
-  failed.apps.open(catalog.apps[0]); await failed.apps.copyLink()
+  failed.apps.open(catalog.apps[0]); all(find(failed.apps.view(), 'apps-toolbar'), 'iconbtn')[1].fire('click')
+  await failed.apps.copyLink()
   assert.match(text(failed.apps.view()), /link could not be copied/)
 })
 test('an app list beside another main document does not mark its earlier app as current', async () => {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 
 // Shared computed-style check: tokens are resolved by the browser itself.
-export async function auditControls(page, selector = '.apps-row, .apps-toolbar button, .apps-toolbar a, .apps-page .pillbtn, .settings-utility, .activity-item, .activity-filter select, .tt-persona-card :is(button, a[href], input, select, textarea, [role=button])') {
+export async function auditControls(page, selector = '.apps-row, .apps-toolbar button, .apps-actions-menu .setrow, .apps-page .pillbtn, .settings-utility, .activity-item, .activity-filter select, .tt-persona-card :is(button, a[href], input, select, textarea, [role=button])') {
   await page.mouse.move(0, 0)
   return page.evaluate((selector) => {
     const root = document.documentElement, colors = new Set(['rgba(0, 0, 0, 0)'])

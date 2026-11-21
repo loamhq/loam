@@ -10,7 +10,7 @@ test('Apps explicitly resets native button surfaces and gives anchors the same p
   assert.match(row, /background:(?:transparent|var\(--paper-pane\))/)
   assert.match(row, /border:0;/)
   assert.ok(Number(/min-height:(\d+)px/.exec(row)[1]) >= 44)
-  assert.match(css, /\.apps-toolbar \.pillbtn[^}]+text-decoration:none/)
+  assert.match(css, /\.apps-details \.pillbtn[^}]+text-decoration:none/)
 })
 test('staging defects are held by real computed styles at both widths, themes and modes', {
   skip: !process.env.LOAM_PLAYWRIGHT ? 'Set LOAM_PLAYWRIGHT and a working Chromium to run the computed-style matrix.' : false,

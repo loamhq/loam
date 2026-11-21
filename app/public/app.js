@@ -452,7 +452,7 @@ function goApps({ link = false } = {}) {
 }
 function appsScreen({ list = false } = {}) {
   const embedded = !list && state.mainItem?.kind === 'app'
-  return h('div', { class: 'screen apps-screen', key: 'screen:apps' }, apps.view({ embedded, empty: !embedded }), embedded ? null : page.nav())
+  return h('div', { class: 'screen apps-screen', key: 'screen:apps' }, apps.view({ embedded, empty: !embedded, url: embedded ? state.mainItem.url : null }), embedded ? null : page.nav())
 }
 
 let importRequest = 0
