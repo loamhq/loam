@@ -12,6 +12,7 @@ import sys
 import tempfile
 import zlib
 from pathlib import Path
+from unittest.mock import patch
 
 scratch = tempfile.TemporaryDirectory(prefix="loam-reply-images-")
 TMP = Path(scratch.name)
@@ -218,6 +219,16 @@ before = record.read_bytes()
 check("dry-run finds the recoverable images without editing the record",
       threads.backfill_reply_images(legacy, dry_run=True) == [("m1", 1, 1), ("m2", 2, 0)]
       and record.read_bytes() == before)
+store = VAULT / threads.REPLY_ATTACHMENTS
+files_before = set(store.rglob("*.png"))
+with patch.object(threads, "_write_atomic", side_effect=OSError("test failed write")):
+    try:
+        threads.backfill_reply_images(legacy)
+    except OSError:
+        check("a failed record write removes its unreferenced copies",
+              set(store.rglob("*.png")) == files_before and record.read_bytes() == before)
+    else:
+        check("a failed record write is reported", False)
 check("backfill repairs existing attachments and previously ignored captures",
       threads.backfill_reply_images(legacy) == [("m1", 1, 1), ("m2", 2, 0)])
 after = record.read_bytes()
@@ -234,6 +245,10 @@ check("missing source and owner upload metadata are preserved",
       first["attachments"][1] == gone and owner["attachments"] == [old])
 check("running the backfill twice leaves the record unchanged on the second run",
       threads.backfill_reply_images(legacy) == [("m1", 0, 1)] and record.read_bytes() == after)
+check("the broker's migration remembers completion",
+      threads.migrate_reply_images() == {
+          "errors": {}, "threads": {legacy: {"m1": {"copied": 0, "unavailable": 1}}},
+      } and threads.migrate_reply_images() is None)
 
 print(f"\n{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)

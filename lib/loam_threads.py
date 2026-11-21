@@ -543,7 +543,7 @@ def attachment_path(a: dict) -> str:
     return str((AI_LABS if a.get("root") == "spaces" else VAULT) / path)
 
 
-def _save_reply_image(attachment: dict, day: str) -> dict:
+def _save_reply_image(attachment: dict, day: str, *, created: list[Path] | None = None) -> dict:
     """Publish a complete, uniquely named copy before the record refers to it."""
     import loam_broker as cfg  # noqa: PLC0415
     source = Path(attachment_path(attachment))
@@ -565,6 +565,8 @@ def _save_reply_image(attachment: dict, day: str) -> dict:
         tmp.write(data)
         tmp.flush()
         os.link(tmp.name, target)
+    if created is not None:
+        created.append(target)
     saved = {**attachment, "root": "vault", "path": str(target.relative_to(VAULT)),
              "size": len(data)}
     saved.pop("width", None)
@@ -1035,6 +1037,7 @@ def backfill_reply_images(thread_id: str, *, dry_run: bool = False) -> list[tupl
     """
     import loam_files as files  # noqa: PLC0415
     changes = []
+    created: list[Path] = []
     with locked(VAULT):
         path = record_path(thread_id, save_index=False)
         raw = path.read_bytes().decode("utf-8")
@@ -1087,7 +1090,7 @@ def backfill_reply_images(thread_id: str, *, dry_run: bool = False) -> list[tupl
                         fd, _, _, _ = _open_image(source)
                         os.close(fd)
                     else:
-                        repaired = _save_reply_image(attachment, day)
+                        repaired = _save_reply_image(attachment, day, created=created)
                         if not repaired.get("refs") and (original := inline_refs.get((root, attachment["path"]))):
                             repaired["refs"] = original
                         repaired.pop("missing", None)
@@ -1105,9 +1108,35 @@ def backfill_reply_images(thread_id: str, *, dry_run: bool = False) -> list[tupl
             if fixed or unavailable:
                 changes.append((mid, fixed, unavailable))
         if not dry_run and any(fixed for _, fixed, _ in changes):
-            _write_atomic(path, "\n".join(lines))
+            try:
+                _write_atomic(path, "\n".join(lines))
+            except OSError:
+                for target in created:
+                    target.unlink(missing_ok=True)
+                raise
             _CACHE.pop(str(path), None)
     return changes
+
+
+def migrate_reply_images() -> dict | None:
+    """The thread writer's one-time upgrade of older image references."""
+    name = "reply-images-v1.json"
+    if _state_path(name).is_file():
+        return None
+    changed, errors = {}, {}
+    for thread_id in sorted(rebuild_index(save=False)):
+        try:
+            rows = backfill_reply_images(thread_id)
+        except (OSError, UnicodeError, ThreadError) as exc:
+            errors[thread_id] = str(exc)
+            continue
+        if rows:
+            changed[thread_id] = {mid: {"copied": fixed, "unavailable": missing}
+                                  for mid, fixed, missing in rows}
+    result = {"threads": changed, "errors": errors}
+    if not errors:
+        save_state(name, result)
+    return result
 
 
 _UNSET = object()

@@ -3630,6 +3630,8 @@ async def serve(addr: str, port: int, remote_path=None) -> int:
     # keeping its switch, voices, keys and preferences
     # (lib/loam_to_market.py). Off the loop, and fail-soft.
     asyncio.create_task(keep_moved_to_market())
+    # The thread writer owns both the attachment store and record metadata.
+    asyncio.create_task(migrate_thread_images())
     tcp = await asyncio.start_server(server.handle, addr, port)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -3664,6 +3666,15 @@ async def serve(addr: str, port: int, remote_path=None) -> int:
     else:
         await shutdown(broker, server)
     return 0
+
+
+async def migrate_thread_images() -> None:
+    try:
+        result = await asyncio.to_thread(threads_rec.migrate_reply_images)
+        if result is not None:
+            print("thread-images: " + json.dumps(result, sort_keys=True), file=sys.stderr, flush=True)
+    except Exception as exc:  # noqa: BLE001 - never the reason a broker is down
+        print(f"thread-images: migration failed ({exc!r})", file=sys.stderr, flush=True)
 
 
 async def keep_listed_themes() -> None:

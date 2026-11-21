@@ -3035,9 +3035,10 @@ the same dated `loam-ui` store, with unique names. The writer can read
 images from the vault, AI Spaces (including scratch), `/tmp`, and engineer
 job `captures/` folders. Each attachment keeps its Markdown destinations
 in `refs` for placement and points to its saved copy for download. Files
-keeps its usual visibility rules. On an existing installation, run
-`bin/backfill-thread-images --dry-run` to see what can be recovered, then
-`bin/backfill-thread-images` to update attachment metadata in place.
+keeps its usual visibility rules. On its first startup with this change,
+the broker recovers older attachments whose source still exists and writes
+only their metadata comments. Its journal and the thread state's
+`reply-images-v1.json` record the result.
 
 - **The name is sanitised into a name.** Directory parts go (both separators —
   a Windows browser sends backslashes), anything that is not a letter, digit,
