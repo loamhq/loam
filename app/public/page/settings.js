@@ -290,8 +290,8 @@ function settingsChats({ back = true } = {}) {
       h('div', { class: 'setrow chat-send-setting' },
         h('div', { class: 'setrow-who' },
           h('label', { for: 'chat-send-key', class: 'setrow-title', text: 'Send messages with' }),
-          h('div', { id: 'chat-send-help', class: 'setrow-sub', text: keys.value === 'modifier'
-            ? 'Enter starts a new line.' : 'Shift+Enter starts a new line.' })),
+          h('div', { id: 'chat-send-help', class: 'setrow-sub', text: keys.mobile ? 'Return adds a line here.'
+            : keys.value === 'modifier' ? 'Enter starts a new line.' : 'Shift+Enter starts a new line.' })),
         h('select', { id: 'chat-send-key', class: 'field-input', 'aria-describedby': 'chat-send-help',
           disabled: keys.writing || keys.value === null, value: keys.value ?? '',
           onchange: event => keys.set(event.currentTarget.value) },

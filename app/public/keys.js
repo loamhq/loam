@@ -49,7 +49,7 @@ export function composerKeys({ api, changed, nav = globalThis.navigator, initial
     catch (e) { error = e.message }
     finally { writing = false; changed() }
   }
-  return { get value() { return value }, get writing() { return writing }, get error() { return error },
+  return { mobile, get value() { return value }, get writing() { return writing }, get error() { return error },
     get hint() { return sendHint(mac, value, mobile) },
     get modifierLabel() { return mac ? '⌘ + Enter' : 'Ctrl + Enter' },
     sends: event => sends(event, value, mobile), refresh, set }
