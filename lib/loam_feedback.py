@@ -382,8 +382,8 @@ def draft(kind: str, title: str, body: str, *, patch: bool | str = False,
     if diagnostics:
         import loam_report_diagnostics as diag
         sections.append(diag.bounded(clean(diag.collect(at)), diag.LIMIT))
-    sections.append(clean(f"---\n{install_line()}. Written by an agent on a Loam install and "
-                          "sent by its owner, with personal details taken out."))
+    sections.append(f"---\n{clean(install_line())}. Written by an agent on a Loam install and "
+                    "sent by its owner, with personal details taken out.")
     clean_body = "\n\n".join(sections)
     url = issue_url(clean_title, clean_body, kind)
     fits = len(url) <= URL_LIMIT

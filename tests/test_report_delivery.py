@@ -126,6 +126,31 @@ repo = "test/loam"
             assert path.endswith("/git/ref/tags/1.0.1")
             return {"ref": "refs/tags/1.0.1"}
 
+        # Exercise the maintainer adapter as well as the HTTP/client flow.
+        # The GitHub transport here is entirely in-process.
+        import loam_github_app as github
+        from loam_report_relay import file_issue
+        created = []
+        def api(method, path, token, body=None, ok=()):
+            assert token == "fixture"
+            if method == "GET":
+                assert path.startswith("/repos/test/loam/labels/")
+                return 404, {}
+            if path == "/repos/test/loam/labels":
+                created.append(body["name"])
+                return 201, body
+            assert path == "/repos/test/loam/issues" and created == issues[0]["labels"]
+            assert body == issues[0]
+            return 201, {"number": 42}
+
+        with patch.object(github, "load", return_value={}), \
+                patch.object(github, "route", return_value=({}, {"installation_id": 7})), \
+                patch.object(github, "_mint", return_value={"token": "fixture"}) as mint, \
+                patch.object(github, "api", side_effect=api):
+            assert file_issue("test/loam", issues[0]) == 42
+            mint.assert_called_once_with({}, 7, {"repositories": ["loam"],
+                                                 "permissions": {"issues": "write"}})
+        print("PASS  bot adapter creates missing labels and requests only issues-write for one repo")
         import loam_attention
         loam_attention.STATE = folder / "attention"
         said = []

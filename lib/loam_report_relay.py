@@ -5,6 +5,7 @@ import json
 import re
 import sqlite3
 import time
+import urllib.parse
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -53,6 +54,17 @@ def file_issue(repository, payload):
         token = app._mint(slot, inst["installation_id"], {
             "repositories": [repository.split("/")[1]], "permissions": {"issues": "write"},
         })["token"]
+        # Fresh repositories may lack both the origin label and "idea".
+        # Create them only when the live relay has an approved report.
+        labels_path = f"/repos/{repository}/labels"
+        for label in payload["labels"]:
+            path = labels_path + "/" + urllib.parse.quote(label, safe="")
+            status, _ = app.api("GET", path, token, ok=(200, 404))
+            if status == 404:
+                status, _ = app.api("POST", labels_path, token,
+                                    {"name": label, "color": "536c83"}, ok=(201, 422))
+                if status == 422:
+                    app.api("GET", path, token)  # another worker may have created it
     except app.IntegrationError as exc:
         raise BeforeSubmission from exc
     _, issue = app.api("POST", f"/repos/{repository}/issues", token, body=payload)

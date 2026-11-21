@@ -192,7 +192,8 @@ On the maintainers’ install, `bin/report-relay` binds only to 127.0.0.1
 and prints its URL. It dry-runs issue creation by default.
 `--file-issues` switches to the GitHub App installation for
 `feedback.repo` and requests only issues-write for that one repository.
-The upstream labels are the report kind and `sent-from-Loam`. The relay
+The upstream labels are the report kind and `sent-from-Loam`. The filing
+relay creates missing labels when it receives the first approved report. The relay
 accepts a versioned Loam preview, rechecks privacy, and limits the UTF-8
 request to 64 KiB, five submissions per random install ID per day and
 200 total per day. A public client format cannot authenticate an install.
