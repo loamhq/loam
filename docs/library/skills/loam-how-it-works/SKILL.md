@@ -45,7 +45,19 @@ the Loam release.
 **Threads.** The owner talks with agents in threads. Loam writes each
 thread's record into the vault as it happens (never edit one). A message
 that tags nobody goes to the thread's default agent; `@Name` gives that
-agent a turn. Each thread has a board, a Markdown file of items for the
+agent a turn. Starting from an agent gives the thread that agent. The plain
+**New thread** starts without one. Your first individual tag sets the default,
+with **Undo** beside the message. An unaddressed message stays as a note.
+Pick an agent beneath it to have that agent answer the saved message and
+future messages. Pin a thread from its row (hold on a phone) or its details.
+General always stays pinned. Hello can be unpinned.
+
+Attach MP4, MOV or WebM by choosing, dropping or pasting a file. The upload
+limit is 10 MiB per file. The video stays in Files and can play in the thread
+when the browser supports its codec. Antigravity can read the video. Claude
+Code and Codex receive its path.
+
+Each thread has a board, a Markdown file of items for the
 owner in the vault's inbox. Open **Board** in the thread header. Tap a card to edit its words, or use
 **Add a note** in any section. New cards show their date and author. Drag a
 card to reorder it (hold first on touch), or use its menu to move it, set an
