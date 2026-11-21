@@ -2071,7 +2071,7 @@ def push_pending(project: eng.Project) -> dict | None:
             if not local or not remote or local == remote or not wt.is_ancestor(
                     repo, remote, local):
                 return None
-            pushed = wt.push_origin(repo)
+            pushed = wt.push_origin(project)
             return {"project": project.name, "push": local[:7],
                     "pushed": pushed is True,
                     "error": None if pushed is True else str(pushed)[:300]}

@@ -113,7 +113,7 @@ try:
     check("gate: the receipt says the push was held, and by what",
           "held by the push gate" in text and "someone-else" in text, True)
     check("gate: the sweep's push is held the same way",
-          wt.push_origin(proj.root).startswith("held by the push gate"), True)
+          wt.push_origin(proj).startswith("held by the push gate"), True)
     check("gate: the hand commit is never re-authored",
           git(proj.root, "merge-base", "--is-ancestor", hand, "main") == "", True)
     # Taken by hand (the person decided): origin has it, so it is not asked again.
@@ -151,7 +151,7 @@ try:
     held = git(proj.root, "rev-parse", "main")
     check("landed earlier: the gate would hold it",
           bool(wt.push_gate(proj.root, origin_main(origin))), True)
-    pushed = wt.push_origin(proj.root)
+    pushed = wt.push_origin(proj)
     check("landed earlier: the sweep's push re-authors it and pushes",
           (pushed, git(proj.root, "log", "-1", "--format=%an|%s", "main"),
            origin_main(origin) == git(proj.root, "rev-parse", "main"),
@@ -159,7 +159,8 @@ try:
            git(proj.root, "status", "--porcelain")),
           (True, f"{NAME}|landed while the gate came on", True, True, ""))
     check("landed earlier: a second push changes nothing",
-          (wt.push_origin(proj.root), wt.reauthor_landed(proj.root, origin_main(origin))),
+          (wt.push_origin(proj),
+           wt.reauthor_landed(proj.root, origin_main(origin), expected=(NAME, EMAIL))),
           (True, None))
 
     # Identity right, deny list clean: pushed.

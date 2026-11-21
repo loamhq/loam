@@ -16,7 +16,7 @@ connected, one box: **Also open pull requests as me**.
 
     settings set git.identity null        # Default (how every install starts)
     settings set git.identity '{"name": "Ada Lovelace", "email": "ada@example.org"}'
-    settings set git.identity neutral     # always "<project> engineer", no note
+    settings set git.identity neutral     # use the checkout identity, no note
     settings set git.identity github      # the box: Default, and pull requests as you
 
 ### The default
@@ -57,9 +57,9 @@ accounts.
   address to the account, and your real address never appears in them.
 - A typed name and address are used exactly as given. A provider's address
   is refused.
-- `neutral` is the opt-out: commits carry the engineer's identity,
-  `<project> engineer <engineer+<project>@noreply.local>`, and no note asks
-  for more.
+- `neutral` is the opt-out: commits use the checkout identity, normally
+  `<project> engineer <engineer+<project>@noreply.local>`. The project can
+  still designate its own person.
 - `github` is a snapshot of the account as it was when chosen, and it is the
   only setting that lets the owner's own token open a pull request (below).
 
@@ -72,21 +72,19 @@ The first rule that applies wins:
 1. **The project's person.** A project record's `commit_identity`
    (`lib/loam_commit_identity.py`) is for a repository shared with other
    people. It has stricter rules of its own.
-2. **The repository's own identity.** This is the canonical checkout's
-   `user.name` and `user.email` when someone set them on purpose: anything
-   other than the default that `bin/provision` writes. A checkout with the
-   push gate on (`loam.pushGate`) always keeps its own identity, because the
-   gate checks commits against it.
-3. **The owner's setting**, or with nothing set the default, described
-   above.
-4. **The engineer's identity**: with the prompt, unless the owner chose
-   `neutral`.
+2. **The owner's setting**, or the default described above when the
+   setting is unset.
+3. **The canonical checkout's identity** when there is no effective owner
+   identity. Provisioning sets `<project> engineer` as the fallback. If
+   that fallback takes over because Loam could not resolve an owner, the
+   job receipt explains how to set one.
 
-So a project or repository override, and the gated public Loam checkout's
-neutral `Loam engineer`, are never replaced by the default.
-
-Both author and committer get the chosen identity. So does the landing's
-merge commit, which is made in the job's tree.
+The job's commits and the launcher's merge commit use the same identity
+for author and committer. On shared checkouts with `loam.pushGate` enabled,
+the gate checks both metadata fields against that resolved identity. The
+deny list still scans commit messages, paths and added lines for private
+names and other local details. A name approved for commit metadata can
+still be held when it appears in those places.
 
 ## Provider attribution
 

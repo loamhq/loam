@@ -1,5 +1,5 @@
-"""Resolve commit attribution in order: project identity, explicit checkout identity,
-owner setting, then the engineer fallback. For example, an explicit owner setting
+"""Resolve commit attribution in order: project identity, owner setting, then the
+checkout identity as fallback. For example, an explicit owner setting
 can be {"source": "typed", "name": "Example Author", "email": "author@example.org"}.
 The setting {"source": "neutral"} opts out of owner attribution.
 
@@ -300,11 +300,9 @@ def engineer_default(name: str, email: str) -> bool:
         and (name or "").lower().endswith(" engineer")
 
 
-def resolve(project_identity: dict | None, repo_identity: tuple[str, str],
-            gated: bool, owner: dict | None = None) -> dict:
+def resolve(project_identity: dict | None, repo_identity: tuple[str, str]) -> dict:
     """``{"name", "email", "source"}`` for a job (see the module doc for the
-    order). ``owner`` defaults to ``effective()``: the explicit choice, else
-    the default; pass ``False`` for "none". ``source`` is one of
+    order). ``source`` is one of
     ``project``, ``repo``, ``owner``, ``engineer``, or ``none`` when even the
     checkout has no identity (the commit will fail, as before). ``why`` says,
     for ``engineer``, whether the owner opted out (``neutral``) or which
@@ -312,19 +310,15 @@ def resolve(project_identity: dict | None, repo_identity: tuple[str, str],
     if project_identity:
         return {"name": project_identity["name"],
                 "email": project_identity["email"], "source": "project"}
-    name, email = repo_identity
-    if name and email and (gated or not engineer_default(name, email)):
-        return {"name": name, "email": email, "source": "repo"}
-    how, why = "chosen", prompt()
-    if owner is None:
-        owner, how, why = effective()
-    elif owner is False:
-        owner, how = None, "missing"
+    owner, how, why = effective()
     if owner:
         return {"name": owner["name"], "email": owner["email"], "source": "owner",
                 "via": owner["source"], "default": how == "default",
                 **({"login": owner["login"]} if owner.get("login") else {})}
+    name, email = repo_identity
     if name and email:
+        if not engineer_default(name, email):
+            return {"name": name, "email": email, "source": "repo"}
         return {"name": name, "email": email, "source": "engineer", "why": how,
                 "prompt": why}
     return {"name": "", "email": "", "source": "none", "why": how, "prompt": why}

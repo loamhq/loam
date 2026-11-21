@@ -146,20 +146,21 @@ try:
 
     # -- The order ---------------------------------------------------------
     eng_id = ("demo engineer", "engineer+demo@noreply.local")
+    repo_id = ("Ada Repo", "ada@repo.example")
     person = {"name": "Pat", "email": "9+pat@users.noreply.github.com", "github_login": "pat"}
+    set_owner(OWNER)
     check("order: a project's person first",
-          gi.resolve(person, ("Ada Repo", "ada@repo.example"), True, OWNER)["source"], "project")
-    check("order: a gated checkout keeps its own identity",
-          gi.resolve(None, ("Loam engineer", "engineer+loam@noreply.local"), True, OWNER)["source"], "repo")
-    check("order: a repository identity set on purpose",
-          gi.resolve(None, ("Ada Repo", "ada@repo.example"), False, OWNER)["name"], "Ada Repo")
+          gi.resolve(person, repo_id)["source"], "project")
+    check("order: the owner's setting wins over a repository-local identity",
+          gi.resolve(None, repo_id)["name"], "Ada Lovelace")
     check("order: the owner's over provision's default",
-          gi.resolve(None, eng_id, False, OWNER)["name"], "Ada Lovelace")
+          gi.resolve(None, eng_id)["name"], "Ada Lovelace")
+    set_owner(None)
     check("order: nothing set is the engineer, never a provider",
-          gi.resolve(None, eng_id, False, {})["source"], "engineer")
+          gi.resolve(None, eng_id)["source"], "engineer")
+    check("order: without an owner identity the checkout can supply one",
+          gi.resolve(None, repo_id)["source"], "repo")
     bea = {"source": "typed", "name": "Bea Second", "email": "bea@second.example"}
-    check("order: a second install's owner gets their own name",
-          gi.resolve(None, eng_id, False, bea)["name"], "Bea Second")
 
     # -- A fresh install: nothing set --------------------------------------
     set_owner(None)
@@ -251,12 +252,12 @@ try:
           git(proj.root, "merge-base", "--is-ancestor", signed, "main") == "", True)
     check("signed: the landing says it kept it", result.get("signed_kept"), [signed[:10]])
 
-    # -- A repository's own identity, and a project's person, win ----------
+    # -- The owner's setting and a project's person ------------------------
     proj_r, _ = make("explicit", ident=("Ada Repo", "ada@repo.example"))
     r = start(proj_r, "20261118-100000-00000005")
-    check("explicit repo: the job commits as the repository says",
+    check("explicit repo: the job still commits as the owner",
           (r["attribution"]["source"], git(Path(r["path"]), "config", "user.name")),
-          ("repo", "Ada Repo"))
+          ("owner", "Ada Lovelace"))
     proj_p, _ = make("person", record_extra={"commit_identity": person})
     r = start(proj_p, "20261118-100000-00000006")
     check("project person: the job commits as the project's person",
@@ -354,26 +355,25 @@ try:
            "Choose one" in r["attribution"]["summary"]), ("engineer", True, True))
     profile["value"] = {"status": "unreachable", "login": "ada", "error": "x"}
     check("unreachable: the engineer, never a guessed address",
-          gi.resolve(None, ("demo engineer", "engineer+demo@noreply.local"),
-                     False)["source"], "engineer")
+          gi.resolve(None, eng_id)["source"], "engineer")
 
     # No connection: a global git identity only if it is already a no-reply.
     profile["value"] = {"status": "missing"}
     eng_id = ("demo engineer", "engineer+demo@noreply.local")
     gi.GLOBAL_GIT_SOURCE = lambda: ("Ada Box", "ada.private@example.org")
     check("privacy: a private global address is never used",
-          gi.resolve(None, eng_id, False)["source"], "engineer")
+          gi.resolve(None, eng_id)["source"], "engineer")
     gi.GLOBAL_GIT_SOURCE = lambda: ("Ada Box", "77+ada@users.noreply.github.com")
-    got = gi.resolve(None, eng_id, False)
+    got = gi.resolve(None, eng_id)
     check("git-config: a global no-reply identity is the default",
           (got["source"], got["via"], got["name"]), ("owner", "git-config", "Ada Box"))
     gi.GLOBAL_GIT_SOURCE = lambda: ("Claude", "noreply@anthropic.com")
     check("git-config: a provider's global identity is not",
-          gi.resolve(None, eng_id, False)["source"], "engineer")
+          gi.resolve(None, eng_id)["source"], "engineer")
     profile["value"] = {"status": "ambiguous", "logins": ["a", "b"]}
     gi.GLOBAL_GIT_SOURCE = lambda: ("Ada Box", "77+ada@users.noreply.github.com")
     check("git-config: not consulted when two accounts are connected",
-          gi.resolve(None, eng_id, False)["source"], "engineer")
+          gi.resolve(None, eng_id)["source"], "engineer")
     gi.GLOBAL_GIT_SOURCE = lambda: ("", "")
     profile["value"] = dict(ADA_PROFILE)
 
@@ -388,7 +388,7 @@ try:
           ("neutral", "neutral", None))
     set_owner(bea)
     check("explicit typed wins over the default",
-          gi.resolve(None, eng_id, False)["name"], "Bea Second")
+          gi.resolve(None, eng_id)["name"], "Bea Second")
     set_owner(None)
     view = gi.public()
     check("view: unset is the default, with what commits carry",
@@ -397,15 +397,41 @@ try:
     check("setting: neutral and default round-trip",
           (gi.validate({"identity": "neutral"}), gi.validate({"identity": "default"}),
            gi.validate({"identity": None})), ({"source": "neutral"}, None, None))
-    proj_g, _ = make("gated-default", ident=("Loam engineer", "engineer+loam@noreply.local"))
+    neutral = ("Loam engineer", "engineer+loam@noreply.local")
+    proj_g, origin_g = make("gated-default", ident=neutral)
+    deny = root / "gated-deny"
+    deny.write_text("Ada Lovelace\n")
     git(proj_g.root, "config", "loam.pushGate", "true")
+    git(proj_g.root, "config", "loam.pushDeny", str(deny))
     r = start(proj_g, "20261118-110000-00000007")
-    check("gated: the neutral repository identity is kept over the default",
+    check("gated: a new clone uses the owner's GitHub default",
           (r["attribution"]["source"], git(Path(r["path"]), "config", "user.name")),
-          ("repo", "Loam engineer"))
+          ("owner", "Ada Lovelace"))
+    commit(r, "legacy.txt", "Work from an older job" + CLAUDE, who=neutral, verify=False)
+    (proj_g.root / "other.txt").write_text("main moved\n")
+    git(proj_g.root, "add", "other.txt")
+    git(proj_g.root, "commit", "-qm", "Main moved while the job ran")
+    git(proj_g.root, "push", "-q", "origin", "main")
+    before = git(origin_g, "rev-parse", "main")
+    result = land(proj_g, r)
+    landed = git(origin_g, "rev-parse", "main")
+    check("gated: the older job commit and the merge push as the owner",
+          (result["state"], result["pushed"], result["reauthored"],
+           git(origin_g, "rev-parse", "main^1"),
+           people(origin_g, "main") + people(origin_g, "main^2")),
+          ("landed", True, True, before, [f"{want} / {want}"] * 2))
+    check("gated: the job's provider trailers were removed",
+          bodies(origin_g, f"{before}..{landed}"),
+          [f"Land {r['branch']}", "Work from an older job"])
+    r = start(proj_g, "20261118-110000-00000009")
+    commit(r, "private.txt", "Mention Ada Lovelace in prose")
+    result = wt.land(proj_g, r, "Land privacy check", keep_tree=True)
+    check("gated: the deny list still holds the owner's name in a message",
+          (result["state"], result["reason"], git(origin_g, "rev-parse", "main")),
+          ("not_landed", "gate", landed))
     proj_rp, _ = make("repo-default", ident=("Ada Repo", "ada@repo.example"))
-    check("repo override: a repository's own identity wins over the default",
-          start(proj_rp, "20261118-110000-00000008")["attribution"]["source"], "repo")
+    check("repo fallback: the GitHub default wins over a repository identity",
+          start(proj_rp, "20261118-110000-00000008")["attribution"]["source"], "owner")
 
     # The default is metadata only: it never makes the owner the PR actor.
     import loam_github_app as gh  # noqa: E402

@@ -194,13 +194,15 @@ def deny_rules(repo: Path, deny: Path | None = None
 
 
 def push_gate(repo: Path, since: str | None, deny: Path | None = None,
-              head: str = MAIN, objects: Path | None = None) -> list[str]:
+              head: str = MAIN, objects: Path | None = None, *,
+              expected: tuple[str, str] | None = None) -> list[str]:
     """Why `head` may not be pushed past `since` (what the remote has; None
     for a remote that has nothing). Empty when it may. ``deny`` defaults to
     the checkout's `loam.pushDeny`. ``objects`` is the repository the
     commits are read from when it is not ``repo`` (a landing asks of the
     job's clone before the canonical checkout has its commits); the
-    identity and the deny list are always ``repo``'s."""
+    deny list always comes from ``repo``. The launcher passes the resolved job
+    identity as ``expected``; a standalone check uses the checkout identity."""
     objects = objects or repo
     spec = [f"{since}..{head}"] if since else [head]
     commits = git(objects, "rev-list", "--reverse", *spec, check=False).stdout.split()
@@ -209,7 +211,7 @@ def push_gate(repo: Path, since: str | None, deny: Path | None = None,
     if len(commits) > GATE_COMMITS:
         return [f"{len(commits)} commits to push, more than the gate reads "
                 f"({GATE_COMMITS}); push them by hand after checking them"]
-    name, email = identity(repo)
+    name, email = expected if expected is not None else identity(repo)
     want = f"{name} <{email}>"
     big, allows, problems = deny_rules(repo, deny)
     for sha in commits:
@@ -218,8 +220,7 @@ def push_gate(repo: Path, since: str | None, deny: Path | None = None,
         author, committer, body = (meta.split("\0", 2) + ["", ""])[:3]
         for role, who in (("author", author), ("committer", committer)):
             if who != want:
-                problems.append(f"{sha[:7]}: {role} is {who!r}, not this "
-                                f"checkout's {want!r}")
+                problems.append(f"{sha[:7]}: {role} is {who!r}, expected {want!r}")
         if not big:
             continue
         for m in big.finditer(body):
@@ -319,23 +320,25 @@ def remake(repo: Path, since: str, head: str, pick) -> str:
 def reauthor(repo: Path, since: str, head: str, name: str, email: str) -> str:
     """`head` with every commit in `since..head` made again as ``name
     <email>``: same tree, message, parents (mapped) and dates. A commit that
-    already has the identity comes out as itself, so this is idempotent.
-    Returns the new head; refs are not touched."""
+    already has the identity comes out as itself. If the range contains a
+    signed commit, return the original head so its signature stays valid."""
     want = (name, email)
+    has_signature = False
 
-    def pick(_sha, author, committer, message, _signed):
+    def pick(_sha, author, committer, message, signed):
+        nonlocal has_signature
+        has_signature |= signed
         if author == want and committer == want:
             return None
         return name, email, message
-    return remake(repo, since, head, pick)
+    new = remake(repo, since, head, pick)
+    return head if has_signature else new
 
 
 def job_identity(project: eng.Project, repo: Path) -> dict:
-    """Whose name this project's job commits as (lib/loam_git_identity.resolve):
-    the project's person, the repository's own identity, the owner's, or the
-    engineer's when none is set."""
+    """Resolve the project's person, the owner, or the checkout fallback."""
     return loam_git_identity.resolve(loam_commit_identity.of(project.record),
-                                     identity(repo), gate_on(repo))
+                                     identity(repo))
 
 
 def remote_tips(repo: Path) -> list[str]:
@@ -346,14 +349,13 @@ def remote_tips(repo: Path) -> list[str]:
     return sorted(set(out))
 
 
-def settle_commits(project: eng.Project, repo: Path, tree: Path, branch: str,
+def settle_commits(want: dict, repo: Path, tree: Path, branch: str,
                    main_sha: str, say, result: dict | None = None) -> str | None:
     """Set the clone's identity and normalize unpublished commits before merging.
     Preserve signatures. An ungated checkout also preserves human attribution.
     Return the previous tip if the branch moves."""
     if not is_clone(tree):
         return None
-    want = job_identity(project, repo)
     if not want["name"] or not want["email"]:
         return None
     if result is not None:
@@ -416,11 +418,12 @@ def landings_only(repo: Path, since: str) -> bool:
     return False
 
 
-def reauthor_landed(repo: Path, since: str | None) -> tuple[str, str] | None:
+def reauthor_landed(repo: Path, since: str | None, *,
+                    expected: tuple[str, str]) -> tuple[str, str] | None:
     """Re-author the landed commits `origin` lacks when another identity
     holds them and only landings put them there: (old main, new main), or
     None when nothing was done."""
-    name, email = identity(repo)
+    name, email = expected
     head = rev(repo, MAIN)
     if not since or not head or not name or not email \
             or not is_ancestor(repo, since, head) \
@@ -430,6 +433,12 @@ def reauthor_landed(repo: Path, since: str | None) -> tuple[str, str] | None:
     mark = rev(repo, BACKUP_MARK) if has_remote(repo, BACKUP) else None
     if mark and not is_ancestor(repo, mark, since):
         return None         # the off-box copy already took them
+    # A fetched branch other than origin/main can already have part of this range.
+    pending = git(repo, "rev-list", "--count", f"{since}..{head}").stdout
+    unpublished = git(repo, "rev-list", "--count", head, "--not", since,
+                      *remote_tips(repo)).stdout
+    if pending != unpublished:
+        return None
     new = reauthor(repo, since, head, name, email)
     if new == head:
         return None
@@ -439,17 +448,21 @@ def reauthor_landed(repo: Path, since: str | None) -> tuple[str, str] | None:
     return head, new
 
 
-def push_origin(repo: Path) -> bool | str:
+def push_origin(project: eng.Project, *, expected: tuple[str, str] | None = None) -> bool | str:
     """Push `main` to `origin`, through the gate when the checkout has
     one: True, or why not. Gated, it first re-authors landed commits
     (``reauthor_landed``), which may move `main`."""
+    repo = canonical(project)
     problems = []
     if gate_on(repo):
         git(repo, "fetch", "--quiet", "--no-tags", "origin", MAIN, check=False,
             timeout=120)
         since = rev(repo, f"origin/{MAIN}")
-        reauthor_landed(repo, since)
-        problems = push_gate(repo, since)
+        if expected is None:
+            want = job_identity(project, repo)
+            expected = want["name"], want["email"]
+        reauthor_landed(repo, since, expected=expected)
+        problems = push_gate(repo, since, expected=expected)
     if problems:
         shown = "; ".join(problems[:5]) + (
             f"; and {len(problems) - 5} more" if len(problems) > 5 else "")
@@ -958,8 +971,7 @@ def setup(project: eng.Project, job_id: str, job_dir: Path,
         with loam_lock.live(project.name, "local main"):
             made_main = ensure_local_main(repo)
     resolved = job_identity(project, repo)
-    # The identity the clone commits as: the project's person, the
-    # repository's own, the owner's, or the engineer's (lib/loam_git_identity).
+    # The clone uses the same identity rules as the landing.
     identity = ({"name": resolved["name"], "email": resolved["email"]}
                 if resolved["name"] and resolved["email"] else None)
     ensure_union(project)
@@ -2173,7 +2185,7 @@ def canonical_ready(repo: Path, result: dict) -> bool:
     return True
 
 
-def _prepare(project, repo, tree, branch, message, result, say, record,
+def _prepare(project, repo, tree, branch, message, result, say, record, want,
              locked=False):
     """Merge the branch into `main` as it stands now and test the merged
     tree, touching nothing but the job's tree. Returns ``(main_sha, tip,
@@ -2188,7 +2200,7 @@ def _prepare(project, repo, tree, branch, message, result, say, record,
             f"`{MAIN}` was rewritten since this job began, and replaying the "
             f"job's own commits onto it stopped: {replay}"))
         return None
-    if settle_commits(project, repo, tree, branch, main_sha, say, result):
+    if settle_commits(want, repo, tree, branch, main_sha, say, result):
         result["reauthored"] = True
     tip = branch_tip(tree, branch)
     result["head"] = head_note(tree, branch)
@@ -2237,7 +2249,8 @@ def _prepare(project, repo, tree, branch, message, result, say, record,
         # What the push would refuse is refused here, before `main` has it
         # Only what this landing adds is read: a commit
         # already on `main` is the push's to report, not this job's.
-        held = push_gate(repo, main_sha, head=merged, objects=tree)
+        held = push_gate(repo, main_sha, head=merged, objects=tree,
+                         expected=(want["name"], want["email"]))
         if held:
             back_to_branch(tree, branch, merged, result, force=True)
             result.update(reason="gate", gate=held, main=main_sha, detail=(
@@ -2294,7 +2307,7 @@ def _finish_nothing(project, record, keep_tree, result, main_sha) -> None:
 
 
 def _finish_landed(project, repo, tree, branch, keep_tree, result, say,
-                   record, cancelled, tip, merged) -> None:
+                   record, cancelled, tip, merged, expected) -> None:
     """Under the lock, with `main` where the tested merge was made: move the
     branch and then `main` to the tested commit, merge the memory, push.
     A commit made on the branch since ``tip`` was tested is carried onto
@@ -2338,7 +2351,7 @@ def _finish_landed(project, repo, tree, branch, keep_tree, result, say,
         result["local_only"] = True     # a release install's own main
     elif has_remote(repo):
         with timed(result, "push"):
-            result["pushed"] = push_origin(repo)
+            result["pushed"] = push_origin(project, expected=expected)
         now = rev(repo, MAIN)
         if now and now != merged:
             # The push re-authored landed commits (``reauthor_landed``): the
@@ -2361,6 +2374,8 @@ def _land_tested(project, repo, tree, branch, message, keep_tree, result,
     """A `main`-merging landing; see the section above."""
     result["retests"] = 0
     result["tested_under_lock"] = False
+    want = job_identity(project, repo)
+    expected = want["name"], want["email"]
     for attempt in range(OUTSIDE_TRIES + 1):
         if attempt == OUTSIDE_TRIES:
             # Lost every race: today's order, under the lock throughout.
@@ -2373,7 +2388,7 @@ def _land_tested(project, repo, tree, branch, message, keep_tree, result,
                         or not canonical_ready(repo, result):
                     return
                 ready = _prepare(project, repo, tree, branch, message, result,
-                                 say, record, locked=True)
+                                 say, record, want, locked=True)
                 if ready is None:
                     return
                 main_sha, tip, merged = ready
@@ -2381,14 +2396,14 @@ def _land_tested(project, repo, tree, branch, message, keep_tree, result,
                     _finish_nothing(project, record, keep_tree, result, main_sha)
                 else:
                     _finish_landed(project, repo, tree, branch, keep_tree,
-                                   result, say, record, cancelled, tip, merged)
+                                   result, say, record, cancelled, tip, merged, expected)
                 finish()
             return
 
         if stop_for_cancel(cancelled, result, say):
             return
         ready = _prepare(project, repo, tree, branch, message, result, say,
-                         record)
+                         record, want)
         if ready is None:
             return
         main_sha, tip, merged = ready
@@ -2406,7 +2421,7 @@ def _land_tested(project, repo, tree, branch, message, keep_tree, result,
                     _finish_nothing(project, record, keep_tree, result, main_sha)
                 else:
                     _finish_landed(project, repo, tree, branch, keep_tree,
-                                   result, say, record, cancelled, tip, merged)
+                                   result, say, record, cancelled, tip, merged, expected)
                 finish()
                 return
         # Lost the race: the lock is already let go.
