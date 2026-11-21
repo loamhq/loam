@@ -174,6 +174,9 @@ async def exercise(case, root, baseline=False):
     if case == "legacy":
         threads.update(hello, engines={agent: "claude-code"})
         marker = starter.marker_path()
+        old_marker = starter.status()
+        old_marker.pop("inherits_engine")
+        agents._write_json(marker, old_marker)
         stamp = threads.record_path(hello).stat().st_mtime_ns + 1
         os.utime(marker, ns=(stamp, stamp))
         assert starter.inherit_legacy_hello() and not starter.inherit_legacy_hello()

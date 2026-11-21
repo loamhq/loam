@@ -341,6 +341,9 @@ def _main() -> int:
     except ValueError as exc:
         print(exc, file=sys.stderr)
         return 64
+    import loam_claim_start
+    if loam_claim_start.unclaimed():
+        return 0
     if cron == RESULTS:
         return results_main(project)
     # A run its timer started when it was not due goes no further

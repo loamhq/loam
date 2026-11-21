@@ -14,15 +14,20 @@ POINTERS = (
 )
 
 
-def migrate(workspace: Path) -> bool:
-    target = workspace / MAP
-    if target.exists() or target.is_symlink():
-        return False
+def initial_map(workspace: Path) -> str:
     pointers = [words.format(name=name) for name, words in POINTERS
                 if (workspace / name).is_file()]
     text = MAP_SEED
     if pointers:
         text += "\n" + "".join(f"- {line}\n" for line in pointers)
+    return text
+
+
+def migrate(workspace: Path) -> bool:
+    target = workspace / MAP
+    if target.exists() or target.is_symlink():
+        return False
+    text = initial_map(workspace)
     with TemporaryDirectory(prefix=".map-", dir=workspace) as tmp:
         seed = Path(tmp) / MAP
         seed.write_text(text, encoding="utf-8")

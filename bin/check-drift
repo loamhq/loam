@@ -601,8 +601,6 @@ def check_broker(findings: list) -> list[str]:
     and leaves the rendered file exactly as it was.
     """
     notes: list[str] = []
-    compare(findings, "broker firewall script", brk.FIREWALL_SCRIPT,
-            (AGENTS / "broker" / "firewall.sh").read_text(encoding="utf-8"))
 
     active = user_systemctl("is-active", brk.SERVICE)
     if active != "active":
@@ -736,7 +734,12 @@ def check_deploy(findings: list) -> list[str]:
             f"{', '.join(sorted(moved - kept))}."
             + (f" Keep {', '.join(stays)} and its record: `[[forward]]` still "
                f"needs it." if stays else "")))
+    # The unclaimed apex serves only the claim endpoint and its redirect.
+    # Accept only the generator's exact block, including the fallback.
+    claim_host = dep.domain() if dep.unclaimed() else None
     for host, gated in dep.live_host_blocks(live_caddy):
+        if host == claim_host and dep.caddy_claim_block(host) in live_caddy and live_caddy == renders[dep.CADDYFILE]:
+            continue
         app = by_host.get(host)
         if not gated and (host in moved or host in kept or host in landed):
             continue

@@ -61,13 +61,11 @@ the Garden with them. Their own idea takes the lead.
 A first-weeks starter marker identifies this Hello as the place for release
 news, even if renamed. Older starters keep their original routing.
 
-An update from an older starter replaces a byte-for-byte stock board with
-the ordinary empty board if the install is unclaimed or the owner has sent
-no message in Hello. When it clears the board, it also refreshes any of Iris's
-two guidance files that still match a shipped copy. Existing edits and the
-workspaces of people keeping their board stay as they are. The old source at
-`docs/starter/hello-board.md` serves requests from earlier Iris workspaces that
-refer to that path.
+Each update identifies the original Hello by its seed marker. It compares the
+installed greeting, board and workspace files with historical starter templates
+expanded for this install. Until the owner replies, a stock preset and board
+can refresh. Each workspace file refreshes independently if its bytes still
+match a shipped version. The first-week clock starts at claim.
 
 **Once per install.** A marker, `<state>/agents/starter.json` (the agent,
 the thread, the message, when), makes every later run a no-op, so a person

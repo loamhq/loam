@@ -95,6 +95,8 @@ close the page and return to the same address. Usernames are saved in
 lowercase and work with any capitalization. A passkey signs in to the
 same account without typing the username.
 
+Claiming starts the owner’s first day. General starts empty, and health notices begin with checks of the claimed install. Updates refresh the original Hello until the owner replies. Each starter file keeps local edits.
+
 On a fresh install, a phone opens Chats with an unread Hello. A wide screen
 opens Hello. Iris greets the owner by name and shows how Chats, Files and Apps
 fit together. Empty places explain their purpose until they fill. Board,

@@ -84,6 +84,9 @@ def append_comms(
 
 def _append_log(vault: Path, agent: str, reason: str, stamp: str) -> None:
     """One line into the failure log, in the one shape every line has."""
+    import loam_claim_start
+    if loam_claim_start.unclaimed():
+        return
     note = vault / FAILURE_LOG
     try:
         note.parent.mkdir(parents=True, exist_ok=True)

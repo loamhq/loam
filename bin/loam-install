@@ -606,7 +606,7 @@ def step_user(a, ans: dict) -> None:
         pwd.getpwnam(user)
     except KeyError:
         run(["useradd", "--create-home", "--home-dir", home, "--shell", "/bin/bash", user])
-    run(["usermod", "-aG", "sudo,docker", user])
+    run(["usermod", "-aG", "sudo", user])
     sudoers = Path("/etc/sudoers.d/loam")
     text = (f"# Loam's agents get the whole machine (first release, decision 1).\n"
             f"{user} ALL=(ALL) NOPASSWD: ALL\n"
@@ -824,6 +824,8 @@ def step_starter(a, ans: dict) -> None:
     # it (2026-11-18): its role and project file are seeded into the vault
     # from this release and rendered beside the code (bin/provision).
     as_user(cfg, ["python3", f"{cfg['root']}/bin/preinstall-plugins"])
+    for option in ("--managed-settings", "--reviewer"):
+        as_user(cfg, ["python3", f"{cfg['root']}/bin/provision", option])
     with progress("Setting up the engineer", "Engineer ready to make changes your agents ask for."):
         res = as_user(cfg, ["python3", f"{cfg['root']}/bin/provision", "--engineer"],
                       check=False)
@@ -885,6 +887,10 @@ def step_units(a, ans: dict) -> None:
         as_user(cfg, ["systemctl", "--user", "daemon-reload"])
         for svc in (brk.SERVICE, "loam-plugins-gateway.service"):
             as_user(cfg, ["systemctl", "--user", "enable", "--now", svc])
+        # The first check may run before either sampling timer's first deadline.
+        # Give it real readings before arming the timers and opening the claim.
+        as_user(cfg, ["systemctl", "--user", "start", "loam-pressure.service",
+                      "loam-memsample.service"])
         arm = (f"import sys; sys.path.insert(0, {root + '/lib'!r}); import loam_units as u\n"
                "for t in sorted(n for n in u.rendered() if n.endswith('.timer')):\n"
                "    print(t, u.arm_timer(t))\n")

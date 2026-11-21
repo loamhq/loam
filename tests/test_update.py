@@ -112,7 +112,7 @@ subprocess.run(["git", "init", "-q", "-b", "main", str(HQ)], check=True)
 git(HQ, "remote", "add", "origin", str(ORIGIN))
 files = {
     "manifest.json": '{"version": "1.0.0"}\n',
-    ".gitignore": "*.pyc\n",
+    ".gitignore": "*.pyc\n*.local\n",
     "docs/library/README.md": "# Loam's library\n\nEvery page is a skill.\n",
     "docs/library/skills/loam-a/SKILL.md": "---\nname: loam-a\n---\nA.\n",
     "docs/releases/1.0.0.md": "The first release.\n",
@@ -273,6 +273,11 @@ app_settings = INSTALL / "app" / ".claude" / "settings.json"
 write(app_settings, "{}\n")
 with (INSTALL / ".git" / "info" / "exclude").open("a") as exclude:
     exclude.write("/app/.claude/\n")
+cache = INSTALL / "lib" / "__pycache__"
+write(cache / "example.cpython-313.pyc", "cache")
+write(cache / "important.txt", "owner data")
+check("only bytecode is exempt from the stock preflight", len(up.dirt("stock")), 1)
+(cache / "important.txt").unlink()
 rec = up.apply(accept_library_edits=True, box=box)
 check("apply: applied, the checkout at the tag's commit, detached",
       (rec["outcome"], git(INSTALL, "rev-parse", "HEAD"),
@@ -293,6 +298,7 @@ check("...the others recorded as skipped, with why",
       ["agents", "providers", "provider-memory", "broker", "gateway", "deploy", "app", "host"])
 check("...the generated app settings survived and the updater sees a clean tree",
       (app_settings.read_text(), up.dirt("stock")), ("{}\n", []))
+(cache / "example.cpython-313.pyc").unlink()
 told = notices()
 check("...a notice that it applied, naming the notes and the kept copy",
       ([n["kind"] for n in told], str(backup) in told[0]["note"],
@@ -324,11 +330,11 @@ readme.write_text(readme.read_text().replace("Sam's own line.\n", ""))
 # -- the clean-tree rule, stock --------------------------------------------------------------
 
 (INSTALL / "stray.txt").write_text("x")
-(INSTALL / "lib" / "x.pyc").write_text("x")
+(INSTALL / "lib" / "x.local").write_text("x")
 rec = up.apply(box=FakeBox())
 check("a stock install with an untracked and an ignored file refuses, naming both",
       (rec["outcome"], rec["refusal"]["code"], rec["refusal"]["files"]),
-      ("refused", "dirty", ["?? stray.txt", "!! lib/x.pyc"]))
+      ("refused", "dirty", ["?? stray.txt", "!! lib/x.local"]))
 check("...nothing moved", git(INSTALL, "rev-parse", "HEAD"), v100)
 told = notices()
 check("...and the job handed to the person's agent, with what was found",
@@ -336,7 +342,7 @@ check("...and the job handed to the person's agent, with what was found",
        "1.1.0" in told[0]["line"]), (["refused"], True, True))
 clear_notices()
 (INSTALL / "stray.txt").unlink()
-(INSTALL / "lib" / "x.pyc").unlink()
+(INSTALL / "lib" / "x.local").unlink()
 
 # -- a failed apply ------------------------------------------------------------------------
 

@@ -174,6 +174,9 @@ def tell(fact: str, *, by: str = "loam", key: str | None = None,
         now = time.time()
         quiet = QUIET_DAYS * 86400
         with _queue_lock():
+            import loam_claim_start
+            if loam_claim_start.unclaimed():
+                return "unclaimed"
             seen = _load_seen()
             seen = {k: v for k, v in seen.items()
                     if isinstance(v, dict) and now - float(v.get("last", 0)) < quiet}
@@ -210,6 +213,10 @@ def pending() -> list[dict]:
     """Facts not yet heard, oldest first. A record being heard carries
     ``given``; one found ``given`` later belonged to a run that died after
     its input went in, and is not given again (``stale_given``)."""
+    import loam_claim_start
+    if loam_claim_start.unclaimed():
+        return []
+    since = loam_claim_start.claimed_at()
     out = []
     try:
         paths = sorted(STATE.glob("*.json"))
@@ -223,7 +230,8 @@ def pending() -> list[dict]:
         except (OSError, ValueError):
             continue
         if isinstance(record, dict) and record.get("id") and record.get("fact"):
-            out.append(record)
+            if str(record.get("at") or "")[:19] >= since:
+                out.append(record)
     return sorted(out, key=lambda r: (str(r.get("at")), str(r.get("id"))))
 
 

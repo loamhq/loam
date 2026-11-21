@@ -144,7 +144,7 @@ TRIGGERS = {
     # deployment layer is re-rendered (its unit template among it), then the
     # app is unpacked at the new commit and restarted, and put back on its
     # old release if the new one does not answer.
-    "deploy": {"script": "bin/gen-deploy", "dirs": ["deploy/"]},
+    "deploy": {"script": "bin/gen-deploy", "dirs": ["deploy/", "broker/firewall.sh"]},
     "app": {"script": "bin/deploy", "dirs": ["app/", "deploy/"]},
     # The host history's timer (2026-11-19, lib/loam_host.py): root's, so
     # gen-units does not install it; `loam host install` does.
@@ -393,9 +393,14 @@ def dirt(kind: str) -> list[str]:
     app_harness = {f"{pre}{loam_engineer.APP_SCOPE}/{name}" for name in
                    ("CLAUDE.md", "role.md", "project.md", ".claude/settings.json")}
 
+    reviewer_harness = {pre + name for name in lc.REVIEWER_HARNESS}
+
     def ours(line: str) -> bool:
         path = line[3:].strip().strip('"')
-        return untracked(line) and (path in app_harness or any(
+        cache = Path(path)
+        bytecode = cache.suffix == ".pyc" or (
+            cache.parent.name == "__pycache__" and re.search(r"\.pyc\.\d+$", cache.name))
+        return untracked(line) and (bytecode or path in app_harness or path in reviewer_harness or any(
             path == h or path.startswith(h + "/") for h in platform_harness))
     return [ln for ln in git(*args).stdout.splitlines() if ln.strip() and not ours(ln)]
 
@@ -619,6 +624,9 @@ def notice(kind: str, line: str, note: str, key: str | None = None, *,
     ``note`` what it comes with, handed to the system persona
     (lib/loam_attention.py; nothing is posted in General since 2026-11-19).
     ``key`` makes it once only."""
+    import loam_claim_start
+    if loam_claim_start.unclaimed():
+        return None
     sent = read_json("told.json") or {}
     if key and key in sent:
         return None
@@ -710,6 +718,10 @@ def release_notice_detail(rec: dict) -> str:
 
 
 def owed_notices() -> list[dict]:
+    import loam_claim_start
+    if loam_claim_start.unclaimed():
+        return []
+    since = loam_claim_start.claimed_at()
     folder = _path("notices")
     out = []
     for path in sorted(folder.glob("*.json")) if folder.is_dir() else []:
@@ -717,7 +729,7 @@ def owed_notices() -> list[dict]:
             rec = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        if not isinstance(rec, dict):
+        if not isinstance(rec, dict) or str(rec.get("at") or "")[:19] < since:
             continue
         if rec.get("kind") in ("available", "applied"):
             rec["note"] = release_notice_detail(rec)

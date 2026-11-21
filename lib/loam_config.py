@@ -80,6 +80,9 @@ REVIEWER_STATE = _path("paths.reviewer_state", STATE / "reviewer")
 ENGINEER_HARNESS = tuple(f"engineer/{name}" for name in
                          ("CLAUDE.md", "role.md", "project.md", "agent.json", ".claude"))
 
+REVIEWER_HARNESS = tuple(f"reviewer/{name}" for name in
+                         ("CLAUDE.md", "agent.json", ".mcp.json", ".claude/settings.json"))
+
 # -- where: the user's own tools -----------------------------------------------
 
 LOCAL_BIN = HOME / ".local" / "bin"

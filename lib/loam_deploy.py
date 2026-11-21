@@ -189,7 +189,7 @@ SESSION_COOKIE = "loam_auth"
 def edge_state() -> dict:
     """What loam-await-dns last found ({"dns": "resolved", ...}), or {}."""
     try:
-        data = json.loads(EDGE_STATE.read_text(encoding="utf-8"))
+        data = json.loads(read_root_text(EDGE_STATE) or "{}")
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
@@ -1553,6 +1553,10 @@ def preview_sysctl_live() -> bool:
         return False
 
 
+def claim_edge_backup() -> Path:
+    return CADDYFILE.with_name(".loam-claim.previous")
+
+
 def caddy_claim_block(fq: str) -> str:
     """The app's host while the install has no login yet: `/claim` from the
     claim service, outside the login, and every other path sent there. The
@@ -2143,6 +2147,7 @@ INBOUND_CHAIN = "LOAM-INBOUND"
 INBOUND_TCP = (80, 443)
 INBOUND_UDP = (443,)
 MODES[INBOUND_FIREWALL_SCRIPT] = 0o755
+MODES[loam_broker.FIREWALL_SCRIPT] = 0o755
 
 
 def inbound_open() -> list[tuple[int, str]]:
@@ -2386,6 +2391,7 @@ def sudoers() -> str:
 
 def generated(today: dt.date | None = None) -> dict[Path, str]:
     return {
+        loam_broker.FIREWALL_SCRIPT: (Path(__file__).resolve().parents[1] / "broker/firewall.sh").read_text(),
         CADDYFILE: caddyfile(today),
         DAEMON_JSON: daemon_json(),
         AUTHELIA_CONFIG: authelia_config(),

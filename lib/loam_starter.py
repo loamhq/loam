@@ -34,6 +34,10 @@ def fill(text: str) -> str:
 def read_hello(root: Path | None = None) -> tuple[str, str]:
     """(title, first message) from hello.md."""
     text = ((root or STARTER_DIR) / "hello.md").read_text(encoding="utf-8")
+    return parse_hello(text)
+
+
+def parse_hello(text: str) -> tuple[str, str]:
     title = "Hello"
     if text.startswith("---\n"):
         head, _, text = text[4:].partition("\n---\n")
@@ -146,7 +150,7 @@ def inherit_legacy_hello() -> bool:
     import loam_threads as threads  # noqa: PLC0415
 
     seeded = status()
-    if not isinstance(seeded, dict) or not seeded.get("thread") or not seeded.get("agent"):
+    if not isinstance(seeded, dict) or seeded.get("inherits_engine") or not seeded.get("thread") or not seeded.get("agent"):
         return False
     agent, tid = seeded["agent"], seeded["thread"]
     with threads.locked(threads.VAULT):
@@ -237,7 +241,7 @@ def seed(*, root: Path | None = None, provision=None) -> dict:
         preset = next((m for m in msgs if m.get("preset")), None)
         msg_id = (preset or threads.append(tid, agent, text, preset=True))["id"]
         record = {"agent": agent, "thread": tid, "message": msg_id,
-                  "at": loam_agents.now_iso()}
+                  "at": loam_agents.now_iso(), "inherits_engine": True}
         if first_minute:
             record["used_controls"] = []
         if first_weeks:

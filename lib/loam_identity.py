@@ -180,7 +180,7 @@ def pick_decoy(
         # It supplies a real negative control until there is a sibling.
         import loam_starter  # noqa: PLC0415
         seeded = loam_starter.status() or {}
-        if (isinstance(seeded, dict) and seeded.get("first_weeks") is True
+        if (isinstance(seeded, dict) and seeded.get("thread")
                 and seeded.get("agent") == project.name
                 and project.resolve() == (AI_LABS / project.name).resolve()
                 and not any(p.parent != project for pattern in ("*/agent.json", "*/soul.md")

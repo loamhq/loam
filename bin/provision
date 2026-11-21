@@ -913,7 +913,7 @@ def ensure_engineer_excluded() -> None:
     common = Path(done.stdout.strip())
     exclude = (common if common.is_absolute() else AGENTS / common) / "info" / "exclude"
     have = exclude.read_text(encoding="utf-8") if exclude.is_file() else ""
-    lines = [f"/{name}" for name in lc.ENGINEER_HARNESS]
+    lines = [f"/{name}" for name in (*lc.ENGINEER_HARNESS, *lc.REVIEWER_HARNESS)]
     missing = [ln for ln in lines if ln not in have.splitlines()]
     if not missing:
         return
@@ -1175,6 +1175,7 @@ def provision_reviewer(dry: bool = False) -> None:
     if dry:
         print("  [dry-run] no files written")
         return
+    REVIEWER.mkdir(parents=True, exist_ok=True)
     write_if_changed(instruction, reviewer_instructions())
     (REVIEWER / ".claude").mkdir(parents=True, exist_ok=True)
     for sub in ("memory", "runs", "notes"):

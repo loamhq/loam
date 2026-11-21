@@ -315,69 +315,87 @@ def main() -> int:
 
 
 def check_retirement(ws: Path) -> None:
-    from unittest.mock import patch
     import loam_agents
-    import loam_deploy
     import loam_update
-    from loam_starter_update import LIST_STARTERS, retire_hello_board
+    from loam_starter_update import refresh
 
     prefix = loam_update.prefix() + "docs/starter/"
+    def stock(name):
+        return st.fill(loam_update.show("0.2.13", prefix + name))
 
-    def stock(rev, path):
-        return loam_update.show(rev, prefix + path)
+    hello = threads.create("iris", "Hello", extra={"hello": True})
+    tid = hello["id"]
+    _, old = st.parse_hello(stock("hello.md"))
+    msg = threads.append(tid, "iris", old, preset=True)
+    seeded = {"agent": "iris", "thread": tid, "message": msg["id"]}
+    loam_agents._write_json(st.marker_path(), seeded)
+    threads.update(tid, engines={"iris": "claude-code"})
+    board = threads.VAULT / hello["board"]
+    previous_board = loam_update.show("0.2.18", prefix + "hello-board.md")
+    board.write_text(previous_board)
+    for name in ("map.md", *st.OWN_FILES):
+        (ws / name).write_text(stock("iris/" + name))
+    edited = stock("iris/nights.md") + "A personal instruction.\n"
+    (ws / "nights.md").write_text(edited)
+    refresh()
+    meta, messages, path = threads.read(tid)
+    check("legacy marker without first_weeks refreshes greeting, board and engine",
+          (messages[0]["text"], messages[0]["id"], meta["engines"], board.read_text()),
+          (st.read_hello()[1], msg["id"], {}, threads.empty_board(meta)))
+    check("each unchanged sibling refreshes and the edited Iris file survives",
+          [(ws / name).read_text() for name in ("map.md", *st.OWN_FILES)],
+          [st.draft()["map"], st.own_files()["how-i-am-here.md"], edited])
+    threads.update(tid, engines={"iris": "claude-code"})
+    board.write_text(previous_board + "\n")
+    refresh()
+    check("a later explicit engine choice and a one-byte board edit survive",
+          (threads.read(tid)[0]["engines"], board.read_text()),
+          ({"iris": "claude-code"}, previous_board + "\n"))
+    threads.replace_message(tid, msg["id"], [{**msg, "text": old}])
+    threads.append(tid, lc.OWNER_ID, "Hello Iris.")
+    before = path.read_bytes()
+    board.write_text(previous_board)
+    loam_agents._write_json(st.marker_path(), seeded)
+    refresh()
+    check("a replied legacy Hello keeps every byte of its chat and board",
+          (path.read_bytes(), board.read_text()), (before, previous_board))
 
-    def previous_hello(rev):
-        hello = threads.create("iris", "Hello again", extra={"hello": True})
-        threads.append(hello["id"], "iris", "Welcome.", preset=True)
-        loam_agents._write_json(st.marker_path(), {"agent": "iris", "thread": hello["id"],
-                                                 "first_weeks": True})
-        board = threads.VAULT / hello["board"]
-        board.write_bytes(stock(rev, "hello-board.md").encode())
-        for name in st.OWN_FILES:
-            (ws / name).write_bytes(st.fill(stock(rev, "iris/" + name)).encode())
-        return hello, board
+    from loam_map_migration import initial_map
+    for old in ("_active.md", "_reflection.md"):
+        (ws / old).write_text(st.fill(loam_update.show("0.1.0", prefix + "iris/" + old)))
+    for name in st.OWN_FILES:
+        (ws / name).unlink()
+    (ws / "map.md").write_text(initial_map(ws))
+    refresh()
+    check("a starter from before maps gets the modern files its map reads",
+          [(ws / name).read_text() for name in ("map.md", *st.OWN_FILES)],
+          [st.draft()["map"], *st.own_files().values()])
 
-    for rev in LIST_STARTERS:
-        hello, board = previous_hello(rev)
-        original = dict(st.status())
-        thread = threads.record_path(hello["id"])
-        conversation = thread.read_bytes()
-        with patch.object(loam_deploy, "unclaimed", return_value=True):
-            check(f"untouched starter {rev[:7]} updates to an ordinary empty board",
-                  (retire_hello_board(), board.read_bytes(), retire_hello_board()),
-                  (True, "# Hello again — board\n\n".encode(), False))
-        check("the update refreshes only the stock guidance and keeps the marker and chat",
-              ({name: (ws / name).read_text() for name in st.OWN_FILES}, st.status(), thread.read_bytes()),
-              (st.own_files(), original, conversation))
-        threads.delete(hello["id"])
-
-    rev = LIST_STARTERS[2]  # the 0.2.18 starter
-    hello, board = previous_hello(rev)
-    guidance = {name: (ws / name).read_bytes() for name in st.OWN_FILES}
-    original = board.read_bytes()
-    threads.append(hello["id"], "old-sam", "Hello Iris.")
-    with patch.object(lc, "LEGACY_OWNER_IDS", ("old-sam",)), patch.object(loam_deploy, "unclaimed", return_value=False):
-        check("claimed Hello with an owner's message keeps the stock board and installed guidance",
-              (retire_hello_board(), board.read_bytes(), {name: (ws / name).read_bytes() for name in st.OWN_FILES}),
-              (False, original, guidance))
-    check("earlier installed guidance can still read its source board",
-          (str(lc.ROOT / "docs/starter/hello-board.md") in guidance["how-i-am-here.md"].decode(),
-           (ROOT / "docs/starter/hello-board.md").read_bytes()), (True, original))
-    threads.delete(hello["id"])
-
-    hello, board = previous_hello(rev)
-    board.write_bytes(original + b"\n")
-    with patch.object(loam_deploy, "unclaimed", return_value=True):
-        check("one extra newline protects even an unclaimed Hello board and its guidance",
-              (retire_hello_board(), board.read_bytes(), {name: (ws / name).read_bytes() for name in st.OWN_FILES}),
-              (False, original + b"\n", guidance))
-    board.write_bytes(original)
-    custom = guidance["how-i-am-here.md"] + b"\nSam's own note.\n"
-    (ws / "how-i-am-here.md").write_bytes(custom)
-    with patch.object(loam_deploy, "unclaimed", return_value=False):
-        check("a claimed install before the first message gets an empty board and keeps custom guidance",
-              (retire_hello_board(), board.read_text(), (ws / "how-i-am-here.md").read_bytes()),
-              (True, "# Hello again — board\n\n", custom))
+    from unittest.mock import patch
+    import loam_claim_start as claim
+    import loam_attention as attention
+    import loam_inbox as inbox
+    threads.ensure_general()
+    threads.append("general", "iris", "Before the claim")
+    general = threads.VAULT / threads.GENERAL_BOARD
+    general.parent.mkdir(parents=True, exist_ok=True)
+    general.write_text("An old drift finding")
+    log = lc.VAULT / inbox.FAILURE_LOG
+    log.write_text("An old wake failure")
+    attention.tell("An old check", kick=False)
+    with patch.object(claim, "unclaimed", return_value=True), patch.object(
+            subprocess, "check_output", return_value=""):
+        claim.prepare()
+    check("claim clears the old facts, General message, board and failure log",
+          (attention.pending(), threads.read("general")[1], general.read_text(), log.exists()),
+          ([], [], "# General — board\n\n", False))
+    general.write_text("The owner read this.")
+    try:
+        claim.prepare()
+    except RuntimeError:
+        pass
+    check("an already claimed install keeps the board it could have read",
+          general.read_text(), "The owner read this.")
 
 
 if __name__ == "__main__":

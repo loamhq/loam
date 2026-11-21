@@ -162,10 +162,19 @@ def finish_claim() -> None:
     CLAIM_STAGE = "finish_failed"
 
 
+def prepare_owner() -> None:
+    res = run(["runuser", "-u", lc.USER, "--", "env", f"XDG_RUNTIME_DIR={lc.RUNTIME_DIR}",
+               sys.executable, "-B", str(ROOT / "bin/loam-claim"),
+               "--prepare-owner"], cwd=str(lc.HOME), timeout=300)
+    if res.returncode:
+        raise RuntimeError("preparing the owner's first day failed: " + res.stderr.strip()[-300:])
+
+
 def save_claim(username: str, password: str) -> None:
     global CLAIM_STAGE
     try:
         write_users(username, lc.OWNER_NAME, hash_password(password))
+        prepare_owner()
         when = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
         temp = dep.CLAIMED_FILE.with_suffix(".new")
         temp.write_text(json.dumps({"username": username, "at": when}) + "\n", encoding="utf-8")
@@ -189,7 +198,7 @@ def unfinished_claim() -> bool:
         live = dep.CADDYFILE.read_text(encoding="utf-8")
     except OSError:
         return False
-    return not dep.unclaimed() and dep.CLAIM_MARKER in live
+    return not dep.unclaimed() and (dep.CLAIM_MARKER in live or dep.claim_edge_backup().exists())
 
 
 # ---------------------------------------------------------------------------
@@ -470,6 +479,10 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> int:
     global CLAIM_STAGE
+    if sys.argv[1:] == ["--prepare-owner"] and os.geteuid() == lc.UID:
+        import loam_claim_start
+        loam_claim_start.prepare()
+        return 0
     if os.geteuid() != 0:
         print("loam-claim: runs as root (loam-claim.service)", file=sys.stderr)
         return 2

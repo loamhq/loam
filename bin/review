@@ -801,6 +801,9 @@ def main() -> int:
         print(sheet)
         return 0
 
+    import loam_claim_start
+    if loam_claim_start.unclaimed():
+        return 0
     if PROVIDER is None:
         print("review: Connect Claude Code or Antigravity to run the reviewer.", file=sys.stderr)
         return 0

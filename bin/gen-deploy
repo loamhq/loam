@@ -215,18 +215,18 @@ def wait_for_login() -> None:
 
 
 def switch_claim_edge(content: str) -> None:
-    """Apply the new edge before persisting it. A failed reload leaves the
-    old claim route in service and on disk for the next attempt."""
-    staged = dep.CADDYFILE.with_name(".loam-claim.Caddyfile")
-    try:
-        write_root(staged, content)
-        res = run(["caddy", "reload", "--config", str(staged), "--adapter", "caddyfile", "--force"])
-        if res.returncode:
-            die(f"caddy could not switch from claim to sign-in: {res.stderr.strip()}")
-        write_root(dep.CADDYFILE, content)
-        print("  caddy: the sign-in is ready and the claim route is removed")
-    finally:
-        staged.unlink(missing_ok=True)
+    """Load the final path: Caddy includes that filename in file_server's hide list.
+    Keep the previous claim render until a reload succeeds, including across a crash."""
+    backup = dep.claim_edge_backup()
+    if not backup.exists():
+        write_root(backup, dep.CADDYFILE.read_text(encoding="utf-8"))
+    write_root(dep.CADDYFILE, content)
+    res = run(["systemctl", "reload", "caddy"])
+    if res.returncode:
+        write_root(dep.CADDYFILE, backup.read_text(encoding="utf-8"))
+        die(f"caddy could not switch from claim to sign-in: {res.stderr.strip()}")
+    backup.unlink()
+    print("  caddy: the sign-in is ready and the claim route is removed")
 
 
 def generate(dry: bool) -> int:
@@ -239,7 +239,8 @@ def generate(dry: bool) -> int:
     warn_unresolved()
     caddy = files[dep.CADDYFILE]
     switching_claim = (dep.CADDYFILE.exists()
-                       and dep.CLAIM_MARKER in dep.CADDYFILE.read_text(encoding="utf-8")
+                       and (dep.claim_edge_backup().exists() or
+                            dep.CLAIM_MARKER in dep.CADDYFILE.read_text(encoding="utf-8"))
                        and dep.CLAIM_MARKER not in caddy
                        and dep.edge_ready() and not dep.unclaimed())
     changed: list[Path] = []
@@ -273,7 +274,12 @@ def generate(dry: bool) -> int:
         res = run(["systemctl", "daemon-reload"])
         print(f"  {dep.SERVICE_UNIT.name}: daemon-reload (exit {res.returncode}); "
               f"running instances pick it up at their next `bin/deploy <app> up`")
-    if dep.CADDYFILE in changed and not switching_claim:
+    reload_caddy = dep.CADDYFILE in changed
+    if dep.EDGE.get("app") and not dep.unclaimed() and not switching_claim and not reload_caddy:
+        # Earlier claims loaded a staged filename into file_server's hide rules.
+        adapted = dep.caddy_adapted(dep.CADDYFILE)
+        reload_caddy = adapted is not None and dep.caddy_running() != adapted
+    if reload_caddy and not switching_claim:
         res = run(["systemctl", "reload", "caddy"])
         print(f"  caddy reloaded (exit {res.returncode}){': ' + res.stderr.strip() if res.stderr.strip() else ''}")
     if dep.DAEMON_JSON in changed:
@@ -306,6 +312,8 @@ def generate(dry: bool) -> int:
     print(f"  browser: compose up (exit {res.returncode})")
     if res.returncode:
         print(res.stderr.strip())
+    if dep.loam_broker.FIREWALL_SCRIPT in changed:
+        subprocess.run(["systemctl", "restart", dep.loam_broker.WALL_SERVICE], check=True)
     # The wall. A changed script or unit is re-applied by restarting the
     # unit (the script rebuilds both chains); an unchanged one is only made
     # sure of, because check-drift will ask the kernel either way.

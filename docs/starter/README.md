@@ -3,7 +3,7 @@
 A blank Loam install ships one agent, Iris, and one thread: the hello
 thread. After sign-in a phone shows Hello unread in Chats, and a wide screen opens it. Everything here is copied
 into the install once, by `bin/library seed-starter` (lib/loam_starter.py),
-and from then on belongs to the person. They can change, rename or archive
+and belongs to the person. Updates can refresh a stock greeting and stock files until they have been personalized. They can change, rename or archive
 Iris. Her soul, config and map load on every run.
 
 The words are the owner's approved starter (2026-11-16), which replaced the

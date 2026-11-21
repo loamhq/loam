@@ -174,6 +174,8 @@ def _tail_rows(path: Path, size: int = 512 * 1024) -> list[dict]:
 
 def reflections(at: float, names: list[str] | None = None) -> list[dict]:
     out = []
+    import loam_claim_start
+    since = parse_iso(loam_claim_start.claimed_at()) or 0
     window = REFLECTION_HOURS * 3600
     for agent in (agents() if names is None else names):
         record = lc.WORKSPACES / agent / "crons" / "reflection.md"
@@ -189,7 +191,8 @@ def reflections(at: float, names: list[str] | None = None) -> list[dict]:
                             f"`{record}`"))
             continue
         try:
-            rows = [r for r in _tail_rows(ledger) if r.get("lane") == "reflection"]
+            rows = [r for r in _tail_rows(ledger) if r.get("lane") == "reflection"
+                    and (parse_iso(r.get("ts")) or 0) >= since]
         except FileNotFoundError:
             rows = []
         ended = [parse_iso(r.get("finished") or r.get("ts")) or 0 for r in rows if r.get("ok")]
@@ -203,6 +206,9 @@ def reflections(at: float, names: list[str] | None = None) -> list[dict]:
             fresh = at - record.stat().st_mtime < window
         except OSError:
             fresh = False
+        if since and at - since < window:
+            out.append(fact(f"reflection:{agent}", True, "The owner just claimed this install; its first reflection is not due yet"))
+            continue
         if fresh:
             out.append(fact(f"reflection:{agent}", True,
                             f"{agent}'s reflection record is under {REFLECTION_HOURS} "
@@ -633,6 +639,12 @@ def tick(at: float | None = None, daily: bool | None = None,
     prev = load_state(path)
     today, hhmm = local_day(at)
     last_daily = (prev.get("daily") or {})
+    import loam_claim_start
+    version = json.loads((TREE / "manifest.json").read_text())["version"]
+    if (last_daily.get("version") != version
+            or (last_daily.get("unclaimed") and not loam_claim_start.unclaimed())
+            or str(last_daily.get("at") or "")[:19] < loam_claim_start.claimed_at()):
+        last_daily = {}
     if daily is None:
         daily = last_daily.get("date") != today and (hhmm >= DAILY_AT or not last_daily)
     names = agents()
@@ -644,8 +656,17 @@ def tick(at: float | None = None, daily: bool | None = None,
         day_facts: list[dict] = []
         for name, reader in once_a_day():
             day_facts.extend(read(name, reader))
-        last_daily = {"date": today, "at": iso(at), "facts": day_facts}
+        last_daily = {"date": today, "at": iso(at), "facts": day_facts,
+                      "version": version, "unclaimed": loam_claim_start.unclaimed()}
     facts.extend(last_daily.get("facts") or [])
+    if tell is None:
+        import loam_attention
+        # A fact can have been queued while no provider was available. Only
+        # deliver check failures that still hold after this complete reading.
+        current = {f"{BY}:" + ("unreadable:" if f["ok"] is None else "") + f["id"]
+                   for f in facts if f["ok"] is not True}
+        stale = {r["key"] for r in loam_attention.pending() if r.get("by") == BY} - current
+        loam_attention.withdraw(stale)
     told = tell_all(facts, tell)
     status = run_status(at, names, states)
     talks = [f["says"] for f in facts if f["ok"] is False and f.get("blocks") == "conversations"]

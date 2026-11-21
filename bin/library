@@ -57,17 +57,27 @@ def main(argv: list[str]) -> int:
                            check=True)
             reviewer = lc.ROOT / "reviewer"
             source = lc.ROOT / "plugins" / "reviewer" / "instructions.md"
-            if (reviewer / "CLAUDE.md").is_file() and source.is_file():
+            stock_edge = bool(lc.get("edge.app"))
+            if stock_edge:
+                subprocess.run([sys.executable, str(provision), "--managed-settings"], check=True)
+            if (stock_edge or (reviewer / "CLAUDE.md").is_file()) and source.is_file():
                 subprocess.run([sys.executable, str(provision), "--reviewer"],
                                check=True)
+            if stock_edge and loam_update.show(pending.get("from_commit") or "HEAD",
+                                               loam_update.prefix() + "lib/loam_claim_start.py") is None:
+                import grp
+                if lc.USER in grp.getgrnam("docker").gr_mem:
+                    subprocess.run(["sudo", "-n", "gpasswd", "-d", lc.USER, "docker"], check=True)
+                status = subprocess.check_output(["systemctl", "--user", "show",
+                    "loam-reviewer.service", "-p", "ExecMainStatus", "--value"], text=True)
+                if status.strip() == "200":  # systemd EXIT_CHDIR, repaired above
+                    subprocess.run(["systemctl", "--user", "reset-failed", "loam-reviewer.service"], check=True)
+                subprocess.run(["sudo", "-n", "systemctl", "try-restart", "loam-claim.service"], check=True)
         for line in sk.refresh():
             print(f"  {line}")
-        if (updating and pending.get("from_commit")
-                and loam_update.show(pending["from_commit"], loam_update.prefix()
-                                     + "lib/loam_starter_update.py") is None):
-            from loam_starter_update import retire_hello_board  # noqa: PLC0415
-            if retire_hello_board():
-                print("  Retired the unvisited Hello board's stock content")
+        if updating:
+            from loam_starter_update import refresh
+            refresh()
         return 0
     if cmd == "seed-vault" and len(rest) <= 1:
         vault = Path(rest[0]) if rest else lc.VAULT

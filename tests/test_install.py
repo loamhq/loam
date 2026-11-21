@@ -109,7 +109,7 @@ def exercise_claim(claim, unclaimed_render: str) -> None:
         def finish():
             starting.set()
 
-        with patch.object(claim, "hash_password", side_effect=hash_password), \
+        with patch.object(claim, "prepare_owner"), patch.object(claim, "hash_password", side_effect=hash_password), \
              patch.object(claim, "write_users") as write_users, \
              patch.object(claim, "finish_claim", side_effect=finish):
             server = claim.ThreadingHTTPServer(("127.0.0.1", 0), claim.Handler)

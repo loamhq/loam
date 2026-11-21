@@ -109,9 +109,11 @@ def failure_log() -> str:
 def pending(agent: str, logs: Path | None = None,
             state: Path | None = None) -> list[tuple[str, dict]]:
     """The lanes whose last run failed and has not been told yet."""
+    import loam_claim_start
+    since = loam_claim_start.claimed_at()
     told = _told(agent, state)
     return [(lane, row) for lane, row in sorted(last_runs(agent, logs).items())
-            if row.get("ok") is False
+            if row.get("ok") is False and str(row.get("ts") or "")[:19] >= since
             and told.get(lane) != str(row.get("ts"))]
 
 
