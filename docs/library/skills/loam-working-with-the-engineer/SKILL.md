@@ -20,3 +20,5 @@ description: The essentials of handing work to the engineer - whether to, at whi
 7. **Run jobs side by side**: send each one when it is ready. Hold one back only when both change the same feature or screen, or one depends on the other, and then say in the brief which one wins.
 
 8. **Tell the owner the outcome in a few lines:** what is done and what they will see.
+
+For a Loam core defect, take the saved report and patch from the receipt and offer it once under `loam-filing-a-bug-or-feature`. A yes to fixing the install does not authorize filing the report.

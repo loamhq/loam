@@ -251,10 +251,11 @@ one short message about the most relevant major change. A small change gets
 a line only if it affects something they use. Skip contributor details and
 keep the list of changes out of the conversation.
 
-**Loam's makers** hear a bug, a wish or any feedback ("tell the people who
-make Loam…") when the owner sends it: an agent writes it with personal
-details taken out, shows every word, and on the owner's yes gives them a
-link that files it as an issue on Loam's GitHub from their own account
+An agent that encounters a Loam fault offers once to tell its makers. You
+see the exact report, including scrubbed bug diagnostics and any proposed
+fix, before deciding. The preview says whether account-free sending is
+available and offers a GitHub link for your own account. Your agent can
+let you know when a maker replies or a fix ships
 (`loam-filing-a-bug-or-feature`).
 
 Plugins can add a single update line above the agents in Chats and draw

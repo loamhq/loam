@@ -10,6 +10,23 @@ bug: what the owner wishes for, what confused them, what they love. Send it
 whenever the owner wants it to reach them. A defect that cannot wait can
 also be fixed here.
 
+## Offer once, where it happened
+
+When Loam itself fails, including a broken route or tool, prepare the draft
+first. For a defect the engineer has fixed, use the saved patch preview at
+the end of its receipt. An error in the owner's content stays with the task.
+Choose a stable short topic from the component and symptom (for example
+`report:threads-lost-message`). Use the same topic if it recurs. Run
+`loam report offer TOPIC` just before offering. Only “Offer once” calls for
+a line: “Loam lost that message. I have a report ready. Would you like to
+see it?” An invitation to show the draft never authorizes sending it.
+
+If a requested change could be a plugin, use a `market:PLUGIN-ID` topic
+and the same offer check. Ask “Would you like to share this in the Market?”
+Use `loam-publishing-to-the-marketplace` for the publication preview and
+approval. On a no to either offer, run `loam report decline TOPIC`. Leave
+it there unless the owner reopens it.
+
 ## Write it up
 
 **A bug.** Cause it again if you can, then collect what you did, what you
@@ -42,19 +59,37 @@ of what was taken out (the owner's name, agents' names, paths, this
 install's address, keys, e-mail and IP addresses, note names), and a link.
 Read the report again yourself for anything personal it missed.
 
-## Show it, then give them the link on their yes
+Bug previews include a bounded diagnostics block by default. It lists the
+release and commit, local changes, OS, provider/model and lane, service
+states, installed plugin versions, and recent failure codes from runtime
+logs. For an earlier incident, `--at 2026-11-01T09:15:00Z` selects the
+hour ending at that instant. Missing evidence is marked. Use `--no-diagnostics` to leave it out
+or `--diagnostics` to add it to an idea or feature. A changed draft needs
+a fresh preview and a fresh yes.
 
-1. **Show the owner every word**: the title and body as printed, and what
-   was taken out. Ask whether to send it. Nothing goes without their yes.
-2. **On their yes, give them the link.** It opens GitHub's new-issue page
-   for Loam with the report filled in. They need a GitHub account (free, at
-   github.com/signup); signed in, they press **Submit new issue**, and it is
-   sent from their account. A very long report comes with its title only;
-   they paste the body you showed them.
-3. Tell them where it went, and that the makers may answer on the issue.
+## Show every word and ask “Send it?”
 
-The owner's connected GitHub (Settings › Connections) cannot file it for
-them: it reaches only repositories on their own account.
+1. Show the saved title, complete body (including diagnostics and any
+   diff), destination, labels, and removal list. When a relay is configured,
+   explain that it sends from the makers' bot and uses a random install ID
+   to limit requests. The preview ID retrieves the same words with
+   `loam report preview ID`. Wait for the owner's yes to that exact draft.
+2. When the preview offers direct delivery, use `loam report send ID --yes`.
+   No account is needed. Give the owner the returned issue link. A dry run
+   is only a test. If the relay reports another privacy match, edit the
+   draft locally and show it again. Retry an uncertain delivery with the
+   same ID.
+3. Owners who want to file from their own account can use the preview's
+   GitHub link after approval. Until the makers enable the relay, explain
+   plainly that filing currently needs a GitHub account. Keep the local
+   draft if they have none. For a long report, paste the approved body in
+   the form. After Submit, ask for the resulting issue link and use
+   `loam report track ID ISSUE_URL`. Opening the form alone files nothing.
+
+Loam checks tracked public issues nightly without signing in. When a maker
+replies or a tagged release fixes a reported bug, the agent chosen for
+install news tells the owner in one line with the issue link. Stay quiet
+between updates.
 
 ## Fix it here, if it cannot wait
 
@@ -84,7 +119,7 @@ loam report bug --title "…" --body-file report.md --patch
 ```
 
 `--patch` adds the diff of this install's own changes to Loam since the
-release it runs, with the same things taken out. Show the owner, and send it
-on their yes the same way. A pull request would need a fork and a push from
-the owner's GitHub account that Loam cannot make for them yet; the patch in
-the issue is what a maintainer applies.
+release it runs, with the same things taken out. Prefer `--patch BASE..FIX`
+to include only the fix in question. End the engineer's receipt with the
+draft, patch and saved preview ID. The briefing agent makes the single
+offer above. The makers decide how to implement a fix.

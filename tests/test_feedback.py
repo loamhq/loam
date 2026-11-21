@@ -103,6 +103,9 @@ try:
           {"your name": 1, "an agent's name": 1, "a key or a token": 3,
            "an e-mail address": 1, "an IP address": 1, "the name of a note": 2})
 
+    check("an IP at the end of a sentence is scrubbed",
+          fb.scrub("Stopped at 192.0.2.10.")[0], "Stopped at <ip>.")
+
     # -- the draft and its link ----------------------------------------------------
     subprocess.run(["git", "init", "-q", "-b", "main", str(CHECKOUT)], check=True)
     (CHECKOUT / "manifest.json").write_text('{"version": "1.0.0"}\n')
@@ -171,7 +174,7 @@ try:
            d["url"].startswith("https://github.com/loamhq/loam/issues/new?")),
           (0, "idea", "idea", True))
     check("and is shown as an idea", "To Loam's makers, as an idea:" in fb.show(d), True)
-    check("there is no other way to send it: `send` is not a command",
+    check("an unknown preview cannot be sent",
           report("send", "0123456789ab").returncode, 2)
     sc = report("scrub", "--json", stdin="Wren at sam.example.test\n")
     check("loam report scrub", json.loads(sc.stdout)["text"], "<agent> at <domain>\n")
