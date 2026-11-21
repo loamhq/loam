@@ -68,9 +68,7 @@ def idle():
     view = loam_live.broker_live()
     if not view or not all(view.get(k) is True for k in ("admission_closed", "host_admission_closed")):
         raise Deferred("the running API and provider host have not both acknowledged the admission fence")
-    if not isinstance(view.get("turns"), list) or view.get("opening") != 0:
-        raise Deferred("a session is opening or thread work could not be read")
-    reasons = loam_live.restart_blockers(view.get("sessions"), view["turns"])
+    reasons = loam_live.planned_restart_blockers(view)
     if reasons:
         raise Deferred(", ".join(reasons))
 

@@ -14,6 +14,7 @@ import importlib.util
 import io
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.dont_write_bytecode = True
@@ -81,7 +82,9 @@ class World:
 def run(world, argv):
     wait = functools.partial(rb.wait_idle, read=world.read, clock=world.clock,
                              sleep=world.sleep)
-    with contextlib.redirect_stdout(io.StringIO()) as out:
+    # Exercise the combined broker with the fake restart even on a split host.
+    with patch("loam_units.split_marker") as marker, contextlib.redirect_stdout(io.StringIO()) as out:
+        marker.return_value.exists.return_value = False
         rc = rb.main(argv, wait=lambda *a: wait(*a), lock=world.lock,
                      restart=world.restart, clock=world.clock)
     return rc, out.getvalue()
@@ -155,6 +158,22 @@ for label, live in (("None (the read failed)", None),
     rc, out = run(w, WHEN_IDLE)
     check(f"3. {label}: deferred, not restarted, said busy",
           (rc, restarted(w), "counted as busy" in out), (75, False, True))
+
+# A provider can be idle between two messages in the same conversation.
+from datetime import datetime, timezone
+now = datetime(2026, 10, 1, 12, tzinfo=timezone.utc)
+resident = row("ada", "idle", kind="thread", idle_since="2026-10-01T11:50:00Z")
+snapshot = {"sessions": [resident], "turns": [], "opening": 0}
+def allows(view):
+    return not loam_live.planned_restart_blockers(view, now)
+check("thread's full idle window elapsed", allows(snapshot), True)
+for field, value in (("idle_since", "2026-10-01T11:59:59Z"),
+                     ("last_event_at", "2026-10-01T11:59:57Z"),
+                     ("idle_since", None), ("kind", "classic")):
+    check("recent or unreadable resident holds: " + field,
+          allows({**snapshot, "sessions": [{**resident, field: value}]}), False)
+for field, value in (("opening", 1), ("opening", None), ("turns", None), ("sessions", None)):
+    check("partial or busy live response holds: " + field, allows({**snapshot, field: value}), False)
 
 # -- 4. all idle --------------------------------------------------------------
 idle = World(lambda t, locked: {"sessions": [row("ada", "idle"), row("iris", "idle")],

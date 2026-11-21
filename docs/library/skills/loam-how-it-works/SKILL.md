@@ -271,3 +271,5 @@ let you know when a maker replies or a fix ships
 Plugins can add a single update line above the agents in Chats and draw
 their own icon in Apps. A new install can receive ordinary removable Market
 plugins pinned to the commits reviewed for that release.
+
+A planned provider-host restart waits through each resident session’s normal idle window. A thread member stays warm for ten minutes after activity and a classic session for thirty. Incomplete live state defers the restart.

@@ -121,15 +121,39 @@ def broker_live(timeout: float = 10) -> dict | None:
         return None
 
 
+def planned_restart_blockers(view: dict | None, now=None) -> list[str]:
+    """A provider process between turns still owns its normal resume window."""
+    from datetime import datetime, timezone
+    import loam_broker as cfg
+
+    if not isinstance(view, dict) or not isinstance(view.get("turns"), list):
+        return ["session and turn state could not be read (counted as busy)"]
+    if type(view.get("opening")) is not int or view["opening"] != 0:
+        return ["a session is opening or its state could not be read"]
+    reasons = restart_blockers(view.get("sessions"), view["turns"])
+    if reasons:
+        return reasons
+
+    now = now or datetime.now(timezone.utc)
+    for row in view["sessions"]:
+        try:
+            grace = {"thread": cfg.THREAD_IDLE_S, "classic": cfg.CLASSIC_IDLE_S}[row["kind"]]
+            stamps = [row["idle_since"]]
+            if row.get("last_event_at"):
+                stamps.append(row["last_event_at"])
+            latest = max(datetime.fromisoformat(value.replace("Z", "+00:00")) for value in stamps)
+            quiet = (now - latest).total_seconds()
+        except (ValueError, TypeError, KeyError, AttributeError):
+            reasons.append(f"{_who(row)} idle duration could not be read (counted as busy)")
+            continue
+        if quiet < grace:
+            reasons.append(f"{_who(row)} within its {grace}s idle window")
+    return reasons
+
+
 def restart_read(timeout: float = 10) -> list[str]:
-    """One fresh read of what holds a planned restart (`restart_blockers`
-    over the rows and the thread turns in flight). Empty means idle; a
-    failed read is busy. (Moved here from the provider follower, retired
-    2026-11-19.)"""
-    live = broker_live(timeout)
-    if live is None:
-        return restart_blockers(None)
-    return restart_blockers(live.get("sessions"), live.get("turns"))
+    """Read sessions, pending starts and thread turns afresh. An incomplete read holds."""
+    return planned_restart_blockers(broker_live(timeout))
 
 
 def state_of(busy: str | None) -> str:
