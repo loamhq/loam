@@ -28,17 +28,26 @@ try {
     const info = Object.fromEntries(rows.slice(0, 2).map((row, i) => [row.id, {
       via: 'market', version: '1.0.4', held: i === 1, link: 'https://github.com/' + row.source.repo + '/tree/v1.0.4',
     }]))
+    info['field-notes'] = { via: 'link', version: '1.0.4', personal: true, held: true }
     app.routes['GET /v1/plugins'] = (req, res) => json(res, { plugins: rows })
     app.routes['GET /v1/plugin-updates'] = (req, res) => json(res, { plugins: info, entries: {}, market_state: 'listed' })
     for (const row of rows) {
       app.routes[`GET /v1/plugins/${row.id}`] = (req, res) => json(res, { plugin: row })
       app.routes[`PATCH /v1/plugins/${row.id}`] = (req, res, url, raw) => {
         const patch = JSON.parse(raw); patches.push(patch)
+        if (patch.review) {
+          if (patch.review === 'skip') delete info[row.id]
+          return json(res, { [patch.review === 'skip' ? 'skipped' : 'offered']: patch.version })
+        }
         row.auto_update = patch.auto_update; row.updates_paused = false
         json(res, { plugin: row })
       }
     }
     app.routes['POST /v1/plugins'] = (req, res, url, raw) => {
+      if (JSON.parse(raw).url?.includes('field-notes')) return json(res, {
+        ...rows[2], version: '1.0.4', replaces: { version: '1.0.3', edited: true },
+        added: {}, declaration: {}, confirm: 'fixture', source: { url: 'https://github.com/ada-park/field-notes/tree/v1.0.4' }
+      })
       assert.deepEqual(JSON.parse(raw), { url: info['pocket-sync'].link })
       json(res, { ...rows[1], version: '1.0.4', replaces: { version: '1.0.3' },
         added: { record: 'read' }, declaration: { touches: { record: 'read' } }, confirm: 'fixture' })
@@ -51,7 +60,7 @@ try {
       isMobile: width === 390, hasTouch: width === 390, reducedMotion: 'reduce' })
     try {
       await ctx.route('**/app.js', route => route.fulfill({ contentType: 'text/javascript',
-        body: source + '\nglobalThis.__review = {goSettings, goActivity, closeSheet};' }))
+        body: source + '\nglobalThis.__review = {goSettings, goActivity, closeSheet, modules};' }))
       const page = await ctx.newPage(); page.setDefaultTimeout(12000)
       page.on('pageerror', e => errors.push(e.message))
       const shot = async name => {
@@ -65,7 +74,7 @@ try {
       await page.locator('.tt-row').first().waitFor()
       await page.evaluate(() => __review.goSettings('plugins'))
       await page.getByText('Update available · 1.0.4', { exact: true }).waitFor()
-      await page.getByText('Changed here · updates paused', { exact: true }).waitFor()
+      await page.getByText('Version 1.0.4 is available for your copy.', { exact: true }).waitFor()
       await shot('plugins')
       await page.getByRole('button', { name: 'About Pocket Sync' }).click()
       await page.getByRole('button', { name: 'Review update' }).waitFor()
@@ -76,18 +85,25 @@ try {
       await page.getByRole('button', { name: 'Not now' }).click()
       await page.getByRole('button', { name: 'Back to Plugins' }).click()
       await page.getByRole('button', { name: 'About Field notes' }).click()
-      await page.getByRole('switch', { name: 'Update automatically' }).click()
-      await page.getByRole('button', { name: 'Resume updates' }).waitFor()
-      await shot('resume')
-      await page.getByRole('button', { name: 'Resume updates' }).click()
-      await page.waitForFunction(() => document.querySelector('[aria-label="Update automatically"]')?.getAttribute('aria-checked') === 'true')
-      assert.deepEqual(patches, [{ auto_update: true, replace_changes: true }])
+      await page.getByRole('button', { name: 'Ask my agent' }).waitFor()
+      await shot('personal')
+      await page.getByRole('button', { name: 'Ask my agent' }).click()
+      await page.getByText('Your agent has the update.', { exact: true }).waitFor()
+      await page.getByRole('button', { name: 'Keep my version' }).click()
+      await page.getByText('Keeping your version.', { exact: true }).waitFor()
+      assert.deepEqual(patches, [{ review: 'ask', version: '1.0.4' }, { review: 'skip', version: '1.0.4' }])
+      await page.evaluate(() => __review.modules.market.openLinkInstall({ link: 'https://github.com/ada-park/field-notes/tree/v1.0.4' }))
+      await page.getByRole('button', { name: 'Ask my agent' }).waitFor()
+      await shot('personal-install')
+      await page.getByRole('button', { name: 'Ask my agent' }).click()
+      await page.getByText('Your agent has the update.', { exact: true }).waitFor()
+      await page.getByRole('button', { name: 'Done', exact: true }).click()
       await page.evaluate(() => { __review.closeSheet(); __review.goActivity() })
       await page.getByText('updated automatically to 1.0.3', { exact: true }).first().click()
       await page.getByText(/Version 1.0.2 → 1.0.3/).waitFor()
       await shot('activity')
       assert.deepEqual(errors, [])
-      console.log(`PASS ${width} ${mode}: list, About, review, resume and Activity`)
+      console.log(`PASS ${width} ${mode}: list, About, review, personal update choices and Activity`)
     } finally { await ctx.close(); await app.close() }
   }
 } finally { await browser.close() }

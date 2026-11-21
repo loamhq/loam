@@ -3145,7 +3145,10 @@ class Server:
                 elif method == "PATCH":
                     by = author(payload)
                     fields = {k: v for k, v in payload.items() if k != "by"}
-                    if set(fields) == {"on"}:
+                    if "review" in fields:
+                        import loam_plugin_review
+                        body = await asyncio.to_thread(loam_plugin_review.action, pid, fields)
+                    elif set(fields) == {"on"}:
                         body = await asyncio.to_thread(loam_plugins.set_on, pid, fields["on"], by)
                     elif "auto_update" in fields and set(fields) <= {"auto_update", "replace_changes"}:
                         body = await asyncio.to_thread(loam_plugins.set_auto_update, pid,

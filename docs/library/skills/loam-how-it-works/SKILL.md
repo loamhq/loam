@@ -183,8 +183,11 @@ extensions. Loam checks the Market listing or the linked repository’s release
 tags daily. About lets you review an update and turn automatic updates on or
 off. Nightly updates are on by default and appear in Activity. An update
 that asks for more access waits for the owner’s yes. An agent changes the
-same switch with `bin/settings set plugin.auto_update` and uses
-`plugin.install` to preview and confirm a specific update on the owner’s word.
+same switch for an unedited install with `bin/settings set plugin.auto_update` and uses
+`plugin.install` to preview and confirm a specific update on the owner’s word. Personal changes pause replacement.
+Loam tells the chosen attention agent about a newer original. The agent
+uses `loam-building-a-plugin` to show what would change in chat, bring in
+what the owner wants, or keep this version and leave it quiet.
 
 **History and backup.** Every fifteen minutes the vault and AI Spaces are
 each committed to their own git history on the server, so a change anyone

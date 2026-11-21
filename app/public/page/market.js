@@ -866,6 +866,7 @@ export function mount(host) {
     const entry = job.entry, p = job.preview, kind = entry ? kindOf(entry) : p ? kindOf(p) : 'extension'
     const name = p?.name ?? entry?.name ?? job.id
     const update = p?.replaces
+    const personal = Boolean(update?.edited || update?.personal)
     const theme = kind === 'theme'
     const home = KIND_HOME[kind]
     const done = job.phase === 'done'
@@ -874,7 +875,25 @@ export function mount(host) {
     const lines = p ? plainTouches(additions ? { touches: p.added, overrides: p.added.overrides, page_code: p.added.page_code } : p.declaration, kind, additions) : []
     const description = entry?.description ?? p?.description
     const from = link && p?.source ? `from github.com/${p.source.repo}` : null
+    async function decide(review) {
+      if (job.phase !== 'ready') return
+      job.phase = 'installing'; job.error = ''; host.schedule()
+      try {
+        const out = await host.api('PATCH', `/plugins/${encodeURIComponent(p.id)}`,
+          { review, link: p.source.url, via: link ? 'link' : 'market', version: p.version })
+        if (st.install !== job) return
+        job.phase = 'answered'
+        job.answer = out.skipped ? 'Keeping your version.' : 'Your agent has the update.'
+      } catch (error) { job.phase = 'ready'; job.error = error.message }
+      host.schedule()
+    }
     const card = h('div', { class: `sheet market-install${link ? ' market-link-found' : ''}`, key: `install:${job.id}` }, sheetHandle(closeInstall),
+      personal ? [h('h2', { class: 'display sheet-title', tabindex: '-1', text: name }),
+        h('p', { class: 'note', role: 'status', text: job.answer || `Version ${p.version} is available for your copy.` }),
+        job.error ? h('p', { role: 'alert', text: job.error }) : null,
+        h('div', { class: 'market-install-acts' }, job.answer ? button('Done', closeInstall, 'pillbtn primary') : [
+          button('Keep my version', () => decide('skip'), 'pillbtn', { disabled: job.phase !== 'ready' }),
+          button('Ask my agent', () => decide('ask'), 'pillbtn primary', { disabled: job.phase !== 'ready' })])] :
       job.phase === 'gone' ? [h('h2', { class: 'display sheet-title', tabindex: '-1', text: 'Not in the Market' }), h('p', { class: 'note', text: `The Market lists no ${job.id} now.` }),
         h('div', { class: 'market-install-acts' }, button('Close', closeInstall, 'pillbtn primary'))] : [
       link && !done ? linkCover(p) : null,
@@ -891,7 +910,6 @@ export function mount(host) {
         h('h3', { class: 'market-facts-title', text: update ? (Object.keys(p.added ?? {}).length ? 'New in this version' : 'Nothing new in what it touches') : 'Before you say yes' }),
         job.phase === 'reading' ? h('p', { class: 'note market-reading', role: 'status' }, h('span', { class: 'market-pulse', 'aria-hidden': 'true' }), 'Reading what it declares, from its own link…')
           : p ? touchList(lines) : null) : null,
-      !done && update?.edited ? h('p', { class: 'note', text: 'This update replaces your edits in the installed folder.' }) : null,
       p?.installable === false ? h('p', { class: 'note market-why', text: `${p.why}. It is listed so you can see it.` }) : null,
       job.error ? h('p', { class: 'plugin-notice err', role: 'alert', text: job.error }) : null,
       !done && p && p.installable !== false && !(theme && !p.declaration?.page_code) ? h('p', { class: 'note market-root', text: ROOT_LINE }) : null,

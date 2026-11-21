@@ -1,7 +1,7 @@
 #!/bin/sh
 # Dispatch the public verbs to their sibling scripts. Other loam-* programs are internal.
 set -eu
-VERBS="status update report market host tell hetzner"
+VERBS="status update report market host tell hetzner plugin"
 here=$(dirname "$(readlink -f "$0")")
 # Python's bytecode never lands in the checkout, however `loam` was reached
 # (a root shell over ssh reads no profile): an update refuses a tree with

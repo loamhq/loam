@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+"""Review a plugin update with the owner or connect a customised copy to its original."""
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+from loam_plugins import ID
+from loam_settings import call, SettingsError
+
+parser = argparse.ArgumentParser(prog="loam plugin", description=__doc__)
+commands = parser.add_subparsers(dest="review", required=True)
+for name in ("track", "ask", "prepare", "preview", "apply", "skip"):
+    cmd = commands.add_parser(name)
+    cmd.add_argument("id")
+    if name == "track":
+        cmd.add_argument("original")
+        cmd.add_argument("--link", help="the exact release the copy started from")
+    if name in ("ask", "skip"):
+        cmd.add_argument("version")
+    if name == "apply":
+        cmd.add_argument("confirm", help="the reviewed draft's token, after the owner's yes")
+fields = vars(parser.parse_args())
+pid = fields.pop("id")
+if not ID.fullmatch(pid):
+    parser.error("invalid plugin id")
+try:
+    print(json.dumps(call("PATCH", f"/v1/plugins/{pid}", fields, timeout=180), indent=2))
+except SettingsError as exc:
+    parser.exit(1, f"{exc}\n")
