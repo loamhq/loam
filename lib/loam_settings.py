@@ -538,6 +538,15 @@ ENTRIES: list[Entry] = [
           read="GET /v1/plugins/{plugin}/agents/{agent}",
           pick=lambda a, m: a.get("values")),
 
+    Entry("composer.send_key", "setting",
+          "The keyboard shortcut for sending a chat message",
+          "PATCH /api/settings/composer",
+          route="PATCH /v1/settings/composer",
+          values="enter (default) or modifier (Command or Control + Enter)",
+          body=lambda v, m: {"send_key": v},
+          read="GET /v1/settings/composer",
+          pick=lambda a, m: a["send_key"]),
+
     # -- Settings: Appearance (2026-11-11), kept on the host ---------------
     # One value for each device kind (the page's primary pointer: coarse is
     # the phone), stored by lib/loam_appearance.py. A persona's set changes
@@ -796,6 +805,7 @@ PAGE_RELAY: dict[str, list[str] | str] = {
     "rest === '/integrations/github'": ["integration.github"],
     "/^\\/integrations\\/github\\/(manifest|register|install|callback|refresh)$/":
         ["integration.github"],
+    "rest === '/settings/composer'": ["composer.send_key"],
     "rest === '/settings/git'": ["git.identity"],
     "rest === '/settings/appearance'": [
         "appearance.phone.mode", "appearance.phone.transition",

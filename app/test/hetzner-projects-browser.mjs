@@ -18,7 +18,7 @@ from pathlib import Path
 root = Path(sys.argv[1])
 sys.path.insert(0, str(root / "lib"))
 import loam_plugins
-found = loam_plugins.read_folder(root / "plugins" / "hetzner-cloud")
+found = loam_plugins.read_folder(root / "plugins" / "_listed" / "hetzner-cloud")
 manifest = found["manifest"]
 print(json.dumps({**manifest, "guide": found["guide"], "has": found["has"],
                   "declaration": loam_plugins.declaration(manifest, found["has"])}))
@@ -46,7 +46,7 @@ async function check(width, mode) {
   const settings = { theme: 'latte', mode, size: 100, options: {} }
   app.routes['GET /v1/settings/appearance'] = (req, res) => json(res, { phone: settings, desktop: settings })
   app.routes['GET /v1/keys'] = (req, res) => json(res, { providers: [provider] })
-  const row = { ...plugin, layer: 'shipped', folder: 'plugins/hetzner-cloud', source: { kind: 'loam' },
+  const row = { ...plugin, layer: 'yours', folder: 'plugins/hetzner-cloud', source: { kind: 'built' },
     effective: true, on: false, switch: 'plugin', broken: null, warnings: [] }
   app.routes['GET /v1/plugins'] = (req, res) => json(res, { plugins: [row] })
   app.routes['GET /v1/plugins/hetzner-cloud'] = (req, res) => json(res, { plugin: row, rows: [row] })

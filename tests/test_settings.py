@@ -925,6 +925,23 @@ async def main():
               body["desktop"]["transition"] == "long"
               and body["phone"]["transition"] == "normal"
               and body["phone"]["size"] == before["phone"]["size"], body)
+        send_key = "/v1/settings/composer"
+        status, body = await http(port, "GET", send_key)
+        check("unset send key defaults to Enter", status == 200 and body == {"send_key": "enter"}, body)
+        out = await cli(port, "set", "composer.send_key", "modifier")
+        check("a persona can set the owner's send key", out.get("value") == "modifier", out)
+        status, body = await http(port, "GET", send_key)
+        check("the app reads the modifier choice from the same route",
+              status == 200 and body == {"send_key": "modifier"}, body)
+        status, _ = await http(port, "PATCH", send_key, {"send_key": "space"})
+        status2, body = await http(port, "GET", send_key)
+        check("invalid send key leaves the valid choice in place",
+              status == 400 and status2 == 200 and body == {"send_key": "modifier"}, body)
+        status, body = await http(port, "PATCH", send_key, {"send_key": "enter"})
+        out = await cli(port, "get", "composer.send_key")
+        check("the owner's choice is visible to the Settings CLI",
+              status == 200 and body == {"send_key": "enter"} and out.get("value") == "enter", out)
+
         out = await cli(port, "describe", "appearance.phone.transition")
         row = out.get("setting") or {}
         check("describe appearance.phone.transition: the three ids",

@@ -21,6 +21,7 @@ import loam_contributions as contributions
 import loam_hetzner as api
 import loam_keys as keys
 import loam_plugins as plugins
+import loam_to_market
 
 PERSONAL = "fixture-personal-token-1"
 WORK = "fixture-work-token-2"
@@ -172,7 +173,25 @@ class HetznerTest(unittest.TestCase):
 
     def test_enabled_lanes_and_stdio_tool(self):
         self.assertNotIn(keys.HETZNER_PLUGIN, contributions.lane_servers("persona"))
-        plugins.set_on(keys.HETZNER_PLUGIN, True)
+        pid = keys.HETZNER_PLUGIN
+        self.assertFalse(any(row["id"] == pid for row in plugins.listing()["plugins"]))
+        self.connect_projects()
+        with plugins.locked():
+            data = plugins.load_list()
+            data["on"][pid] = True
+            plugins._save_list(data)
+
+        def listing_unavailable(_pid):
+            raise LookupError("offline fixture")
+
+        migrated = loam_to_market.keep(
+            from_release=lambda pid: plugins.seed_release_copy(ROOT / "plugins" / "_listed" / pid, pid),
+            link_of=listing_unavailable)
+        self.assertEqual(migrated[pid]["how"], "release")
+        self.assertEqual(loam_to_market.keep(), {})
+        row = plugins.one(pid)["plugin"]
+        self.assertEqual((row["layer"], row["on"]), ("yours", True))
+        self.assertEqual(keys.hetzner_project_token("work"), WORK)
         for lane in ("persona", "engineer"):
             self.assertIn("hetzner_api", contributions.lane_prompt(lane))
             spec = contributions.lane_servers(lane)[keys.HETZNER_PLUGIN]

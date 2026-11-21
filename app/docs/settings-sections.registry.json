@@ -42,6 +42,11 @@
       ]
     },
     {
+      "id": "chats",
+      "route": "/v1/settings/composer",
+      "fields": ["send_key"]
+    },
+    {
       "id": "agents",
       "views": [
         "profile",

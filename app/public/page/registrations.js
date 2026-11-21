@@ -45,6 +45,7 @@ export function registerPage(loam) {
   const sections = [
     ['account', 'Account', 'person', () => host.settingsAccount],
     ['appearance', 'Appearance', 'sun', () => host.settingsAppearance],
+    ['chats', 'Chats', 'chat', () => host.settingsChats],
     ['agents', 'Agents', 'users', () => host.settingsAgents],
     ['connections', 'Connections', 'link', () => host.settingsConnections],
     ['plugins', 'Plugins', 'puzzle', () => host.settingsPlugins],

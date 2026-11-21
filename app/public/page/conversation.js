@@ -31,7 +31,7 @@ export function mount(host, options = {}) {
       facts: (item, engine) => host.turnFacts(item, host.state.providers.find(p => p.id === engine) ?? null),
       reveal: steps => host.openBlocks.add(`fold:${host.keyOf(steps[0])}`) },
     sidebar: { collapsed: () => host.state.collapsed, set: host.setCollapsed, view: options.sidePanel ? null : () => host.listColumn() },
-    compose: { field: () => host.draft, render: ctx => host.composer(ctx),
+    compose: { hint: () => host.sendKeys.hint, field: () => host.draft, render: ctx => host.composer(ctx),
       leave: () => { host.registry.emit('field.reset', { host }); host.state.editor = false; host.closeMenus(); clearAttachments(host.state.attach); host.growDraft() },
       dictating: () => Boolean(host.fieldActivity('draft')?.active),
       audioLevel: () => host.fieldActivity('draft')?.level ?? 0,

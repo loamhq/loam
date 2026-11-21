@@ -147,8 +147,8 @@ check("the listing never carries the value; it shows the last four",
       GOOD not in listing and answer["shown"] == {"OPENAI_API_KEY": "…1234"}
       and answer["source"] == "saved" and answer["checked"]["ok"], answer)
 ids = [p["id"] for p in k.listing()["providers"]]
-check("API keys lists Loam's three first, then the ones plugins declare",
-      ids[:3] == ["openai", "google", "hetzner"] and "replicate" in ids
+check("API keys lists Loam's two first, then the ones plugins declare",
+      ids[:2] == ["openai", "google"] and "hetzner" not in ids and "replicate" in ids
       and "modal" not in ids, ids)
 
 # -- resolution ---------------------------------------------------------------------

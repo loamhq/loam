@@ -11,7 +11,7 @@ import { rootsAnswer } from './fixtures/files-contract.js'
 import { readFile } from 'node:fs/promises'
 
 test('removed settings destinations resolve to the current settings catalog', () => {
-  assert.deepEqual(SETTINGS_SECTIONS.map(item => item.label), ['Account', 'Appearance', 'Agents', 'Connections', 'Plugins', 'Files', 'About Loam'])
+  assert.deepEqual(SETTINGS_SECTIONS.map(item => item.label), ['Account', 'Appearance', 'Chats', 'Agents', 'Connections', 'Plugins', 'Files', 'About Loam'])
   assert.ok(SETTINGS_SECTIONS.every(item => !/accounts/i.test(`${item.id} ${item.label}`)), 'the word is kept for the Loam account')
   for (const page of ['providers', 'integrations', 'accounts']) assert.equal(settingsHome(page), 'connections')
   assert.equal(settingsHome('accounts', 'openai'), 'api-key')

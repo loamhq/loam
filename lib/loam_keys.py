@@ -34,7 +34,7 @@ PROVIDERS: dict[str, dict] = {
     "google": {"name": "Google Gemini", "shown": True, "check": "gemini",
                "where": "https://aistudio.google.com/apikey",
                "fields": [{"name": "GEMINI_API_KEY", "label": "API key", "secret": True}]},
-    "hetzner": {"name": "Hetzner Cloud", "shown": True, "check": "hetzner",
+    "hetzner": {"name": "Hetzner Cloud", "check": "hetzner",
                 "where": "https://console.hetzner.cloud/",
                 "fields": [{"name": "HCLOUD_TOKEN", "label": "API token", "secret": True}]},
     "cloudflare": {"name": "Cloudflare", "check": "cloudflare",
@@ -536,7 +536,7 @@ def _shown_values(fields: list[dict], values: dict[str, str]) -> dict[str, str]:
     return out
 
 
-def listing() -> dict:
+def listing(*, include: str | None = None) -> dict:
     """``GET /v1/keys``: every provider worth drawing, its key's state, and
     the plugins that use it. Never a whole secret value."""
     rows = _rows()
@@ -544,7 +544,13 @@ def listing() -> dict:
     users = declared_by(rows)
     checks = _checks()
     ids = [p for p, d in PROVIDERS.items() if d.get("shown")]
-    ids += sorted(p for p in set(users) | {f.stem for f in keys_dir().glob("*.env")}
+    saved_providers = {f.stem for f in keys_dir().glob("*.env")}
+    if include:
+        saved_providers.add(include)
+    hetzner_projects = _hetzner_projects()
+    if hetzner_projects:
+        saved_providers.add("hetzner")
+    ids += sorted(p for p in set(users) | saved_providers
                   if p not in ids and (p in PROVIDERS or p in users))
     out = []
     for pid in ids:
@@ -572,12 +578,12 @@ def listing() -> dict:
                     "checked": checks.get(pid) if source else None,
                     "refused": checks.get(f"{pid}:refused"),
                     "plugins": plugins,
-                    **({"projects": _hetzner_projects()} if pid == "hetzner" else {})})
+                    **({"projects": hetzner_projects} if pid == "hetzner" else {})})
     return {"providers": out}
 
 
 def one(pid: str) -> dict:
-    for p in listing()["providers"]:
+    for p in listing(include=pid)["providers"]:
         if p["id"] == pid:
             return p
     provider(pid)          # raises the 404 sentence

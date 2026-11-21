@@ -16,7 +16,7 @@ is ("below"). It shows the new agent's face (the theme's face for its id, as
 it will have once made), its name, and the first two sentences of its soul.
 "Read the whole thing" opens the soul ("Who they are") and the config ("How
 they work") rendered as markdown, never raw. **Create** is the primary action
-and **Ask for changes** (which puts the cursor in the composer) the secondary.
+and **Ask for changes** as the secondary action. It focuses the composer with a prompt to tell the agent what to change. The draft stays on the card.
 While the person is writing, or on an older draft when there are two, Create
 steps down to the secondary tier (`button-tiers.css`). A revision number is
 never shown on a first draft; from the second it is a quiet "2nd draft". Once

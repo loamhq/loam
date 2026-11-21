@@ -63,6 +63,7 @@ import loam_live  # noqa: E402
 import loam_storage  # noqa: E402
 import loam_settings  # noqa: E402
 import loam_appearance  # noqa: E402
+import loam_composer  # noqa: E402
 import loam_git_identity  # noqa: E402
 import loam_apps  # noqa: E402
 import loam_plugins  # noqa: E402
@@ -1380,6 +1381,26 @@ class Server:
         # Update state, checks, apply and rollback use the same implementation as the CLI.
         if parts[:2] == ["v1", "update"]:
             await self.update_route(method, parts[2:], payload, writer)
+            return
+
+        if parts == ["v1", "settings", "composer"]:
+            nocache = "Cache-Control: no-store\r\n"
+            try:
+                if method == "GET":
+                    value = await asyncio.to_thread(loam_composer.read)
+                elif method == "PATCH":
+                    by = author(payload)
+                    patch = {k: v for k, v in payload.items() if k != "by"}
+                    value = await asyncio.to_thread(loam_composer.update, patch)
+                    print(f"composer: {value['send_key']} by {by or lc.OWNER_ID}",
+                          file=sys.stderr, flush=True)
+                else:
+                    raise BrokerError(405, "use GET or PATCH for composer settings")
+            except ValueError as exc:
+                writer.write(response(400, {"error": str(exc)}, nocache))
+            else:
+                writer.write(response(200, value, nocache))
+            await writer.drain()
             return
 
         # Store appearance preferences on the host so devices and authorized setting changes

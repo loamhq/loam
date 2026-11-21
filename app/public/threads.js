@@ -16,8 +16,7 @@ import { canReply, quoteLine, replyQuotes, replyGesture } from './thread-replies
 import { OPENING_MESSAGES, HISTORY_MESSAGES, openingContext, readingAnchor, restoreAnchor, mergeHistory, progressiveProse } from './thread-opening.js'
 import { follower } from './follow.js'
 import { layoutPixels } from './scale.js'
-import { modelPill, settingsRow, listHeading, personaGrid, rowTop, chatHeader, chatFrame, chatDock, agentProse, userBubble, messageFiles, replyImages, stepFold, thinkingLine, emptyConversation, panelHeader, composerHint, settingsNav, selectionMark, createMessageState, sheetHandle } from './chat-ui.js'
-import { sendHint, isMac } from './keys.js'
+import { modelPill, settingsRow, listHeading, personaGrid, rowTop, chatHeader, chatFrame, chatDock, agentProse, userBubble, messageFiles, replyImages, stepFold, thinkingLine, emptyConversation, panelHeader, settingsNav, selectionMark, createMessageState, sheetHandle } from './chat-ui.js'
 import { authenticatedFetch as fetch, authExpired, failureSentence } from './auth.js'
 import { createPermissionCards } from './permission-cards.js'
 import { h, kept, blob, avatarLook, icon, dress } from './ui.js'
@@ -68,7 +67,16 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     api: (...args) => transport(...args),
     redraw,
     made: agent => { changedAgent(agent); load({ quiet: true }) },
-    askChanges: () => { draft.focus(); redraw() },
+    askChanges: revision => {
+      const o = st.open
+      if (!o) return
+      o.changingDraft = revision
+      const field = compose.field()
+      field.placeholder = changeDraftPrompt(o)
+      field.focus({ preventScroll: true })
+      o.focusReplyDraft = true
+      redraw()
+    },
     openThread: id => open(id),
     renderText,
   })
@@ -742,7 +750,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
         await outbox.add(o.thread.id, body, attachments, o.replyTo ?? null)
         st.drafts.delete(o.thread.id)
         if (st.open === o) {
-          o.replyTo = null; draft.value = ''; compose.clear(); st.mention = null
+          o.replyTo = null; o.changingDraft = null; draft.value = ''; compose.clear(); st.mention = null
           o.atEnd = true; o.readingPosition = null; o.openingBoundary = null; o.replyAnchor = null; o.landAt = null; o.landing = false
         }
       } catch (error) { o.error = `Your message is still here. ${error.message}` }
@@ -764,7 +772,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       }
       if (st.drafts.get(o.thread.id)?.text.trim() === text) st.drafts.delete(o.thread.id)
       if (st.open !== o) return
-      o.replyTo = null; draft.value = ''; compose.clear()
+      o.replyTo = null; o.changingDraft = null; draft.value = ''; compose.clear()
       applyThreadEvent(o, { type: 'message.done', message })
       refreshList()
     } catch (e) { o.error = accepted ? `Message sent. ${e.message} Refresh to read the latest reply.` : `${e.message} Your message is still here.` }
@@ -1779,6 +1787,12 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
   function emptyThread() {
     return h('div', { class: 'pane-body' }, registry.draw('app.overlay', { slot: 'player' }), emptyState({ object: 'speech', title: 'Good things start here.', body: 'Choose a conversation or start a new thread.' }))
   }
+  function changeDraftPrompt(o) {
+    const revision = o.changingDraft
+    if (!revision || !agentDrafts.rows.some(d => d.draft === revision.draft && d.rev === revision.rev)) return null
+    return o.thread.default ? `Tell ${name(o.thread.default)} what to change` : 'Say what to change'
+  }
+
   function thread() {
     const o = st.open
     if (!o) return emptyThread()
@@ -1807,6 +1821,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       disabled: o.sending || o.loading || o.refreshing || o.readFailed || o.creating || o.createFailed,
       readOnly: o.readFailed || o.sending || o.createFailed,
       requiresText: Boolean(o.replyTo?.thread),
+      changePrompt: changeDraftPrompt(o),
       placeholder: (!o.messages.length && o.promptPlaceholder) || (o.thread.default ? `Message ${name(o.thread.default)}` : o.creating ? 'A little room for your thought…' : 'Write a thought, or @mention someone'),
       mentionPicker: st.mention ? h('div', { key: 'mentions', class: 'popover tt-mentions', role: 'listbox', 'aria-label': 'Mention an agent',
         'data-menu-inputs': '.draft, .tt-mention-button', onmenudismiss: () => { st.mention = null; redraw() } }, ...mentionChoices().map((a, i) => settingsRow({ title: a.name, sub: a.sub, lead: a.everyone ? icon.users(24) : avatar(a.id, 24), onclick: () => insertMention(a), props: { type: 'button', role: 'option', 'aria-selected': String(i === (st.mention.index ?? 0)), class: `setrow${i === (st.mention.index ?? 0) ? ' on' : ''}` } }))) : null,
@@ -1868,7 +1883,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
           listeners,
           o.error ? h('div', { class: 'banner', role: 'alert' }, o.error, o.createFailed ? button('Try creating again', () => create(o.thread.default, { promptTitle: o.promptTitle, promptBody: o.promptBody, placeholder: o.promptPlaceholder, draft: draft.value, source: o.replyTo?.thread ? o.replyTo : null })) : button('Refresh thread', () => open(o.thread.id))) : null,
           o.connection ? h('div', { class: 'noticerow', role: 'status', text: o.connection }) : null,
-          composingReply(), renderedComposer), composerHint({ wide: st.wide, chord: sendHint(isMac(globalThis.navigator)), thread: true }))),
+          composingReply(), renderedComposer), compose.hint?.())),
       o.boardOpen ? h('button', { class: 'tt-board-scrim', title: 'Dismiss board panel', tabindex: '-1', onclick: () => chooseView(null) }) : null,
       board(),
       branchPanel(),

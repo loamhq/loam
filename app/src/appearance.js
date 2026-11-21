@@ -12,7 +12,19 @@ export function appearanceValues(value, themes = [{ id: 'latte' }, { id: 'plain'
   return { phone: clean(value?.phone), desktop: clean(value?.desktop), ...(globalThis.LoamSun.location(value?.location) ? { location: globalThis.LoamSun.location(value.location) } : {}) }
 }
 
+async function composerBoot(broker) {
+  try {
+    const out = await broker.json('GET', '/v1/settings/composer', undefined, { signal: AbortSignal.timeout(3000) })
+    if (out.status === 200) {
+      const value = JSON.parse(out.body).send_key
+      if (value === 'enter' || value === 'modifier') return value
+    }
+  } catch { /* The app retries when the broker comes back. */ }
+  return null
+}
+
 export async function appearanceBoot(broker, themes = [{ id: 'latte', name: 'Latte' }, { id: 'plain', name: 'Plain' }]) {
+  const sendKey = composerBoot(broker)
   let data
   try {
     const out = await broker.json('GET', '/v1/settings/appearance', undefined, { signal: AbortSignal.timeout(3000) })
@@ -21,5 +33,6 @@ export async function appearanceBoot(broker, themes = [{ id: 'latte', name: 'Lat
   } catch {
     data = { values: appearanceValues(null, themes), available: false, themes }
   }
+  data.sendKey = await sendKey
   return `globalThis.__loamAppearance = ${JSON.stringify(data).replace(/</g, '\\u003c')};\n`
 }

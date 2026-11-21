@@ -44,11 +44,11 @@ try {
   const face = find(root, 'blob')
   assert.match(face.style.background, /^var\(--agent-avatar-tone-\d+, var\(--persona-/)
 
-  for (const label of ['Account', 'Appearance', 'Agents', 'Connections', 'Plugins', 'Files', 'About Loam']) {
+  for (const label of ['Account', 'Appearance', 'Chats', 'Agents', 'Connections', 'Plugins', 'Files', 'About Loam']) {
     click(utility('Settings')); await until(() => find(root, 'settings'))
     const destinations = width >= 1100 ? all(root, 'navrow').map(text) : all(root, 'setrow-title').map(text)
     // The Market (2026-11-18) is the last row, set apart: a place of its own.
-    assert.deepEqual(destinations, [...(width < 1100 ? ['Activity'] : []), 'Account', 'Appearance', 'Agents', 'Connections', 'Plugins', 'Files', 'About Loam', 'Market'])
+    assert.deepEqual(destinations, [...(width < 1100 ? ['Activity'] : []), 'Account', 'Appearance', 'Chats', 'Agents', 'Connections', 'Plugins', 'Files', 'About Loam', 'Market'])
     if (width < 1100) await until(() => text(find(setting('Activity'), 'setrow-sub')) === '1 working')
     click(setting(label))
     await until(() => all(root, 'sheet-title').some(node => text(node) === label))
@@ -129,5 +129,5 @@ try {
   click(all(root, 'apps-row')[1]); assert.equal(browserOpens.at(-1), apps[1].url)
   click(section('Chats')); await until(() => all(root, 'tt-row').length === 4)
   assert.ok(find(root, 'tt-unread'), 'Chats retain their own unread dots')
-  console.log(JSON.stringify({ width, mode, sections: 3, settings: 8, roots: 2, activitySeenWrites: 0, workIndicators: 0, apps: 2, result: 'passed', visualLayout: 'not evaluated' }))
+  console.log(JSON.stringify({ width, mode, sections: 3, settings: 9, roots: 2, activitySeenWrites: 0, workIndicators: 0, apps: 2, result: 'passed', visualLayout: 'not evaluated' }))
 } finally { page.unwatch(); page.stop(); await app.close(); setImmediate(() => process.exit(process.exitCode ?? 0)) }

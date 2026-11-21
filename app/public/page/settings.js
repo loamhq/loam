@@ -229,6 +229,7 @@ function goSettings(page, provider = null) {
   if (page === 'account') { passkey.loadPasskeys(); loadAccount() }
   if (page === 'about') loadServer()
   if (page === 'connections' || page === 'api-key' || page === 'root') apiKeys.load(page === 'connections')
+  if (page === 'chats') host.sendKeys.refresh()
   host.registry.emit('settings.opened', { page })
   if (page === 'agents') host.settingsProfiles.directory()
   host.schedule()
@@ -282,13 +283,31 @@ function providerCount() {
   return connected ? `${connected} AI ${connected === 1 ? 'provider' : 'providers'}` : null
 }
 
+function settingsChats({ back = true } = {}) {
+  const keys = host.sendKeys
+  return [back ? settingsBack('Settings', 'root') : null, settingsHead('Chats'),
+    h('section', { class: 'rows' },
+      h('div', { class: 'setrow chat-send-setting' },
+        h('div', { class: 'setrow-who' },
+          h('label', { for: 'chat-send-key', class: 'setrow-title', text: 'Send messages with' }),
+          h('div', { id: 'chat-send-help', class: 'setrow-sub', text: keys.value === 'modifier'
+            ? 'Enter starts a new line.' : 'Shift+Enter starts a new line.' })),
+        h('select', { id: 'chat-send-key', class: 'field-input', 'aria-describedby': 'chat-send-help',
+          disabled: keys.writing || keys.value === null, value: keys.value ?? '',
+          onchange: event => keys.set(event.currentTarget.value) },
+          keys.value === null ? h('option', { value: '', text: 'Loading…', selected: true }) : null,
+          ...[['enter', 'Enter'], ['modifier', keys.modifierLabel]].map(([value, label]) =>
+            h('option', { value, text: label, selected: value === keys.value })))),
+      keys.error ? h('p', { class: 'note warn', role: 'alert', text: keys.error }) : null)]
+}
+
 function settingsRoot() {
   const who = accountName()
   const services = integrationCatalog(host.state).filter(service => service.connected).map(service => service.name)
   const version = updates.st.data?.current?.version
   const summaries = { account: who.username && who.username !== who.name ? `${who.name} · ${who.username}` : who.name,
     appearance: `${({ system: 'System', sun: 'Sun', dark: 'Dark', light: 'Light' })[host.theme.value.mode]} · ${host.theme.value.size}%`,
-    agents: `${host.state.agents.list.length} agents`,
+    chats: 'Message shortcuts', agents: `${host.state.agents.list.length} agents`,
     connections: [providerCount(), ...services, apiKeys.st.list ? apiKeys.summary() : null].filter(Boolean).join(' · ') || 'AI providers, services and API keys',
     files: 'Shortcuts and folders', plugins: 'Themes and extensions',
     about: updates.st.data?.check?.available ? `Loam ${updates.st.data.check.latest?.version} is ready` : version ? `Version ${version}` : 'Version and updates' }
@@ -881,6 +900,7 @@ return Object.defineProperties({}, {
     settingsDialog: { enumerable: true, get: () => settingsDialog },
     settingsPlugins: { enumerable: true, get: () => settingsPlugins },
     settingsAppearance: { enumerable: true, get: () => settingsAppearance },
+    settingsChats: { enumerable: true, get: () => settingsChats },
     goSettings: { enumerable: true, get: () => goSettings },
     settingsBack: { enumerable: true, get: () => settingsBack },
     backInSettings: { enumerable: true, get: () => backInSettings },

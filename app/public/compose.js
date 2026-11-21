@@ -1,3 +1,4 @@
+import { composing } from './keys.js'
 // The composer's field, which shows markdown as it is typed.
 //
 // The owner, 2026-09-22: "please make sure bullet points and numbered lists
@@ -457,7 +458,7 @@ export function richField(el, { sends = () => false, changed = () => {}, send = 
   })
 
   el.addEventListener('keydown', (event) => {
-    if (key(event)) return
+    if (el.__composing || composing(event) || key(event)) return
     if (sends(event)) {
       event.preventDefault?.()
       send()

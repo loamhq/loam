@@ -311,6 +311,11 @@ export function createApp({
       return await relayJson(res, method, '/v1/settings/git', method === 'PATCH' ? await readBody(req) : undefined)
     }
 
+    if (rest === '/settings/composer') {
+      if (!['GET', 'PATCH'].includes(method)) return sendJson(res, 405, { error: 'Use GET or PATCH for composer settings.' })
+      return await relayJson(res, method, '/v1/settings/composer', method === 'PATCH' ? await readBody(req) : undefined)
+    }
+
     if (rest === '/settings/appearance') {
       if (!['GET', 'PATCH'].includes(method)) return sendJson(res, 405, { error: 'Use GET or PATCH for appearance.' })
       return await relayJson(res, method, '/v1/settings/appearance', method === 'PATCH' ? await readBody(req) : undefined)

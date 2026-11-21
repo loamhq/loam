@@ -1,4 +1,4 @@
-import { isMac, sends, sendHint } from "../keys.js"
+import { isMac } from "../keys.js"
 import { richField } from "../compose.js"
 import { h, icon, kept } from "../ui.js"
 import { removeAttachment, bytes, uploading, stored, heldFiles } from "../attach.js"
@@ -55,6 +55,7 @@ const draft = richField(
     contenteditable: 'true',
     role: 'textbox',
     'aria-multiline': 'true',
+    enterkeyhint: 'enter',
     // The keyboard animates in, and a phone reports the viewport it is going to
     // leave part way through rather than at the moment of focus. The browser's
     // own `resize` is what this app acts on; these are the two nudges that catch
@@ -74,10 +75,7 @@ const draft = richField(
     },
   }),
   {
-    // Enter is a new line — or the next item of the list it is pressed in.
-    // Sending is the button, or a modifier held; see keys.js, which is the
-    // whole of that decision.
-    sends,
+    sends: event => host.sendKeys.sends(event),
     key: (event) => activeThread() && host.threads.mentionKey(event),
     send: () => submitDraft(),
     // A screenshot pasted into the field. The field hands over the files it
@@ -126,9 +124,10 @@ const editorDraft = richField(
     contenteditable: 'true',
     role: 'textbox',
     'aria-multiline': 'true',
+    enterkeyhint: 'enter',
   }),
   {
-    sends,
+    sends: event => host.sendKeys.sends(event),
     send: () => sendFromEditor(),
     // Attachments and the model belong to the chat and not to this screen, so
     // nothing is taken in here: a paste of an image is the composer's business
@@ -337,8 +336,8 @@ function builtinComposer(ctx) {
   // control in it disabled and the send gone — so the only two things that can
   // be pressed are the ✕ and the ✓ inside the field.
   const take = host.fieldActivity('draft')
-  draft.placeholder = ctx.placeholder ?? `Message ${ctx.agentName}`
-  const editable = String(!ctx.readOnly), label = 'Message thread'
+  draft.placeholder = ctx.changePrompt ?? ctx.placeholder ?? `Message ${ctx.agentName}`
+  const editable = String(!ctx.readOnly), label = ctx.changePrompt ?? 'Message thread'
   if (draft.getAttribute('contenteditable') !== editable) draft.setAttribute('contenteditable', editable)
   if (draft.getAttribute('aria-readonly') !== String(Boolean(ctx.readOnly))) draft.setAttribute('aria-readonly', String(Boolean(ctx.readOnly)))
   if (draft.getAttribute('aria-label') !== label) draft.setAttribute('aria-label', label)
@@ -366,11 +365,13 @@ function builtinComposer(ctx) {
       ? h('button', { class: 'popscrim', key: 'popscrim', type: 'button', title: 'Close', onclick: closeMenus })
       : null,
     host.state.wide && host.state.pop ? menuPopover() : null,
+    !take ? host.registry.draw('composer.tool', { host, slot: 'advice', target: 'draft' }) : null,
     h(
       'div',
       { class: 'composer-box' },
       ctx.mentionPicker,
-      host.registry.draw('composer.tool', { host, slot: 'notice', target: 'draft', context: ctx }),
+      host.registry.draw('composer.tool', { host, slot: 'notice', target: 'draft', context: ctx })
+        .filter(node => !node?.classList?.contains('speech-key-link')),
       attachStrip(),
       // Row one: the field, and the glyph that opens it full screen in its
       // top-right corner. The owner, 2026-09-25: "I like the design, but I feel
@@ -506,11 +507,12 @@ function editorNodes() {
         h('div', { class: 'display editor-title', text: name ? `Message ${name}` : 'Your message' }),
         h('button', { class: 'editor-done', type: 'button', text: 'Done', onclick: closeEditor }),
       ),
+      !take ? host.registry.draw('composer.tool', { host, slot: 'advice', target: 'editor' }) : null,
       h('div', { class: `editor-body${take ? ' taking' : ''}` }, kept(editorDraft), take ? host.registry.draw('composer.tool', { host, slot: 'take', target: host.state.editor ? 'editor' : 'draft' }) : null),
       h(
         'div',
         { class: `editor-foot${take ? ' quiet' : ''}` },
-        h('span', { class: 'editor-hint', text: sendHint(MAC) }),
+        h('span', { class: 'editor-hint', text: host.sendKeys.hint }),
         host.registry.draw('composer.tool', { host, slot: 'microphone', target: 'editor' }),
         take
           ? null

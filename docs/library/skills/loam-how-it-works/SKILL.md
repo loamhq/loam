@@ -57,7 +57,7 @@ Files keeps item dates, authors and expiry in the Markdown while you edit.
 If an agent edits the board during a Cards save, the app keeps the draft and
 shows the latest board with a button to reapply the edit.
 
-**Dictation and Read aloud.** These Market plugins work without a key in browsers that support speech recognition or speech synthesis, respectively. With a server key, they select Google first and OpenAI second. A provider error stays with that provider. Each plugin’s settings show the active provider. On browser fallback, a guide helps you create, check and save a shared Gemini key. Record first and Polish, spoken Briefs and generated table descriptions need a server key.
+**Dictation and Read aloud.** These Market plugins work without a key in browsers that support speech recognition or speech synthesis, respectively. With a server key, they select Google first and OpenAI second. A provider error stays with that provider. Each plugin’s settings show the active provider. The Gemini key guide walks through creating, checking and saving a shared key. Dictation can suggest it once after a take that used browser recognition. Record first and Polish, spoken Briefs and generated table descriptions need a server key.
 
 The session host runs the provider and records its
 output as it arrives. The thread worker turns that output into the reply the
@@ -103,6 +103,12 @@ fit together. Empty places explain their purpose until they fill. Board,
 Details, Branch, Activity, Settings and the desktop's Hide list show a
 caption until the owner uses that control. Chats, Files and Apps keep
 their tab names.
+
+In chats, Enter sends and Shift+Enter starts a new line. Settings › Chats
+can switch to Command or Control + Enter to send. The owner’s choice follows
+their browsers, and an agent can change it on their word with
+`settings set composer.send_key` using `enter` or `modifier`. On mobile
+browsers, Return starts a new line and the Send button sends.
 When the owner starts designing an agent in Hello or any other thread, Iris
 asks one question about what they're looking for and hears the answer
 before drafting.

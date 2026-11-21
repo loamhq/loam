@@ -130,6 +130,7 @@ own `thread.*` rows cover the same things.
 | `reviewer.model` | The reviewer's model | PATCH /api/system/reviewer | persona, conversation only | no |
 | `reviewer.effort` | The reviewer's thinking level | PATCH /api/system/reviewer | persona, conversation only | no |
 | `plugin.agent` | A plugin's settings for one agent (Read aloud's voice, once loam-ui reads it) | PATCH /api/plugins/{plugin}/agents/{agent} | persona, conversation only | no |
+| `composer.send_key` | The chat send shortcut. `enter` by default, or `modifier` for Command or Control + Enter. | PATCH /api/settings/composer | persona | no |
 | `appearance.phone.mode` | The phone's mode: light, dark, sun or system (the modes loam-ui's handoff declares) | PATCH /api/settings/appearance | persona | no (was `device.theme`, in the browser) |
 | `appearance.phone.transition` | The phone's Sun mode transition: fast (3 s), normal (10 s) or long (20 s) | PATCH /api/settings/appearance | persona | no |
 | `appearance.phone.size` | The phone's page size, 75–150 % in 5s | PATCH /api/settings/appearance | persona | no |

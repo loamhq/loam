@@ -1,10 +1,11 @@
 // Stable destinations. Legacy settings links resolve to their current home.
-// Seven since 2026-11-18 (the owner: "love it", to this structure). The word
+// The word
 // for API keys is "API keys", never "Accounts": that word is kept for the
 // Loam account, which will live under Account.
 export const SETTINGS_SECTIONS = [
   { id: 'account', label: 'Account', icon: 'person' },
   { id: 'appearance', label: 'Appearance', icon: 'sun' },
+  { id: 'chats', label: 'Chats', icon: 'chat' },
   { id: 'agents', label: 'Agents', icon: 'users' },
   { id: 'connections', label: 'Connections', icon: 'link' },
   { id: 'plugins', label: 'Plugins', icon: 'puzzle' },

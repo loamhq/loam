@@ -610,6 +610,7 @@ function keepTake() {
     return
   }
   land(take, take.words)
+  if (host.provider?.() === 'browser') host.browserTakeLanded?.(take.target)
 }
 
 
