@@ -430,7 +430,10 @@ function settingsAgents({ back = true } = {}) {
   if (!st.engineers && !st.reviewer && !st.directoryLoading && !st.directoryError) host.settingsProfiles.directory()
   const group = (title, rows) => h('section', { class: 'profile-group', 'aria-label': title }, h('h3', { class: 'kicker', text: title }), h('div', { class: 'rows' }, rows))
   const detail = goSettingsDetail
-  const provider = row => host.state.providers.find(p => p.id === row.effective.provider)?.name || row.effective.provider
+  const providerValue = row => {
+    const id = row.effective?.provider
+    return id ? h('span', { class: 'setrow-value', text: host.state.providers.find(p => p.id === id)?.name || id }) : null
+  }
   if (host.state.sheet?.archivedAgents) return [settingsBack('Agents', 'agents'), settingsHead('Archived'),
     st.directoryError ? h('p', { role: 'alert', class: 'schedule-error', text: st.directoryError }) : null,
     st.archived === null ? h('p', { role: 'status', text: 'Loading archived agents…' }) : st.archived.length ? group('Archived agents', st.archived.map(agent => h('div', { class: 'setrow', key: agent.id },
@@ -438,10 +441,10 @@ function settingsAgents({ back = true } = {}) {
       h('button', { class: 'pillbtn', disabled: st.directoryBusy, text: 'Restore', 'aria-label': `Restore ${agent.name}`, onclick: () => host.settingsProfiles.restore(agent.id) })))) : emptyState({ object: 'archive', title: 'No archived agents', body: 'Agents you archive wait here, ready to restore.' })]
   const systemRows = [
     ...(st.engineers ? [
-      ...[...st.engineers.engineers].sort((a, b) => Number(b.platform) - Number(a.platform) || a.project.localeCompare(b.project)).map(row => settingsRow({ title: row.project, sub: row.platform ? 'Builds and repairs Loam itself' : `Changes code for ${row.project}`, lead: tile(icon.code(18)), right: h('span', { class: 'setrow-value', text: provider(row) }), onclick: () => detail('engineer', row.project) })),
-      settingsRow({ title: 'Every other project', sub: 'Engineer settings for the things you build', lead: tile(icon.code(18)), right: h('span', { class: 'setrow-value', text: provider(st.engineers.default) }), onclick: () => detail('engineer', 'default') }),
+      ...[...st.engineers.engineers].sort((a, b) => Number(b.platform) - Number(a.platform) || a.project.localeCompare(b.project)).map(row => settingsRow({ title: row.project, sub: row.platform ? 'Builds and repairs Loam itself' : `Changes code for ${row.project}`, lead: tile(icon.code(18)), right: providerValue(row), onclick: () => detail('engineer', row.project) })),
+      settingsRow({ title: 'Every other project', sub: 'Engineer settings for the things you build', lead: tile(icon.code(18)), right: providerValue(st.engineers.default), onclick: () => detail('engineer', 'default') }),
     ] : []),
-    ...(st.reviewer ? [settingsRow({ title: st.reviewer.name, sub: st.reviewer.on === false ? 'Reviews are off' : 'Reads one agent’s work and leaves a note', lead: tile(icon.clock(18)), onclick: () => detail('reviewer', 'reviewer') })] : []),
+    ...(st.reviewer ? [settingsRow({ title: st.reviewer.name, sub: st.reviewer.on === false ? 'Reviews are off' : 'Reads one agent’s work and leaves a note', lead: tile(icon.clock(18)), right: providerValue(st.reviewer), onclick: () => detail('reviewer', 'reviewer') })] : []),
   ]
   return [back ? settingsBack('Settings', 'root') : null, settingsHead('Agents'),
     h('div', { class: 'agent-directory-actions' }, h('button', { class: 'pillbtn primary', disabled: st.directoryBusy, 'aria-label': 'New agent', onclick: async () => {

@@ -11,9 +11,32 @@ import { readAloudConfig } from './key-fixture.js'
 import { agentVoiceFrom } from '../../plugins/_listed/read-aloud/server/app.js'
 import { PREBUILT_VOICES } from '../../plugins/_listed/read-aloud/page/document-speech.js'
 import { createActivity } from '../public/activity.js'
+import { mount as mountSettings } from '../public/page/settings.js'
 import { installDom } from './fakedom.js'
 import { h } from '../public/ui.js'
 import { text, all } from './browser.js'
+
+test('the Nightly reviewer row labels the effective provider', () => {
+  installDom()
+  const reviewer = { name: 'Nightly reviewer', provider: 'antigravity', effective: { provider: 'antigravity' } }
+  const settings = mountSettings({
+    state: { agents: { list: [] }, providers: [{ id: 'antigravity', name: 'Antigravity' }, { id: 'codex', name: 'Codex' }] },
+    settingsProfiles: { st: { reviewer } },
+  })
+  const value = () => {
+    const page = h('div', {}, settings.settingsAgents())
+    const row = all(page, 'setrow').find(row => text(all(row, 'setrow-title')[0]) === reviewer.name)
+    return all(row, 'setrow-value').map(text)
+  }
+  assert.deepEqual(value(), ['Antigravity'])
+  reviewer.provider = null
+  reviewer.effective.provider = 'codex'
+  assert.deepEqual(value(), ['Codex'])
+  reviewer.provider = 'antigravity'
+  assert.deepEqual(value(), ['Codex'])
+  reviewer.effective.provider = null
+  assert.deepEqual(value(), [])
+})
 
 test('all profile relays preserve bearer, by, encoded ids, error sentences and no-store', async t => {
   const paths=['/agents/test agent','/engineers','/engineers/Project name','/system/reviewer','/plugins/test-plugin/agents','/plugins/test-plugin/agents/test-agent']
