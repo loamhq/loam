@@ -217,14 +217,14 @@ function builtinFileFieldFor(f, { readOnly, mono }) {
 // Go to a folder or a file. `push: false` is for an address the browser has
 // already moved to — a load, or Back.
 let fileDestination = 0
-function goFiles(root, path = '', { isFile = null, row = null, push = true, fragment = null, routed = false, mode = null, list = null, boardThread = null, panelLink = false } = {}) {
+function goFiles(root, path = '', { isFile = null, row = null, push = true, fragment = null, routed = false, mode = null, list = null, boardThread = null, panelLink = false, returnToSettings = false } = {}) {
   const destination = ++fileDestination
   if (isFile === null && path && root?.startsWith('@')) isFile = true
   if (isFile === null && path && root && root !== 'system') {
     const request = host.importRequest
     const open = (isFile, row) => {
       if (destination === fileDestination && request === host.importRequest)
-        goFiles(root, path, { isFile, row, push, fragment, mode, list, boardThread, panelLink })
+        goFiles(root, path, { isFile, row, push, fragment, mode, list, boardThread, panelLink, returnToSettings })
     }
     files.stat(root, path).then(row => open(!isFolder(row), row), () => open(false, null))
     return true
@@ -236,6 +236,10 @@ function goFiles(root, path = '', { isFile = null, row = null, push = true, frag
     return true
   }
   const item = { kind: 'file', root, path, row, fragment, mode, push, list, boardThread }
+  const sheet = host.state.sheet
+  if (returnToSettings && sheet?.kind === 'settings') {
+    item.returnModal = { kind: 'settings', page: sheet.page, provider: sheet.provider }
+  }
   if (!routed) return host.panels[host.panelId === 'side' ? 'openSide' : 'openMain'](item)
   files.st.chatFile = Boolean(boardThread || host.activeThread() || (host.state.screen === 'files' && files.st.chatFile))
   if (host.state.screen !== 'files') {
@@ -247,7 +251,10 @@ function goFiles(root, path = '', { isFile = null, row = null, push = true, frag
   host.state.screen = 'files'
   const current = files.st.file
   if (!current || current.root !== root || current.path !== path) files.openFile(root, path, row, { fragment, mode })
-  else if (fragment) current.fragment = fragment
+  else {
+    if (fragment) current.fragment = fragment
+    if (mode && current.mode !== mode) files.setMode(mode)
+  }
   host.schedule()
   return true
 }

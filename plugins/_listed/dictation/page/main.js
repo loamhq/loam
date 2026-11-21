@@ -69,7 +69,7 @@ export function activate(loam) {
   const mounts = new Map(owners.map(owner => {
     const local = { rec: null, takeNotice: null,
       mics: { loaded: false, list: [], named: false, error: '' },
-      termsNote: { loaded: false, found: false, path: null, url: null, terms: [], readAt: null, error: '' } }
+      termsNote: { loaded: false, found: false, path: null, vaultPath: null, terms: [], readAt: null, error: '' } }
     Object.defineProperty(local, 'dictation', { get: () => store.dictation, set: value => { store.dictation = value } })
     const context = loam.ui.extension({ host: owner, state: local, store, helpers: { ...helpers, provider: () => provider, guide,
       browserTakeLanded: target => showSuggestion(owner.panelId ?? 'main', target),
@@ -121,7 +121,14 @@ export function activate(loam) {
   loam.events.on('key.escape', event => { const entry = at(event); if (entry?.local.rec) { entry.service.discardTake(); event.preventDefault() } })
   loam.events.on('page.visible', () => { for (const { service } of mounts.values()) service.screen.shown() })
   loam.events.on('rendered', () => { for (const { service } of mounts.values()) service.followTake() })
-  loam.events.on('plugin.settings.opened', ({ id }) => { if (id === 'dictation') { const { service } = mounts.get('main'); service.loadMicrophones(); service.loadTermsNote() } })
+  function loadPreferences() {
+    const { service } = mounts.get('main')
+    service.loadMicrophones()
+    service.loadTermsNote()
+  }
+  loam.events.on('plugin.settings.opened', ({ id }) => { if (id === 'dictation') loadPreferences() })
+  const sheet = loam.ui.host.state.sheet
+  if (sheet?.kind === 'settings' && sheet.page === 'plugins' && sheet.provider === 'dictation') loadPreferences()
   const cleanup = () => { revision++; settingsRead++; pending = null; closeSuggestion(); guide.close(); for (const { service, local } of mounts.values()) { service.discardTake(); service.stopLive(); service.dispose(); local.takeNotice = null } }
   loam.events.on('page.leaving', cleanup)
   return cleanup

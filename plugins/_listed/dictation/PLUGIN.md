@@ -1,7 +1,7 @@
 ---
 id: dictation
 name: Dictation
-version: 1.2.2
+version: 1.2.3
 author: Loam contributors
 api: 0
 default_on: false
@@ -42,6 +42,8 @@ server:
 
 Press the microphone in the composer or Files and speak. Press ✓ to keep the words. With no key, As you speak uses your browser’s recognition. Browser support varies. Record first and Polish use a server key.
 
+In Settings › Plugins › Dictation, choose Record first to create or open your Names and terms note in Files. Add one name or term per line. Each recording reads the note fresh and sends the terms to the transcriber. As you speak uses browser recognition without Polish or the terms note.
+
 ## What you need, and what leaves your server
 
 Loam uses a Google key first, then an OpenAI key, then the browser. A provider error stays with that provider. Open Settings › Plugins › Dictation to see the provider. After your first browser take, the plugin can offer a free Gemini key. You can dismiss the suggestion or open the guide from Dictation preferences. To use the guide, sign in to Google AI Studio, create a key and paste it in the guide. Loam checks it and saves it in Settings › Connections › API keys for both plugins.
@@ -51,3 +53,5 @@ Eligible projects get a free quota without setting up billing. Google may use fr
 ## What it touches
 
 Recording sends audio and vocabulary to the selected provider. As you speak may use the browser vendor’s speech service.
+
+Create terms note writes the configured terms note in your vault when you press the button. Existing notes open in Files.
