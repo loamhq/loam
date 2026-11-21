@@ -16,6 +16,18 @@ function persistUse(key) {
   save(key).then(() => pending.delete(key)).catch(() => pending.add(key))
 }
 
+export function firstThreadLesson() {
+  const key = 'Agentless thread'
+  if (used.has(key)) return false
+  try {
+    if (localStorage.getItem('loam.thread-lesson')) return false
+    localStorage.setItem('loam.thread-lesson', '1')
+  } catch { /* Memory still covers this visit. */ }
+  used.add(key)
+  if (active) persistUse(key)
+  return true
+}
+
 export function firstUseActive() { return active }
 
 const captions = {

@@ -1,4 +1,4 @@
-import { firstUseActive } from './first-use.js'
+import { firstUseActive, firstThreadLesson } from './first-use.js'
 import { cardText, applyCardText, setBoardExpiry, recoverBoard } from './board-document.js'
 import { threadOutbox } from './thread-outbox.js'
 import { createAgentDrafts } from './agent-drafts.js'
@@ -52,7 +52,10 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     outbox = threadOutbox(api)
     outbox.listen((message, id) => {
       if (st.fixture) return
-      if (message && st.open?.thread.id === id) applyThreadEvent(st.open, { type: 'message.done', message })
+      if (message && st.open?.thread.id === id) {
+        applyThreadEvent(st.open, { type: 'message.done', message })
+        receivedNote(st.open, message)
+      }
       if (message) refreshList()
       redraw()
     })
@@ -586,6 +589,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     if (e.type === 'broker.permission_resolved') forgetAnswers(o, e.request_id)
     if (e.type === 'turn.finished' && o.deleteBlocked === o.error) { o.error = ''; o.deleteBlocked = null }
     if (e.type === 'message.done') {
+      receivedNote(o, e.message)
       refreshList(); if (o.atEnd !== false) markRead(o)
       if (!st.fixture && e.message?.kind === 'system') agentDraftController.load(o.thread.id)
       if (!st.listLive && e.message?.kind === 'system' && o.typing.size) refreshTurn(o, e.message.id, o.eventVersion)
@@ -774,6 +778,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       if (st.open !== o) return
       o.replyTo = null; o.changingDraft = null; draft.value = ''; compose.clear()
       applyThreadEvent(o, { type: 'message.done', message })
+      receivedNote(o, message)
       refreshList()
     } catch (e) { o.error = accepted ? `Message sent. ${e.message} Refresh to read the latest reply.` : `${e.message} Your message is still here.` }
     finally { o.sending = false; o.pending = null; redraw() }
@@ -1398,6 +1403,37 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     const id = catalog().find((a) => a.name === display)?.id ?? String(display).toLowerCase()
     return st.open?.thread.members.find((member) => member.persona === id)?.engine ?? null
   }
+  function receivedNote(o, message) {
+    if (message?.unaddressed && !o.thread.default && o.note?.id !== message.id) {
+      o.note = { id: message.id, teach: firstThreadLesson() }
+    }
+    if (message?.first_tag) o.firstTag = message.id
+  }
+  function noteActions(m) {
+    const o = st.open
+    if (o.firstTag === m.id && m.first_tag && m.first_tag === o.thread.default) {
+      return h('div', { class: 'tt-agent-note', role: 'status' },
+        `${name(m.first_tag)} now answers this thread. `,
+        button('Undo', () => patch({ default: null, if_default: m.first_tag }), { class: 'quietlink', disabled: o.patching }))
+    }
+    if (m.id !== o.note?.id || o.thread.default) return null
+    async function choose(persona) {
+      if (o.noteBusy) return
+      o.noteBusy = true; o.error = ''; redraw()
+      try {
+        const row = await transport('POST', `${path(o.thread.id)}/answer`, { message: m.id, persona })
+        updateRow(readThreadSummary(row)); o.note = null
+      } catch (e) { o.error = e.message }
+      finally { o.noteBusy = false; redraw() }
+    }
+    return h('div', { class: 'tt-agent-note', key: 'choose:' + m.id },
+      o.note.teach ? h('p', { text: 'A thread can have an agent who answers by default. Tag anyone with @, or keep a thread for notes and conversations with several agents.' }) : null,
+      o.note.teach || o.note.expanded ? [
+        h('p', { text: 'Who should answer this message?' }),
+        h('div', { class: 'profile-actions' }, ...catalog().map(a => button([avatar(a.id, 20), name(a.id)], () => choose(a.id), { disabled: o.noteBusy })),
+          button('Keep as a note', () => { o.note = null; redraw() }, { class: 'quietlink' }))] :
+        button('Ask an agent to answer', () => { o.note.expanded = true; redraw() }, { class: 'quietlink' }))
+  }
   function messageRuns(messages) {
     const out = []
     let run = null
@@ -1411,7 +1447,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       if (failed) { run = null; out.push(failedTurnLine(m, failed)); continue }
       const agent = m.kind !== 'system' && (st.open.thread.members.some((a) => a.persona === m.author) || catalog().some((a) => a.id === m.author))
       if (agent && !showReply(st.open, m)) continue
-      if (!agent) { run = null; out.push(message(m)); continue }
+      if (!agent) { run = null; out.push(message(m), noteActions(m)); continue }
       const labels = replyChip(m, fixtureProviders ?? providers())
       const tooltip = [labels.provider, modelTooltip((fixtureProviders ?? providers()).find((p) => p.id === m.engine), m.model)].filter(Boolean).join(' · ')
       const identity = JSON.stringify([m.author, m.engine, m.model, m.kind === 'bulletin', m.viewKey])
@@ -1873,8 +1909,8 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
               o.moreBusy ? h('div', { class: 'earlier tt-history-loading', role: 'status', text: 'Loading earlier…' }) : button('Earlier messages', () => earlier(), { class: 'earlier' }),
               o.historyError ? h('div', { class: 'muted', role: 'status', text: o.historyError }) : null) : null,
             !o.loading && !o.messages.length ? emptyConversation({
-              title: o.promptTitle || (o.thread.default ? `A new thread with ${name(o.thread.default)}` : 'A little room to think'),
-              body: o.promptBody || (o.thread.default ? 'Start with a thought. Bring others in with @.' : 'Collect your thoughts here. Mention someone when you want a reply.'),
+              title: o.promptTitle || (o.thread.default ? `A new thread with ${name(o.thread.default)}` : 'A thread without an agent'),
+              body: o.promptBody || (o.thread.default ? 'Start with a thought. Bring others in with @.' : 'Keep a note here, or tag an agent with @ to start a conversation.'),
               face: h('div', { class: 'tt-empty-icon' }, threadFace(o.thread, 68)),
             }) : null,
             ...messageRows,

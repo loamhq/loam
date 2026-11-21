@@ -2109,6 +2109,8 @@ class Server:
             by = author(payload)
             who = threads_rec.display(by) if by else f"{lc.OWNER_NAME}"
             before = threads_rec.read(thread_id)[0]
+            if "if_default" in payload and before["default"] != payload["if_default"]:
+                raise BrokerError(409, "The thread’s agent has changed.")
             if models:
                 engines_after = {**before["engines"], **(engines or {})}
                 engines = dict(engines or {})
@@ -2180,6 +2182,11 @@ class Server:
                     threads_rec.mark_seen(thread_id, msgs[-1]["id"])
             summary = engine.summary(thread_id)
             engine.publish(thread_id, {"type": "thread.changed", "summary": summary})
+            writer.write(response(200, summary))
+            await writer.drain()
+            return
+        if rest == ["answer"] and method == "POST":
+            summary = engine.answer_note(thread_id, payload.get("message"), payload.get("persona"))
             writer.write(response(200, summary))
             await writer.drain()
             return

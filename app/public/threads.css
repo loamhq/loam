@@ -427,3 +427,7 @@
 .profile-system-help { font-size: .88rem; color: var(--paper-ink-2); margin: 0 0 .8rem; line-height: 1.45; }
 .profile-system-help summary { cursor: pointer; width: fit-content; }
 .profile-system-help p { max-width: 58ch; margin: .6rem 0; }
+
+.tt-agent-note { max-width: 52ch; margin: .5rem auto 1rem; color: var(--paper-ink-2); font-size: .87rem; line-height: 1.5; }
+.tt-agent-note p { margin: .4rem 0; }
+.tt-agent-note .pillbtn { gap: .4rem; }

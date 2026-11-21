@@ -782,6 +782,10 @@ class ThreadEngine:
                    "attachments": attachments, "submission_id": submission_id, "named": named,
                    "recipients": recipients, "fanout": fanout,
                    "first": not any(threads.is_owner(m.get("author")) for m in msgs)}
+        if not meta.get("default") and named and not fanout and not any(m.get("first_tag") for m in msgs):
+            request["first_tag"] = named[0]
+        if not recipients and not fanout:
+            request["unaddressed"] = True
         if submission_id:
             request["submission_hash"] = signature or self.submission_hash(
                 text, [f["path"] for f in attachments], reply_to, model, reply_thread)
@@ -831,11 +835,44 @@ class ThreadEngine:
                 return msg
         return None
 
+    def answer_note(self, thread_id, message_id, persona):
+        self.finish_pending_submission(thread_id)
+        meta, messages, _ = threads.read(thread_id)
+        note = threads.check_reply_to(messages, message_id, thread_id)
+        prior = next((m for m in messages if m.get("answer_for") == message_id), None)
+        if prior and prior.get("persona") == persona:
+            return self.summary(thread_id)
+        if prior or meta.get("default") or not note.get("unaddressed"):
+            raise threads.ThreadError(409, "This message or thread already has an agent.")
+        if not isinstance(persona, str) or persona not in threads.roster():
+            raise threads.ThreadError(400, "Choose an available agent.")
+        request = {"thread": thread_id, "answer_for": message_id, "persona": persona,
+                   "attachments": note.get("attachments", [])}
+        threads._write_atomic(self._submission_path(thread_id), json.dumps(request))
+        self._finish_submission(request)
+        return self.summary(thread_id)
+
     def _finish_submission(self, request, *, enqueue=True):
+        if request.get("answer_for"):
+            tid, mid, persona = request["thread"], request["answer_for"], request["persona"]
+            threads.update(tid, default=persona)
+            line = threads.append(tid, "system", f"{threads.display(persona)} now answers this thread.",
+                                  kind="system", answer_for=mid, persona=persona,
+                                  submission_id=f"answer-{mid}")
+            turn = self.message_input(Turn(tid, persona, 0, mid, attachments=request["attachments"]), mid)
+            self.publish(tid, {"type": "message.done", "message": line})
+            self.publish(tid, {"type": "thread.changed", "summary": self.summary(tid)})
+            self._submission_path(tid).unlink()
+            if turn and enqueue:
+                self.schedule(turn, persist=False)
+            return line
         thread_id, text = request["thread"], request["text"]
         attachments = request["attachments"]
         key = request["submission_id"]
         extra = {"attachments": attachments} if attachments else {}
+        for field in ("unaddressed", "first_tag"):
+            if request.get(field):
+                extra[field] = request[field]
         if request["reply_to"]:
             extra["reply_to"] = request["reply_to"]
         if request.get("reply_source"):
@@ -859,6 +896,9 @@ class ThreadEngine:
                       f"continued by {lc.OWNER_NAME}; out of the archive")
         named, answer = request["named"], request["recipients"]
         self._join(thread_id, meta, named, by=threads.OWNER)
+        if request.get("first_tag") and not meta.get("default"):
+            threads.update(thread_id, default=request["first_tag"])
+            self.publish(thread_id, {"type": "thread.changed", "summary": self.summary(thread_id)})
         if request["fanout"]:
             if not answer:
                 self.mark(thread_id, "", "Nobody to reach: bring someone in first")

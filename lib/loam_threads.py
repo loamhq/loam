@@ -521,7 +521,7 @@ def render_message(msg: dict, quoted: dict | None = None) -> str:
     # and runtime-authored presets through serialization.
     for key in ("persona", "engine", "model", "segments", "attachments", "late",
                 "link", "after", "steered", "preset", "journal_reply", "submission_id", "submission_hash",
-                "occasion"):
+                "occasion", "first_tag", "unaddressed", "answer_for"):
         if msg.get(key):
             meta[key] = msg[key]
     text = (msg.get("text") or "").strip()

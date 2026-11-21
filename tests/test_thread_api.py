@@ -213,14 +213,23 @@ async def main():
           [m["author"] for m in got["messages"]][-2:], ["system", "ada"])
     check("...having read the history from before it was there",
           "Notes before anyone is here" in ada.prompts[0], True)
-    check("...told nobody answers untagged messages",
-          "nobody answers when nobody is tagged" in ada.prompts[0], True)
+    check("the first named agent becomes the default", got["thread"]["default"], "ada")
+    status, _ = await call(server, "PATCH", f"/v1/threads/{tid}", {"default": None, "if_default": "ada"})
+    check("the first tag can be undone", status, 200)
     status, _ = await call(server, "POST", f"/v1/threads/{tid}/messages",
                            {"text": "still nobody's default"})
     await settle(server, tid)
     got = (await call(server, "GET", f"/v1/threads/{tid}"))[1]
     check("...and the next untagged one is still answered by nobody",
           got["messages"][-1]["author"], OWNER)
+
+    note = got["messages"][-1]
+    for attempt in range(2):
+        status, summary = await call(server, "POST", f"/v1/threads/{tid}/answer",
+                                     {"message": note["id"], "persona": "ada"})
+        check("choose an agent for a saved note, including retry", (status, summary["default"]), (200, "ada"))
+    await settle(server, tid)
+    check("the saved note produces one further turn", len(ada.prompts), 2)
 
     # -- PATCH: default, icon, pinned, archived, model ------------------
     status, summary = await call(server, "PATCH", f"/v1/threads/{tid}",
