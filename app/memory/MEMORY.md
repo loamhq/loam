@@ -9,6 +9,10 @@ have never met.
   the page in `public/`. `npm test` runs `test/` and `tools/*.test.js`.
 - **Panel and list navigation** is specified in the [workspace navigation guide](../docs/wide-panels.md#back-and-forward).
   Keep navigation changes in the surface history. Reconstructing a whole workspace from a tab or the address bar can tear down another pane's live editor.
+- **Vault file deletion** requires the broker capability and endpoint in
+  [the Files deletion contract](../docs/files-deletion.md). After confirmation
+  from the broker, remove the file from both panels’ visit trails so Back and
+  Forward can still restore the surviving visits.
 
 - **The app holds no authority.** It reaches agents only through the
   session broker's narrow, authenticated interface (`broker/README.md` at

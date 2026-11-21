@@ -488,6 +488,7 @@ export const icon = {
   plus: (s = 18) => svg(s, [['path', { d: 'M12 5v14M5 12h14' }]]),
   minus: (s = 18) => svg(s, [['path', { d: 'M5 12h14' }]]),
   close: (s = 12) => svg(s, [['path', { d: 'M6 6l12 12M18 6L6 18' }]], { stroke: 3 }),
+  trash: (s = 18) => svg(s, [['path', { d: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5m4-5v5' }]]),
   pin: (s = 18) => svg(s, [['path', { d: 'M12 17v5' }], ['path', { d: PIN }]], { stroke: 2.5 }),
   chevronLeft: (s = 20) => svg(s, [['path', { d: 'M10 2L2 10l8 8' }]], { viewBox: '0 0 12 20' }),
   chevronRight: (s = 10) => svg(s, [['path', { d: 'M9 6l6 6-6 6' }]], { stroke: 3 }),

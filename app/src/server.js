@@ -750,6 +750,15 @@ export function createApp({
       if (body instanceof Error) return sendJson(res, body.tooLarge ? 413 : 400, { error: body.message })
       return await relayJson(res, 'POST', '/v1/files/rename', body)
     }
+    if (rest === '/files/delete') {
+      if (method !== 'POST') return sendJson(res, 405, { error: 'Use POST to delete a file.' })
+      const body = await readBody(req).catch((err) => err)
+      if (body instanceof Error) return sendJson(res, body.tooLarge ? 413 : 400, { error: body.message })
+      if (body?.root !== 'vault' || typeof body.path !== 'string' || !body.path || body.path.startsWith('/') || !safeFilePath(body.path)) {
+        return sendJson(res, 400, { error: 'Choose a file in the vault.' })
+      }
+      return await relayJson(res, 'POST', '/v1/files/delete', { root: body.root, path: body.path })
+    }
     const filesCreate = /^\/files\/(file|folder)$/.exec(rest)
     if (filesCreate && method === 'POST') {
       const body = await readBody(req, FILES_TEXT_BODY).catch((err) => err)

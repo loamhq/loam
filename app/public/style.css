@@ -2108,6 +2108,22 @@ a.ghline { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
 .fs-sheet .sheetrow.danger, .fs-sheet .sheetrow.danger .fs-name { color: var(--danger); }
 .fs-sheet .sheetrow.danger .fs-meta { color: var(--paper-ink-3); }
 .fs-sheet .sheettitle { font-size: 24px; padding: 0 10px 8px; overflow-wrap: anywhere; }
+.fs-sheet .sheetrow.fs-menu-delete { min-height: 48px; font-size: 15.5px; font-weight: 600; }
+.fs-delete-confirm { gap: 0; }
+.fs-delete-confirm .sheettitle { margin: 0; }
+.fs-delete-confirm[data-menu-centered] { padding: 22px 18px 14px; }
+.fs-delete-confirm[data-menu-centered] .sheet-top { display: none; }
+.fs-delete-copy, .fs-delete-error { margin: 0 10px 8px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.fs-delete-copy { color: var(--paper-ink-2); }
+.fs-delete-copy strong { color: var(--paper-ink); }
+.fs-delete-error { color: var(--danger); }
+.fs-sheet .fs-delete-actions { justify-content: flex-end; margin-top: 16px; }
+.fs-delete-actions .pillbtn { min-height: 44px; }
+.fs-delete-actions .fs-delete-submit.pillbtn { padding: 0 16px; font-family: inherit; font-size: 15px; font-weight: 650; }
+.fs-delete-actions .fs-delete-submit.pillbtn:not(:disabled) { background: var(--destructive-button); color: var(--destructive-button-ink); }
+@media (hover: hover) { .fs-delete-actions .fs-delete-submit.pillbtn:not(:disabled):hover { background: var(--destructive-button-hover); } }
+.fs-delete-toast.listnotice { position: fixed; z-index: 130; overflow-wrap: anywhere; }
+@media (min-width: 900px) { .fs-delete-toast.listnotice { bottom: 28px; } }
 .fs-sheetfield { padding: 4px 6px 10px; }
 a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: pointer; }
 .fs-kicker { color: var(--paper-ink-3); padding: 6px 10px 2px; }

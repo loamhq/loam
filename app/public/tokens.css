@@ -31,6 +31,9 @@
   --latte-disabled: #cccccc;
   --signal-crema: #5e5e5e;
   --danger: #4d4d4d;
+  --destructive-button: #982d2d;
+  --destructive-button-hover: #812323;
+  --destructive-button-ink: #fff;
   --warning: #5f5f5f;
   --success: #575757;
   --surface-code: #252525;
