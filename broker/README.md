@@ -5709,86 +5709,40 @@ its frontmatter names both: `imported_from: <session id>`,
 On the box, 2026-11-11: 159 classic chats, 153 imported, 6 not (empty
 sessions with nothing said). Proved by `tests/test_classic_import.py`.
 
-### Branching a thread (2026-11-11)
+### Branching a thread
 
-(the owner, 16:05 PT: "take a specific message or a topic … and be able to
-branch that off into a separate thread … infer a summary of what this new
-thread is going to be about … pre-made into the text box so I can add
-additional questions.") Any message can start a new thread of its own, with
-any persona, carrying the stretch of conversation that led to it. The record
-side is `lib/loam_threads.py` (`branch_window`, `branch`, `branch_context`);
-the routes are the broker's; the draft is written by the app.
+A branch is a reply sent as the opening of a new thread. Open its composer
+with `POST /v1/threads/:id/branch` and `{message, persona?}`.
+The browser supplies the source message ID and the chosen persona. The
+response is the new thread summary with `draft_reply` and
+`ordered_submissions: true`. Opening it starts no turn. A system line
+cannot be the source. The per-thread GET also returns `draft_reply`, which
+can be cleared with `PATCH /v1/threads/:id {"draft_reply": null}`.
 
-- **The window** (`branch_window`). The messages ending at the chosen one,
-  in record order. Walking back from it, a message joins while the window
-  has fewer than 12 (`BRANCH_MAX`) and no gap over 30 minutes
-  (`BRANCH_PAUSE_S`) lies between it and the chosen message; when the pause
-  comes before 3 messages (`BRANCH_MIN`), it is crossed only to make up
-  three. System lines are not in it. A gap of exactly 30 minutes is not a
-  pause. Only the record's times and order go in, so the same message
-  always gives the same window. Branching from a system line is `400`, from
-  an id the thread lacks `404`.
-- **`GET /v1/threads/:id/branch?message=m12[&persona=ada]`**, the sheet's
-  first read, writes nothing: `{thread, title, message, record, window:
-  [messages], persona, people, summarizer, fallback}`. `people` is who the
-  branch can be with, the source's default first, then its other members,
-  then everyone; `persona` is the one preselected (`?persona=`, else the
-  source's default). `summarizer` is `{system_instruction, input, answer}`:
-  one text call whose answer is a JSON object `{"title", "draft"}`, a title
-  of three to seven words and an opening of at most 90 words in the owner's
-  voice (what the branch is about, the context from the window it needs,
-  ending with an open line for them to finish). `fallback` is
-  `{title, draft}` made from the record alone, for when that call fails.
-- **Who writes the draft: the app, not the broker.** The app already holds
-  the Gemini key and writes read-aloud briefs with its brief model
-  (`SPEECH_BRIEF_MODEL`, default `gemini-flash-latest`), and the broker holds
-  no vendor credential by design (its unit says so). So the app sends
-  `summarizer` to that model, parses the JSON, and falls back to `fallback`;
-  the prompt's words live here, beside the window they describe, so every
-  caller asks the same thing.
-- **`POST /v1/threads/:id/branch`** `{message, persona?, title?, draft?,
-  by?}` → `201 {thread: <summary>, from, into, window}`. The new thread has
-  `persona` (default: the source's default) as its default and only member,
-  is titled `title` (else the draft's first line, else `From <source
-  title>`), and its frontmatter records `branched_from: <source id>`,
-  `branched_message: m12` and `branched_window: [ids]`. Its first message
-  is a system line, `Branched from <source title>`, with `link: {thread,
-  message, title}` on its `loam` comment (`from` in the reply). The source
-  gets a system line `Branched into <new title>` with `link: {thread,
-  title}` and `after: m12`, placed **under the chosen message** in the
-  record (`threads.insert_after`, touching no other message's bytes; a
-  second branch from the same message goes under the first one's line), with
-  the next free id (`into`; also sent as `message.done` on the source's
-  stream, so a page places it by `after`). If the source had been read
-  through its last message, its read mark moves past the new line: the line
-  is not news to whoever branched. With `by` (a persona), both lines say who:
-  `Ada branched this from …`, `Ada branched into …`. Nothing is sent and
-  no turn starts.
-- **The draft.** `draft` waits as the new thread's composer opening:
-  `summary.draft` on every row and read, kept beside the record in
-  `state/threads/threads.json` (a convenience, like the placeholder-title
-  flag) and not in it. The owner's first message spends it; `PATCH
-  /v1/threads/:id {"draft": null}` clears it and a string replaces it.
-  `summary.branched_from` is `{thread, message}` on a branch, `null`
-  otherwise.
-- **The persona's first turn in a branch.** A fresh session there is
-  handed, after the usual head, `This thread was branched from the thread
-  "<title>" (id …) at its message m12`, the window's messages in full (the
-  same transcript lines, ids and reply quotes included) and the source
-  file's path for anything earlier, then the branch's own messages. Not the
-  whole source thread. Any later fresh session in the branch gets the same.
-- **A persona branches** with `bin/thread branch <thread> <message>
-  [--persona p] [--title t] [--text draft] --by <persona>` or
-  `mcp__engineer__thread` action `branch` (`thread`, `message`, `persona`,
-  `title`, `text`, `by`): the same `threads.branch`, its draft waiting in
-  the owner's composer. With no text the draft is the `fallback`'s. It writes
-  the files directly, as `post` does; an open page sees the new thread on
-  its list stream's look at the records.
+Send through the normal messages route with `text`, `reply_to` (the
+source message ID) and `reply_thread` (the source thread ID). A cross-thread
+reply requires text even when it has attachments, and belongs on the owner's
+first message. The broker resolves the source itself. The Markdown record
+stores `reply_to` and a `reply_source` snapshot with the source thread, title,
+record path, message ID, author, time and full message text. The agent's
+turn quotes those words in full and points to the source file for any
+earlier context. If the source is renamed, the next prompt uses the current
+path. The usual title rule uses the owner's opening.
 
-Proved by `tests/test_thread_branch.py` (the heuristic, both routes, both
-lines and their places, the draft's life, the first turn's prompt,
-`bin/thread branch`) and `tests/test_engineer_server.py` (the tool's
-hand-off).
+Opening the composer or sending with the quote removed leaves the source
+record alone. When a quoted opening is accepted, the new thread's summary
+carries `branched_from: {thread, message, reply: true}`. The app derives
+the marker under the source message from those summaries, including archived
+threads. Renaming or deleting a destination updates the marker by way of
+the thread list. The marker has no message ID and takes no turn.
+
+An agent can open the same composer with `bin/thread branch <thread>
+<message> [--persona p] [--title t] [--text draft] --by <persona>` or the
+`branch` action of the thread tool. Explicit text waits unsent. Older
+branches keep their saved `branched_window`, system links and opening drafts.
+
+`tests/test_thread_branch.py` covers both the record and delivery to a
+provider session. See the [browser contract](../app/docs/threads-and-boards.md#branching-from-a-message).
 
 ### A thread's engineer jobs (2026-11-13)
 

@@ -91,7 +91,13 @@ export function mountSidePanel(base, activityOptions) {
   modules.push(mountComposer(host), mountTranscript(host), mountSheets(host))
   own.threads = mountConversation(host, {
     messageState, dom: own.root, sidePanel: true, side: () => base.panels,
-    navigate: item => base.panels.openSide(item), address: () => {}, visible: () => base.panels.visible(),
+    navigate: item => base.panels.openSide(item), visible: () => base.panels.visible(),
+    address: id => {
+      if (!id) return
+      state.mainItem = { kind: 'thread', id }
+      base.panels.st.side = item()
+      base.recordSide(item())
+    },
     missing: () => base.panels.close(),
     viewAddress: () => base.recordSide(item()),
     enter: item => { state.mainItem = item; host.files.closeFile(); state.screen = 'threads'; state.sheet = null; base.schedule() },
@@ -125,9 +131,8 @@ export function mountSidePanel(base, activityOptions) {
     state.mainItem = itemDescriptor(item); state.appMenu = false
     own.apps.st.selected = null
     if (item.kind === 'thread') {
-      const pending = own.threads.open(item.id, { routed: true })
+      const pending = own.threads.open(item.id, { routed: true, push: false, message: item.message })
       if (item.view) own.threads.setView(item.view)
-      if (item.message && own.threads.st.open) Object.assign(own.threads.st.open, { replyJump: item.message, jumpKind: 'quote' })
       return pending
     }
     own.threads.close({ navigate: false })

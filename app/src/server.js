@@ -1,4 +1,3 @@
-import { brokerSecret } from './plugin-secrets.js'
 import { shippedPlugins } from './shipped-plugins.js'
 // loam-ui, the web half.
 //
@@ -22,7 +21,6 @@ import { createStatic } from './static.js'
 import { createLog, requestId, loggedQuery } from './log.js'
 import { appearanceBoot } from './appearance.js'
 import { loadThemes, marketThemeCSS, themeFontsCSS } from './themes.js'
-import { createBranchDrafter } from './thread-branch.js'
 import { INSTALLATION_DEFAULTS } from '../public/installation.js'
 import { createAppMedia } from './app-media.js'
 import { serverFacts, signedIn } from './about.js'
@@ -59,7 +57,6 @@ export function createApp({
   appMedia = null,
   publicDir = path.join(ROOT, 'public'),
   log = createLog({ level: config.logLevel }),
-  branchDraft = createBranchDrafter(config, { getKey: brokerSecret(broker, 'read-aloud') }),
 } = {}) {
   const serveStatic = createStatic(publicDir)
   appMedia ??= createAppMedia(config.appMedia, { log })
@@ -335,22 +332,11 @@ export function createApp({
     }
     const threadBranch = /^\/threads\/([^/]+)\/branch$/.exec(rest)
     if (threadBranch) {
-      if (!['GET', 'POST'].includes(method)) return sendJson(res, 405, { error: 'Use GET or POST to branch a thread.' })
+      if (method !== 'POST') return sendJson(res, 405, { error: 'Use POST to open a branch composer.' })
       const target = `/v1/threads/${encodeURIComponent(dec(threadBranch[1]))}/branch`
-      if (method === 'POST') {
-        const body = await readBody(req).catch((error) => error)
-        if (body instanceof Error) return sendJson(res, body.tooLarge ? 413 : 400, { error: body.tooLarge ? 'This text is over what this request carries here.' : body.message })
-        return await relayJson(res, method, target, body)
-      }
-      const query = new URLSearchParams()
-      for (const key of ['message', 'persona']) if (url.searchParams.has(key)) query.set(key, url.searchParams.get(key))
-      const out = await broker.json('GET', `${target}?${query}`)
-      res.setHeader('cache-control', 'no-store')
-      if (out.status !== 200) {
-        noteBrokerError(res, out)
-        return send(res, out.status, out.contentType, out.body)
-      }
-      return sendJson(res, 200, await branchDraft(JSON.parse(out.body)))
+      const body = await readBody(req).catch((error) => error)
+      if (body instanceof Error) return sendJson(res, body.tooLarge ? 413 : 400, { error: body.tooLarge ? 'This text is over what this request carries here.' : body.message })
+      return await relayJson(res, method, target, body)
     }
     const threadRoute = /^\/threads(?:\/([^/]+)(?:\/(messages|events|board|attachments|steps))?)?$/.exec(rest)
     if (threadRoute) {

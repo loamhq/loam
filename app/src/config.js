@@ -28,11 +28,6 @@ export function readConfig(env = process.env) {
   const host = (env.APP_HOST ?? '').trim() || '127.0.0.1'
   const brokerUrl = (env.BROKER_URL ?? '').trim().replace(/\/+$/, '')
   const brokerToken = (env.BROKER_TOKEN ?? '').trim()
-  // Credentials belong to the broker's plugin secret store. This URL lets
-  // tests point the thread-branch drafter at a loopback provider.
-  const geminiUrl = (env.GEMINI_API_URL ?? 'https://generativelanguage.googleapis.com').trim().replace(/\/+$/, '')
-  // The text model that drafts a branched thread's opening (`src/thread-branch.js`).
-  const branchModel = (env.BRANCH_MODEL ?? '').trim() || 'gemini-flash-latest'
   // How much the app says on stdout: `debug` adds a line per static file,
   // `info` (the default) is every other request,
   // `off` is silence. Anything else reads as `info`.
@@ -67,8 +62,6 @@ export function readConfig(env = process.env) {
     filesContentOrigin,
     brokerUrl,
     brokerToken,
-    geminiUrl,
-    branchModel,
     logLevel,
     appMedia: {
       dir: (env.APP_MEDIA_DIR ?? '').trim() || '/storage/app-media',

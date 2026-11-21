@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check branch context boundaries, preview, draft summary and the first message in the new thread."""
+"""Exercise branch replies from the broker API through the first agent turn."""
 
 import asyncio
 import importlib.machinery
@@ -134,7 +134,9 @@ class Session:
 
     async def send_message(self, prompt, attachments=None):
         self.prompts.append(prompt)
-        script, self.script = self.script or [text("ok"), result(0)], []
+        answer = ("I saw that the thyme needs shade."
+                  if "> The thyme needs shade." in prompt else "ok")
+        script, self.script = self.script or [text(answer), result(0)], []
 
         async def play():
             for ev in script:
@@ -228,143 +230,138 @@ async def main():
     tid = (await call(server, "POST", "/v1/threads",
                       {"persona": "iris", "title": "Garden plans"}))[1]["id"]
     await call(server, "PATCH", f"/v1/threads/{tid}", {"add": ["ada"]})
-    # An early exchange the branch must not carry, then the stretch it must.
-    await call(server, "POST", f"/v1/threads/{tid}/messages", {"text": "EARLY tulips?"})
-    await settle(server, tid)
-    for i in range(14):
-        iris = next(s for s in fake.sessions.values() if s.agent == "iris")
-        iris.script = [text(f"reply {i}" + (" -- the watering cron crashes on line 40"
-                                           if i == 13 else "")), result(1)]
-        await call(server, "POST", f"/v1/threads/{tid}/messages", {"text": f"step {i}"})
-        await settle(server, tid)
-    msgs = threads.read(tid)[1]
-    bug = msgs[-1]
-    check("(the source ends with Iris naming the bug)",
-          (bug["author"], "line 40" in bug["text"]), ("iris", True))
-    # A later message, so the branch point is not the last one.
-    await call(server, "POST", f"/v1/threads/{tid}/messages", {"text": "LATER aside"})
-    await settle(server, tid)
-    await call(server, "GET", f"/v1/threads/{tid}")       # the owner reads it all
-    before = threads.record_path(tid).read_text("utf-8")
+    threads.append(tid, OWNER, "Earlier gardening context")
+    system = threads.append(tid, "system", "A system line", kind="system")
+    earlier = "The thyme needs shade.  Two spaces stay.\n\nMarkdown: **thyme**."
+    closing = "Water at dawn.\n" + "Full source text. " * 260 + "Keep the final line. -->"
+    source = threads.append(tid, "iris", closing, segments=[{"text": earlier}])
+    threads.append(tid, "ada", "A later aside")
+    await call(server, "GET", f"/v1/threads/{tid}")
+    path = threads.record_path(tid)
+    before = path.read_bytes()
+    branch_route = f"/v1/threads/{tid}/branch"
+    for mid, persona, expected in (("m999", "ada", 404), (system["id"], "ada", 400),
+                                   (source["id"], "missing", 404)):
+        status, _ = await call(server, "POST", branch_route, {"message": mid, "persona": persona})
+        check(f"invalid branch {mid}, {persona} is refused", status, expected)
 
-    # -- the sheet's read --------------------------------------------------------
-    status, got = await call(server, "GET", f"/v1/threads/{tid}/branch",
-                             params={"message": bug["id"]})
-    check("GET branch: 200, ends at the message, twelve at most",
-          (status, got["window"][-1]["id"], len(got["window"])), (200, bug["id"], 12))
-    check("...members first, the default first of all",
-          got["people"][:2], ["iris", "ada"])
-    check("...the default preselected", got["persona"], "iris")
-    s = got["summarizer"]
-    check("...the summarizer's prompt: the owner's voice, JSON, the excerpt",
-          (f"{OWNER_NAME}'s own voice" in s["system_instruction"],
-           '{"title": "...", "draft": "..."}' in s["system_instruction"],
-           "line 40" in s["input"], "EARLY" in s["input"], "Garden plans" in s["input"]),
-          (True, True, True, False, True))
-    check("...and a fallback with the message in it",
-          ("line 40" in got["fallback"]["draft"], bool(got["fallback"]["title"])), (True, True))
-    status, got = await call(server, "GET", f"/v1/threads/{tid}/branch",
-                             params={"message": bug["id"], "persona": "ada"})
-    check("...a persona chosen is the prompt's", "with Ada" in got["summarizer"]["input"], True)
-    status, _ = await call(server, "GET", f"/v1/threads/{tid}/branch",
-                           params={"message": "m999"})
-    check("GET branch at a message the thread lacks: 404", status, 404)
-    check("the read wrote nothing",
-          threads.record_path(tid).read_text("utf-8") == before, True)
-
-    # -- Start thread ----------------------------------------------------------
-    draft = ("The watering cron crashes on line 40.\nIris found it while we planned "
-             "the beds.\n\nWhat I want to know:")
-    status, made = await call(server, "POST", f"/v1/threads/{tid}/branch",
-                              {"message": bug["id"], "persona": "ada",
-                               "title": "Watering cron crash", "draft": draft})
-    new = made["thread"]
+    status, new = await call(server, "POST", branch_route,
+                             {"message": source["id"], "persona": "ada"})
     nid = new["id"]
-    check("POST branch: 201, Ada the default and only member, the title",
-          (status, new["default"], [m["persona"] for m in new["members"]], new["title"]),
-          (201, "ada", ["ada"], "Watering cron crash"))
-    check("...its draft waits in the summary, unsent", new["draft"], draft)
-    check("...and it says where it came from",
-          new["branched_from"], {"thread": tid, "message": bug["id"]})
-    nmeta, nmsgs, npath = threads.read(nid)
-    check("...the record keeps the source, the message and the window",
-          (nmeta["branched_from"], nmeta["branched_message"], len(nmeta["branched_window"]),
-           nmeta["branched_window"][-1]), (tid, bug["id"], 12, bug["id"]))
-    check("the new thread's first line links back",
-          (nmsgs[0]["kind"], nmsgs[0]["text"], nmsgs[0].get("link")),
-          ("system", "Branched from Garden plans",
-           {"thread": tid, "message": bug["id"], "title": "Garden plans"}))
-    check("...and it is the only message: nothing was sent", len(nmsgs), 1)
-    smsgs = threads.read(tid)[1]
-    at_bug = next(i for i, m in enumerate(smsgs) if m["id"] == bug["id"])
-    line = smsgs[at_bug + 1]
-    check("the source's line sits right under the chosen message",
-          (line["kind"], line["text"], line.get("link"), line.get("after")),
-          ("system", "Branched into Watering cron crash",
-           {"thread": nid, "title": "Watering cron crash"}, bug["id"]))
-    check("...with the next free id", line["id"], made["into"]["id"])
-    check("...and the later message still after it", smsgs[at_bug + 2]["text"], "LATER aside")
-    after = threads.record_path(tid).read_text("utf-8")
-    check("...no other byte of the source changed",
-          after.replace("\n" + threads.render_message(
-              {**line, "text": line["text"]}).strip("\n") + "\n", "", 1) == before, True)
-    check("the source stays read", threads.summary(tid)["unread"], 0)
-    # A second branch from the same message lands under the first line.
-    status, made2 = await call(server, "POST", f"/v1/threads/{tid}/branch",
-                               {"message": bug["id"]})
-    smsgs = threads.read(tid)[1]
-    check("a second branch: its line under the first, the default by default",
-          ([m["id"] for m in smsgs[at_bug + 1:at_bug + 3]], made2["thread"]["default"]),
-          ([line["id"], made2["into"]["id"]], "iris"))
-    status, _ = await call(server, "POST", f"/v1/threads/{tid}/branch",
-                           {"message": bug["id"], "persona": "nobody"})
-    check("a branch with a persona nobody is: 404", status, 404)
+    first_route = f"/v1/threads/{nid}/messages"
+    quote = new["draft_reply"]
+    check("picker creates an empty composer for the chosen member",
+          (status, new["default"], [m["persona"] for m in new["members"]], new["draft"],
+           new["branched_from"], threads.read(nid)[1], list(fake.sessions)),
+          (201, "ada", ["ada"], None, None, [], []))
+    check("draft quote is read from the source record",
+          (quote["thread"], quote["id"], quote["text"], quote["at"]),
+          (tid, source["id"], earlier + "\n\n" + closing, source["at"]))
+    opened = (await call(server, "GET", f"/v1/threads/{nid}"))[1]
+    check("reopening an unsent branch restores the quote", opened["draft_reply"], quote)
 
-    # -- the persona's first turn ----------------------------------------------
-    status, _ = await call(server, "POST", f"/v1/threads/{nid}/messages",
-                           {"text": draft + " why line 40?"})
+    cfg.ATTACHMENT_ROOT.mkdir()
+    attachment = cfg.ATTACHMENT_ROOT / "notes.txt"
+    attachment.write_text("a file alone cannot open a branch")
+    payload = {"reply_to": source["id"], "reply_thread": tid, "submission_id": "first"}
+    for method, fields in (("PUT", {}), ("PUT", {"attachments": [str(attachment)]}), ("POST", {})):
+        status, _ = await call(server, method, first_route, {**payload, **fields, "text": "  "})
+        check(f"{method} rejects an empty branch with fields {list(fields)}", status, 400)
+    check("refused sends leave no transcript or agent turn",
+          (threads.read(nid)[1], list(fake.sessions)), ([], []))
+
+    opening = "How should we water the thyme?"
+    payload["text"] = opening
+    status, response = await call(server, "PUT", first_route, payload)
+    check("send stores the owner's first message and the exact source quote",
+          (status, response["message"]["id"], response["message"]["author"],
+           response["message"]["reply_to"], response["message"]["reply_source"],
+           response["message"]["text"]), (200, "m1", OWNER, source["id"], quote, opening))
+    retry = await call(server, "PUT", first_route, payload)
+    check("retry returns the same accepted delivery", retry, (status, response))
+    status, _ = await call(server, "PUT", first_route, {**payload, "reply_thread": nid})
+    check("the idempotency key includes the source thread", status, 409)
+    status, _ = await call(server, "PUT", first_route, {**payload, "submission_id": "later"})
+    check("a cross-thread quote goes on the first owner message", status, 409)
+
     await settle(server, nid)
     ada = next(s for s in fake.sessions.values() if s.agent == "ada")
     prompt = ada.prompts[0]
-    check("Ada's first turn: where it came from and the source file",
-          (f"branched from the thread \"Garden plans\" (id {tid})" in prompt,
-           str(threads.record_path(tid)) in prompt), (True, True))
-    check("...the window's messages, the bug among them", "line 40" in prompt, True)
-    check("...and not the source's earlier messages",
-          ("EARLY" in prompt, "LATER aside" in prompt, "step 0\n" in prompt), (False, False, False))
-    check("...then the branch's own messages", "why line 40?" in prompt, True)
-    check("the draft is spent once the owner writes", threads.summary(nid)["draft"], None)
-    threads.set_draft(nid, "again")
-    await call(server, "PATCH", f"/v1/threads/{nid}", {"draft": None})
-    check("PATCH draft null clears it", threads.summary(nid)["draft"], None)
-    plain = threads.summary(tid)
-    check("a thread that is not a branch says so",
-          (plain["branched_from"], plain["draft"]), (None, None))
+    quoted = "\n".join("> " + line if line else ">" for line in quote["text"].split("\n"))
+    check("the answering agent receives the full quote, author, time, title, IDs and path",
+          all(part in prompt for part in (quoted, f"Iris's message {source['id']}",
+              threads.local_stamp(source["at"]), f'"Garden plans" (id {tid})',
+              str(path), "You may read earlier messages", opening)), True)
+    check("only the chosen agent wakes, and no source window enters its turn",
+          (len(fake.sessions), len(ada.prompts), "Earlier gardening context" in prompt,
+           "A later aside" in prompt), (1, 1, False, False))
+    check("the provider's answer about the quoted detail is filed in the branch",
+          threads.read(nid)[1][-1]["text"], "I saw that the thyme needs shade.")
+    check("the thread takes its title from the owner's opening",
+          threads.summary(nid)["title"], opening)
+    threads._CACHE.clear()
+    server.threads = engine_mod.ThreadEngine(fake)
+    reloaded = (await call(server, "GET", f"/v1/threads/{nid}"))[1]
+    check("the quote and first words survive a new engine and record read",
+          (reloaded["messages"][0]["reply_source"], reloaded["messages"][0]["text"],
+           reloaded["draft_reply"]), (quote, opening, None))
+    check("the Markdown record includes a readable source quote",
+          '· in "Garden plans"' in threads.record_path(nid).read_text("utf-8"), True)
 
-    # -- bin/thread branch, as a persona -----------------------------------------
-    env = {**os.environ, "LOAM_AGENT": "iris"}
-    out = subprocess.run([sys.executable, str(AGENTS / "bin" / "thread"), "branch",
-                          tid, bug["id"], "--persona", "ada",
-                          "--text", "Ada, the cron bug:"],
-                         capture_output=True, text=True, env=env)
-    got = json.loads(out.stdout)
-    check("bin/thread branch: ok, with Ada, titled by the draft",
-          (got["ok"], got["persona"], got["title"]), (True, "ada", "Ada, the cron bug:"))
-    pmsgs = threads.read(got["thread"])[1]
-    check("...its lines name the persona who branched",
-          (pmsgs[0]["text"], threads.find(threads.read(tid)[1], got["lines"]["into"])["text"]),
-          ("Iris branched this from Garden plans", "Iris branched into Ada, the cron bug:"))
-    check("...and the draft waits for the owner", threads.summary(got["thread"])["draft"],
-          "Ada, the cron bug:")
-    out = subprocess.run([sys.executable, str(AGENTS / "bin" / "thread"), "branch",
-                          tid, bug["id"]], capture_output=True, text=True, env=env)
-    got = json.loads(out.stdout)
-    check("bin/thread branch with no text: the fallback opening",
-          (got["ok"], "line 40" in (threads.summary(got["thread"])["draft"] or "")), (True, True))
-    out = subprocess.run([sys.executable, str(AGENTS / "bin" / "thread"), "branch",
-                          tid, "m999"], capture_output=True, text=True, env=env)
-    check("bin/thread branch at a message the thread lacks is refused",
-          json.loads(out.stdout)["ok"], False)
+    def links():
+        return {row["id"]: (row["title"], row["branched_from"])
+                for row in threads.listing(archived=True) if row["branched_from"]}
+
+    origin = {"thread": tid, "message": source["id"], "reply": True}
+    check("the thread listing supplies an outgoing link for the source message",
+          links(), {nid: (opening, origin)})
+    _, second = await call(server, "POST", branch_route, {"message": source["id"]})
+    sid = second["id"]
+    check("opening another composer does not create its back-link", set(links()), {nid})
+    await call(server, "PUT", f"/v1/threads/{sid}/messages",
+               {**payload, "text": "Another question", "submission_id": "second"})
+    await settle(server, sid)
+    await call(server, "PATCH", f"/v1/threads/{sid}", {"title": "Second branch renamed", "archived": True})
+    check("sibling back-links follow destination renames and survive archiving",
+          links(), {nid: (opening, origin), sid: ("Second branch renamed", origin)})
+    await call(server, "DELETE", f"/v1/threads/{sid}")
+    check("deleting the destination removes just its back-link", links(), {nid: (opening, origin)})
+
+    _, unquoted = await call(server, "POST", branch_route, {"message": source["id"]})
+    pid = unquoted["id"]
+    await call(server, "PATCH", f"/v1/threads/{pid}", {"draft_reply": None})
+    detail = (await call(server, "GET", f"/v1/threads/{pid}"))[1]
+    check("removing the quote persists before send", detail["draft_reply"], None)
+    await call(server, "PUT", f"/v1/threads/{pid}/messages",
+               {"text": "An ordinary new thread", "submission_id": "plain"})
+    await settle(server, pid)
+    check("sending with the quote removed creates a plain thread",
+          (threads.summary(pid)["branched_from"], threads.read(pid)[1][0].get("reply_to"), set(links())),
+          (None, None, {nid}))
+    check("the source record and read state are untouched by all branches",
+          (path.read_bytes() == before, threads.summary(tid)["unread"]), (True, 0))
+
+    # A record written by the previous branch format still provides its original context.
+    legacy = threads.create("ada", "Old branch", extra={"branched_from": tid,
+        "branched_message": source["id"], "branched_window": [source["id"]]})
+    legacy_id = legacy["id"]
+    back = {"thread": tid, "message": source["id"], "title": "Garden plans"}
+    threads.append(legacy_id, "system", "Branched from Garden plans", kind="system", link=back)
+    check("legacy branch metadata, link and first-turn window remain readable",
+          (links()[legacy_id][1], threads.read(legacy_id)[1][0]["link"],
+           closing in threads.branch_context(legacy)),
+          ({"thread": tid, "message": source["id"]}, back, True))
+
+    for words in ("", "An explicitly supplied opening"):
+        args = ["--text", words] if words else []
+        out = subprocess.run([sys.executable, str(AGENTS / "bin" / "thread"), "branch",
+                              tid, source["id"], "--persona", "ada", *args],
+                             capture_output=True, text=True, env={**os.environ, "LOAM_AGENT": "iris"})
+        got = json.loads(out.stdout)
+        handoff = (await call(server, "GET", f"/v1/threads/{got['thread']}"))[1]
+        check(f"agent tool opens a quoted composer with explicit text {bool(words)}",
+              (out.returncode, handoff["thread"]["draft"], handoff["draft_reply"], handoff["messages"]),
+              (0, words or None, quote, []))
 
     server.threads.stop_all_tails()
 

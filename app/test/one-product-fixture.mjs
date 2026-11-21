@@ -43,8 +43,12 @@ export async function oneProductFixture(env = {}, overrides = {}) {
     routes[`GET /v1/sessions/${r.session_id}/events`] = (req, res) => { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write(': open ping=15000\n\n'); for (const e of [{ type: 'broker.session', ...r, window_first_seq: 1, turns_before: 0 }, ...events]) res.write(`data: ${JSON.stringify(e)}\n\n`) }
   }
   function addThread(id) {
-    for (const [method, suffix] of [['GET', ''], ['PATCH', ''], ['DELETE', ''], ['POST', '/messages'], ['GET', '/board'], ['PUT', '/board']]) routes[`${method} /v1/threads/${id}${suffix}`] = async (req, res, url, raw) => {
-      try { const body = await f.api(method, `/threads/${id}${suffix}${url.search}`, raw ? JSON.parse(raw) : undefined); json(res, method === 'GET' && !suffix ? decorate(body) : body) }
+    for (const [method, suffix] of [['GET', ''], ['PATCH', ''], ['DELETE', ''], ['POST', '/branch'], ['POST', '/messages'], ['PUT', '/messages'], ['GET', '/board'], ['PUT', '/board']]) routes[`${method} /v1/threads/${id}${suffix}`] = async (req, res, url, raw) => {
+      try {
+        const body = await f.api(method, `/threads/${id}${suffix}${url.search}`, raw ? JSON.parse(raw) : undefined)
+        if (suffix === '/branch') addThread(body.id)
+        json(res, method === 'GET' && !suffix ? decorate(body) : body, suffix === '/branch' ? 201 : 200)
+      }
       catch (e) { json(res, { error: e.message }, e.status ?? 400) }
     }
     routes[`GET /v1/threads/${id}/events`] = (req, res) => { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write(': open ping=15000\n\n'); if (!streams.has(id)) streams.set(id, new Set()); streams.get(id).add(res); const stop = f.subscribe(id, (e) => res.write(`data: ${JSON.stringify(e)}\n\n`)); res.on('close', () => { stop(); streams.get(id).delete(res) }) }

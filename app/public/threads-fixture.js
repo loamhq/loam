@@ -1,5 +1,6 @@
 import { installation } from './installation.js'
 import { owner, setOwner } from './owner.js'
+import { quoteLine } from './thread-replies.js'
 // Explicit preview only. Synthetic personas and vault paths; in-memory data is
 // discarded on reload and never sent to the runtime or stored in the browser.
 export function createThreadFixture({ modern = true } = {}) {
@@ -26,20 +27,32 @@ export function createThreadFixture({ modern = true } = {}) {
   const emitRow = (id) => { const row = records.get(id)?.thread; if (row) for (const fn of listListeners) fn({ type: 'thread.changed', thread: id, summary: structuredClone(row) }) }
   const emit = (id, e) => { for (const fn of listeners.get(id) ?? []) fn(e); if (modern) emitRow(id) }
   const copy = (o) => structuredClone(o)
+  function create(persona, source = null) {
+    const t = thread(`new-${++counter}`, 'New thread', persona, { last: null })
+    records.set(t.id, { thread: t, messages: [], has_more: false, turn: null,
+      ...(source ? { draft_reply: source, ordered_submissions: true } : {}),
+      board: { path: `${installation().boards}/New thread — board.md`, markdown: '' } })
+    emitRow(t.id)
+    return copy(source ? { ...t, draft_reply: source, ordered_submissions: true } : t)
+  }
   const api = async (method, path, body) => {
     await new Promise((r) => setTimeout(r, 140))
     if (path.split('?')[0] === '/threads') {
       if (method === 'GET') return { threads: [...records.values()].map((r) => copy(r.thread)).filter((t) => !t.archived || path.includes('archived=1')), agents: copy(agents) }
-      const t = thread(`new-${++counter}`, 'New thread', body.persona ?? null, { last: null })
-      records.set(t.id, { thread: t, messages: [], has_more: false, turn: null, board: { path: `${installation().boards}/New thread — board.md`, markdown: '' } })
-      emitRow(t.id); return copy(t)
+      return create(body.persona ?? null)
     }
     // Sample replies keep no full steps; a 404 is how a runtime says so, and the page shows each reply's `did` instead.
     if (/^\/threads\/[^/?]+\/steps\b/.test(path)) throw Object.assign(new Error('Sample threads keep no steps.'), { status: 404 })
-    const match = /^\/threads\/([^/?]+)(?:\/(messages|board|attachments))?/.exec(path)
+    const match = /^\/threads\/([^/?]+)(?:\/(messages|board|attachments|branch))?/.exec(path)
     if (!match) return { accepted: true }
     const id = decodeURIComponent(match[1]), action = match[2], r = records.get(id)
     if (!r) throw new Error('This sample thread does not exist.')
+    function sourceQuote(threadId, messageId) {
+      const record = records.get(threadId), message = record?.messages.find((m) => m.id === messageId && m.kind !== 'system')
+      if (!message) throw Object.assign(new Error('This earlier message is no longer available.'), { status: 404 })
+      return { ...message, thread: threadId, title: record.thread.title }
+    }
+    if (action === 'branch') return create(body.persona, sourceQuote(id, body.message))
     if (method === 'DELETE') {
       if (r.turn) throw Object.assign(new Error('a turn is running in this thread; delete it when the turn has finished'), { status: 409 })
       records.delete(id); for (const fn of listListeners) fn({ type: 'thread.removed', thread: id }); return { deleted: true }
@@ -55,8 +68,19 @@ export function createThreadFixture({ modern = true } = {}) {
       emit(id, { type: 'board.changed', board_new: r.thread.board_new }); return { ...copy(r.board), board_new: r.thread.board_new }
     }
     if (action === 'messages') {
-      if (body.reply_to && !r.messages.some((m) => m.id === body.reply_to)) throw Object.assign(new Error('This earlier message is no longer available.'), { status: 404 })
+      const prior = body.submission_id && r.messages.find((m) => m.submission_id === body.submission_id)
+      if (prior) return { accepted: true, message: copy(prior) }
+      const source = body.reply_thread && sourceQuote(body.reply_thread, body.reply_to)
+      if (source && !body.text.trim()) throw Object.assign(new Error('Write a message to open the branch.'), { status: 400 })
+      if (body.reply_to && !source && !r.messages.some((m) => m.id === body.reply_to)) throw Object.assign(new Error('This earlier message is no longer available.'), { status: 404 })
       const message = { id: `m${++counter}`, author: owner().id, at: now(), kind: 'message', text: body.text, did: [], ...(body.reply_to ? { reply_to: body.reply_to } : {}), ...(body.attachments?.length ? { attachments: body.attachments.map((path) => ({ path, name: path.split('/').at(-1) })) } : {}) }
+      if (body.submission_id) message.submission_id = body.submission_id
+      if (source) {
+        message.reply_source = source
+        r.thread.branched_from = { thread: source.thread, message: source.id, reply: true }
+      }
+      delete r.draft_reply
+      if (r.thread.title === 'New thread') r.thread.title = body.text.slice(0, 60)
       r.messages.push(message); emit(id, { type: 'message.done', message: copy(message) })
       const tagged = agents.filter((a) => body.text.toLowerCase().includes(`@${a.id}`))
       const targets = tagged.length ? tagged.map((a) => a.id) : [r.thread.default].filter(Boolean)
@@ -69,7 +93,8 @@ export function createThreadFixture({ modern = true } = {}) {
         const replyId = `m${++counter}`
         r.turn = { persona, engine: 'claude-code' }; emit(id, { type: 'turn.started', ...r.turn })
         setTimeout(() => emit(id, { type: 'turn.step', persona, label: 'Read the thread and gathered the open questions', steps: 1 }), 200)
-        const text = 'Let’s give that a little room. I’ll keep the next step small, and put anything worth keeping on our board.'
+        const text = source ? `Picking up from “${quoteLine(source)}” I’d start with one small decision, then keep the rest of the plan flexible.`
+          : 'Let’s give that a little room. I’ll keep the next step small, and put anything worth keeping on our board.'
         const words = text.match(/\S+\s*/g)
         words.forEach((delta, i) => setTimeout(() => {
           emit(id, { type: 'message.delta', persona, text: delta, draft: words.slice(0, i + 1).join('') })
@@ -81,10 +106,10 @@ export function createThreadFixture({ modern = true } = {}) {
           }
         }, 600 + i * 45))
       }
-      if (r.thread.title === 'New thread') r.thread.title = body.text.slice(0, 60)
       return { accepted: true, message: copy(message) }
     }
     if (method === 'PATCH') {
+      if (body.draft_reply === null) delete r.draft_reply
       if (body.seen) r.thread.unread = 0
       if (Object.hasOwn(body, 'default')) r.thread.default = body.default
       for (const field of ['icon', 'pinned', 'archived']) if (Object.hasOwn(body, field)) r.thread[field] = body[field]

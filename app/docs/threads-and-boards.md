@@ -241,61 +241,28 @@ quick-add text and raw board drafts survive navigation within this page only;
 closing the page warns about unsaved raw board edits. The app has no database
 or browser storage for thread records, boards or read marks.
 
-## Branching from a message (2026-11-11)
+## Branching from a message
 
-Completed human and persona messages have a forking-path footer icon, named
-**Branch into a new thread**, beside Reply and Copy. System lines, streaming
-replies and optimistic sends have none. It uses the existing footer dimensions
-and tone at every width. The shared `menuSurface` anchors **New thread with**
-to that message's button from 700 px up, and opens a bottom sheet below it.
-The source default is selected; source members precede the remaining roster.
-One tap selects a different persona, including while the opening is loading.
+**Branch into a new thread** in a completed message's footer opens the agent
+picker. On a phone it is a sheet. On desktop it opens beside the message.
+The source thread's members are listed first, with its default at the front.
+Choosing an agent opens the normal composer with an empty field and the
+source quote above it. Use **Remove quote** to send as a plain new thread.
+A quoted opening needs text before Send is enabled.
 
-The broker's branch extension supplies the context and writes the records;
-this app supplies the text-model call. These paths are relative to
-`/v1/threads` at the broker and `/api/threads` in the browser:
+The first message shows the same quote treatment as an in-thread reply, with
+the source thread's name beside the author. Opening it loads the source
+thread and highlights the message. Back returns to the branch. In the source
+thread, **branched →** links appear beneath the message for every accepted
+branch. They follow destination titles and disappear when the destination
+is deleted. Older branches still display their saved system links.
 
-| Method and path | Request and response |
-| --- | --- |
-| `GET /:id/branch?message=m12[&persona=<id>]` | Broker: `{thread,title,message,record,window:[messages],persona,people:[persona ids],summarizer:{system_instruction,input,answer},fallback:{title,draft}}`. Browser: `{thread,message,persona,people,title,draft}` after drafting. This read creates no thread or agent turn. |
-| `POST /:id/branch` | `{message,persona?,title?,draft?,by?}` → `201 {thread:<summary>,from:<system message>,into:<system message>,window}`. The sheet sends the chosen persona, generated title and edited opening. |
-| `PATCH /:id` | Also accepts `draft:<string or null>`; the host stores this convenience beside the record. |
-
-`src/thread-branch.js` sends the broker's `system_instruction` and `input` to
-the existing Gemini Interactions text endpoint using `SPEECH_BRIEF_MODEL` and
-`GEMINI_API_KEY`, with `store:false`. It reads JSON `{title,draft}` from model
-output only. A missing key, rejected call, 20-second timeout, incomplete answer
-or invalid JSON uses the broker's `fallback` without a second call. Prompts,
-the context window and credentials do not reach the browser. No new settings,
-application dependency or app-owned durable state are introduced.
-
-While the read runs the sheet shows a soft four-line shimmer; reduced motion
-keeps it still. The opening is a retained textarea, so live redraws keep its
-selection. An empty opening disables Start. Read failures offer Try again;
-write failures retain the persona and edited opening. Dismissing the sheet
-retires late reads. A pending Start is guarded against repeated clicks.
-
-Starting branches without sending a message or starting a turn. The returned
-summary carries `draft` and `branched_from:{thread,message}`. The page opens
-that thread with the edited opening in its shared composer, focused at the end
-and scrolled there when needed. A fresh read restores `summary.draft` when no
-page-local draft exists. Existing local edits, including a cleared field, take
-precedence. The source text, attachments and reply intent stay with the source
-thread. The broker consumes its stored opening on the first accepted message;
-normal subsequent composer edits follow the existing page-local draft lifetime.
-
-Both system messages render `link:{thread,message?,title}` as real anchors.
-An ordinary tap opens the other thread; the source link also reveals and
-highlights the chosen message using the existing history/jump machinery.
-Modifier clicks retain native link handling. The source notice carries
-`after:<source message id>`; `message.done` inserts it beneath that message and
-its prior branch notices rather than appending it at the live tail. HTTP/SSE
-duplicates update one identity. An off-window notice advances the reconnect
-cursor but appears only when its source is loaded by ordinary history reads.
-
-[Branch evidence](evidence/thread-branch/README.md) includes stubbed-route
-checks, full-suite output and 390/1440 light/dark captures. This is web-half
-work; deployment and the broker's own context/window behavior are separate.
+The page opens the composer through `POST /api/threads/:id/branch` with
+`{message, persona}`. The broker returns a thread summary and `draft_reply`.
+The ordinary ordered send carries `reply_to` and `reply_thread` while the
+quote is attached. The thread-list stream supplies the destination summaries
+for the source markers. See the [broker contract](../../broker/README.md#branching-a-thread)
+and `test/thread-branch-browser.mjs` for the browser journey.
 
 ## Runtime contract
 

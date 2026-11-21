@@ -37,10 +37,9 @@ The sticky listening bar keeps a neutral Play/Pause circle and speed pill,
 with a quiet Close control. See its [states and checks](docs/evidence/sticky-audio-controls/README.md).
 
 Use **Branch into a new thread** beneath a completed message to take a topic
-elsewhere. Choose an agent, edit the drafted opening, then **Start thread**.
-The new thread opens with that text in its composer; sending it is a separate
-action. “Branched from …” and “Branched into …” link both sides. See the
-[branch contract and checks](docs/threads-and-boards.md#branching-from-a-message-2026-11-11).
+elsewhere. Choose an agent and write your opening in the empty composer.
+The attached quote jumps to its source, where a small link opens the new
+thread. See the [branch contract](docs/threads-and-boards.md#branching-from-a-message).
 
 The thread header's **Tasks** panel combines persona background work and
 engineer jobs. Jobs keep their place after the persona session ends; recent
@@ -318,10 +317,8 @@ describes the runtime contract and staging checks. Owner identity comes from
 | `FILES_VAULT_URLS` | — | optional: comma-separated `https://` prefixes of the published vault; the first is the standalone **Copy link** base, and links to any prefix open in Files. No unauthenticated existence probe. Anything not `https://` is ignored. |
 | `FILES_WEB_URLS` | — | optional: JSON array of `{root, path, url}` mappings for other published file trees, e.g. `[{"root":"spaces","path":"shared/www","url":"https://files.example.org"}]`. Paths are relative to a Files root; URLs are HTTPS folder bases. The longest matching folder wins. Unmapped files offer **Copy app link**. See [mapping details](docs/files-content-origin.md#standalone-copy-links). |
 | `FILES_CONTENT_ORIGIN` | — | optional: dedicated HTTPS content origin on a different hostname; enables scripted HTML previews and relative assets. Requires the host proxy setup in [Live HTML: host handoff](docs/files-content-origin.md). Unset, HTML uses the existing static preview with an explanation. |
-| `GEMINI_API_URL` | `https://generativelanguage.googleapis.com` | where Gemini's API is. There to point the tests at a fake; nobody else needs it. |
 | `DICTATION_POLISH_MODEL` | `gemini-3.5-flash-lite` | the text model that polishes a recorded take, on the same key. [Polish](docs/session-ui-history.md#polish-a-second-pass-over-the-words). |
 | `SPEECH_TTS_MODEL` | `gemini-3.8-flash-tts` | the model a reply is voiced with. Google has no tracking alias for its TTS models (checked 2026-10-02); the app lists the models once at start and logs any `…-flash-tts-latest` it finds, and uses it **only when this is unset**. [Read aloud](docs/session-ui-history.md#read-aloud-a-reply-as-speech). |
-| `SPEECH_BRIEF_MODEL` | `gemini-flash-latest` | the text model for spoken briefs, Full’s table/diagram descriptions and thread openings; branch drafting uses the Read aloud plugin key and uses the broker's record-based fallback if generation is unavailable |
 | `SPEECH_VOICES` | — | fallback prebuilt voice for each agent (overridden by a stored profile voice), and a few words of its character: `agent=Voice:character;agent=Voice:character`, e.g. `scout=Iapetus:clear and direct`. The agents are this installation's, so they are configuration and never a literal here. An agent not listed — or every agent, when this is unset — reads in `Charon`, informative. A voice that is not one of the thirty prebuilt ones is dropped at start with a log line. |
 | `SPEECH_PACES` | — | measured word equivalents/minute per prebuilt voice, e.g. `Aoede=147;Aoede.brief=121;Charon=155`. `.brief` and `.verbatim` override one mode; an unsuffixed voice sets the base pace. Aoede defaults to the supplied Full measurement of 147 and brief measurement of about 121; its brief uses 121 unless `.brief` explicitly overrides it. Other voices inherit their base pace in either mode, provisionally 150 when unlisted. Invalid entries are logged and dropped. Synthesis and cache checks use the same pace. |
 | `SPEECH_DIR` | `/storage/speech` (a Loam install: `/var/lib/loam-app/<app>/speech`) | where the MP3s and their sidecars are kept. Not writable, and speech says `no storage`. |

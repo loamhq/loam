@@ -2039,6 +2039,7 @@ class Server:
                 "thread": summary,
                 "messages": messages, "has_more": got["has_more"],
                 "ordered_submissions": True,
+                "draft_reply": threads_rec.draft_reply_for(thread_id),
                 # Return all active turns in start order. Older clients read the first as turn.
                 "turn": engine.active.get(thread_id),
                 "turns": engine.live_turns(thread_id),
@@ -2092,6 +2093,10 @@ class Server:
                     raise BrokerError(400, "`draft` is a string or null")
                 threads_rec.read(thread_id)
                 threads_rec.set_draft(thread_id, payload["draft"])
+            if "draft_reply" in payload:
+                if payload["draft_reply"] is not None:
+                    raise BrokerError(400, "`draft_reply` can only be cleared")
+                threads_rec.clear_draft_reply(thread_id)
             changes = {}
             if "default" in payload:
                 changes["default"] = payload["default"] or None
@@ -2148,46 +2153,20 @@ class Server:
             writer.write(response(200, summary))
             await writer.drain()
             return
-        if rest == ["branch"] and method == "GET":
-            # Return the context around the selected message for the branch preview.
-            meta, msgs, path = threads_rec.read(thread_id)
-            window = threads_rec.branch_window(msgs, params.get("message") or "",
-                                               thread_id)
-            people = threads_rec.branch_people(meta)
-            persona = params.get("persona") or meta.get("default") or (
-                people[0] if people else None)
-            if persona and persona not in people:
-                raise BrokerError(404, f"no persona named {persona!r}")
-            writer.write(response(200, {
-                "thread": thread_id, "title": meta["title"],
-                "message": window[-1]["id"], "record": str(path),
-                "window": window, "persona": persona, "people": people,
-                "summarizer": threads_rec.branch_prompt(meta, window, persona),
-                "fallback": threads_rec.fallback_branch(meta, window)}))
-            await writer.drain()
-            return
         if rest == ["branch"] and method == "POST":
-            # Start thread: the new thread, its line back, the source's line
-            # under the message, the draft for its composer. `by` when a
-            # persona branched (the owner's 11-10 rule: anything they can do).
-            for key in ("title", "draft", "persona"):
-                if payload.get(key) is not None and not isinstance(payload[key], str):
-                    raise BrokerError(400, f"`{key}` is a string")
-            by = author(payload)
+            persona = payload.get("persona")
+            if persona is not None and not isinstance(persona, str):
+                raise BrokerError(400, "`persona` is a string")
             made = threads_rec.branch(thread_id, payload.get("message") or "",
-                                      payload.get("persona") or None,
-                                      title=payload.get("title"),
-                                      draft=payload.get("draft"), by=by)
-            new_id = made["meta"]["id"]
-            print(f"threads: {new_id} branched from {thread_id} at "
-                  f"{payload.get('message')} ({len(made['window'])} messages)"
-                  f"{f' by {by}' if by else ''}", file=sys.stderr, flush=True)
+                                      persona or None)
+            new_id = made["id"]
+            print(f"threads: {new_id} opened a branch composer from {thread_id} at "
+                  f"{payload.get('message')}",
+                  file=sys.stderr, flush=True)
             engine.publish_row(new_id)
-            engine.publish(thread_id, {"type": "message.done", "message": made["into"]})
-            engine.publish_row(thread_id)
-            writer.write(response(201, {"thread": engine.summary(new_id),
-                                        "from": made["from"], "into": made["into"],
-                                        "window": made["window"]}))
+            writer.write(response(201, {**engine.summary(new_id),
+                                        "draft_reply": threads_rec.draft_reply_for(new_id),
+                                        "ordered_submissions": True}))
             await writer.drain()
             return
         if rest == ["attachments"] and method == "POST":
@@ -2218,7 +2197,7 @@ class Server:
                 if not isinstance(text, str):
                     raise BrokerError(400, "Message text must be a string.")
                 signature = engine.submission_hash(text, attachments, payload.get("reply_to"),
-                                                   payload.get("model"))
+                                                   payload.get("model"), payload.get("reply_thread"))
                 engine.finish_pending_submission(thread_id)
                 prior = engine.accepted_submission(threads_rec.read(thread_id)[1], key, signature)
                 if prior:
@@ -2239,7 +2218,8 @@ class Server:
             reply_to = payload.get("reply_to") or None
             msg = engine.post_person(thread_id, payload.get("text") or "",
                                      attachments=carried, model=model,
-                                     reply_to=reply_to, submission_id=key, signature=signature)
+                                     reply_to=reply_to, submission_id=key, signature=signature,
+                                     reply_thread=payload.get("reply_thread"))
             writer.write(response(200, {"accepted": True, "message": msg}))
             await writer.drain()
             return

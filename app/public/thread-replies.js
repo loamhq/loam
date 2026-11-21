@@ -38,7 +38,7 @@ export function replyQuotes({ read, changed, active = () => true }) {
       if (busy || ended || failed || !before) return
       busy = true
       try {
-        const wanted = () => visible.some((m) => /^m\d+$/.test(m.reply_to ?? '') && !messages.has(m.reply_to))
+        const wanted = () => visible.some((m) => !m.reply_source && /^m\d+$/.test(m.reply_to ?? '') && !messages.has(m.reply_to))
         while (active() && !ended && wanted()) {
           const body = await page(before)
           if (!active()) return
