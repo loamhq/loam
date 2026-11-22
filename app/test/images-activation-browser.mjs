@@ -52,7 +52,14 @@ async function check(width, mode) {
         const url = new URL(route.request().url())
         if (route.request().method() === 'GET' && url.pathname.startsWith('/api/plugins/images/files/')) return route.continue()
         if (url.pathname.endsWith('/events')) return route.fulfill({ contentType: 'text/event-stream', body: ': fixture\n\n' })
-        const response = await route.fetch({ url: app.url + url.pathname + url.search })
+        const headers = route.request().headers()
+        delete headers.origin
+        delete headers.host
+        const response = await route.fetch({ url: app.url + url.pathname + url.search, headers })
+        return route.fulfill({ response })
+      })
+      await context.route('**/appearance-state.js*', async route => {
+        const response = await route.fetch({ url: app.url + '/appearance-state.js' })
         return route.fulfill({ response })
       })
     } else {
@@ -73,6 +80,7 @@ async function check(width, mode) {
     const enable = question.getByRole('button', { name: 'Turn on Images' })
     const shot = async screen => {
       await page.evaluate(() => document.fonts.ready)
+      await page.waitForFunction(expected => document.documentElement.dataset.theme === expected, mode)
       await question.scrollIntoViewIfNeeded()
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
       if (evidence) await page.screenshot({ path: path.join(evidence, `${screen}-${width}-${mode}.png`), animations: 'disabled' })
