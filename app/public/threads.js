@@ -400,11 +400,11 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
   function dropUnsent(id) {
     st.threads = st.threads.filter((t) => t.id !== id); listingRequest++
     for (const kept of [st.drafts, st.quickDrafts, st.boardDrafts, visits]) kept.delete(id)
-    transport('DELETE', path(id)).catch(() => refreshList())
+    transport('DELETE', path(id) + '?empty=1').catch(() => refreshList())
   }
   if (!fixture && !sidePanel) globalThis.addEventListener?.('pagehide', () => {
     const o = st.open
-    if (unsentHere(o)) globalThis.fetch?.(`/api${path(o.thread.id)}`, { method: 'DELETE', keepalive: true, credentials: 'same-origin' })?.catch?.(() => {})
+    if (unsentHere(o)) globalThis.fetch?.(`/api${path(o.thread.id)}?empty=1`, { method: 'DELETE', keepalive: true, credentials: 'same-origin' })?.catch?.(() => {})
   })
   async function open(id, { push = true, listing = null, routed = false, board = false, message = null, focusMessage = false } = {}) {
     if (navigate && !routed) return navigate({ kind: 'thread', id, push, listing, board, message, focusMessage })

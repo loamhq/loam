@@ -435,14 +435,14 @@ test('an unsent new thread does not linger: leaving it empty deletes it', async 
   assert.equal(threads.st.threads.some((x) => x.id === 't-new1'), true)
   threads.close({ navigate: false })
   await tick()
-  assert.equal(calls.includes('DELETE /threads/t-new1'), true, 'left empty, it is deleted')
+  assert.equal(calls.includes('DELETE /threads/t-new1?empty=1'), true, 'left empty, it is deleted')
   assert.equal(threads.st.threads.some((x) => x.id === 't-new1'), false, 'and gone from Recent at once')
 
   await buildAppThread(threads, [{ id: 'iris', name: 'Iris' }])
   field.value = 'A habit tracker'
   threads.close({ navigate: false })
   await tick()
-  assert.equal(calls.includes('DELETE /threads/t-new2'), false, 'a thread with a draft stays')
+  assert.equal(calls.includes('DELETE /threads/t-new2?empty=1'), false, 'a thread with a draft stays')
   field.value = ''
 
   await buildAppThread(threads, [{ id: 'iris', name: 'Iris' }])
@@ -450,7 +450,7 @@ test('an unsent new thread does not linger: leaving it empty deletes it', async 
   await threads.send()
   threads.close({ navigate: false })
   await tick()
-  assert.equal(calls.includes('DELETE /threads/t-new3'), false, 'a thread with a message stays')
+  assert.equal(calls.includes('DELETE /threads/t-new3?empty=1'), false, 'a thread with a message stays')
 
   // Opening an existing empty thread and leaving it deletes nothing: only one
   // this page made.

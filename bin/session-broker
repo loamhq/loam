@@ -2120,7 +2120,7 @@ class Server:
                 raise BrokerError(409, "a turn is running in this thread; "
                                        "delete it when the turn has finished")
             by = author(payload)
-            gone = threads_rec.delete(thread_id)
+            gone = threads_rec.delete(thread_id, only_empty=truthy(params.get("empty")))
             print(f"threads: deleted {thread_id}{f' by {by}' if by else ''}: "
                   f"{', '.join(gone['removed'])}",
                   file=sys.stderr, flush=True)

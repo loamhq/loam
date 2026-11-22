@@ -363,7 +363,7 @@ export function createApp({
         : ['GET', 'PATCH', 'DELETE'].includes(method)
       if (!allowed) return sendJson(res, 405, { error: 'This operation is not available for threads.' })
       const query = new URLSearchParams()
-      for (const key of action === 'steps' ? ['message'] : action === 'events' ? ['after', 'steps'] : ['before', 'limit', 'archived', 'steps', ...(id && !action && method === 'GET' ? ['seen'] : [])]) {
+      for (const key of action === 'steps' ? ['message'] : action === 'events' ? ['after', 'steps'] : ['before', 'limit', 'archived', 'steps', ...(id && !action && method === 'DELETE' ? ['empty'] : []), ...(id && !action && method === 'GET' ? ['seen'] : [])]) {
         if (url.searchParams.has(key)) query.set(key, url.searchParams.get(key))
       }
       const target = `/v1/threads${id ? `/${encodeURIComponent(dec(id))}` : ''}${action ? `/${action}` : ''}${query.size ? `?${query}` : ''}`

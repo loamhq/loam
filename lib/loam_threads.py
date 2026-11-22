@@ -1234,14 +1234,19 @@ def update(thread_id: str, *, title: str | None = None, default=_UNSET,
     return meta
 
 
-def delete(thread_id: str) -> dict:
+def delete(thread_id: str, *, only_empty: bool = False) -> dict:
     """Remove the thread, board and runtime state on the owner's confirmed action. Preserve
     General and report what was removed.
     """
     if thread_id == GENERAL_ID:
         raise ThreadError(400, "General can't be deleted")
     with locked(VAULT):
-        meta, _, path = read(thread_id)
+        meta, messages, path = read(thread_id)
+        if only_empty:
+            if (any(m.get("kind") != "system" for m in messages)
+                    or load_state("threads.json").get(thread_id, {}).get("draft")
+                    or thread_files.has_content(meta)):
+                raise ThreadError(409, "This thread has content and was kept")
         board = VAULT / meta["board"]
         removed = [str(path.relative_to(VAULT))]
         removed.extend(thread_files.removed(thread_id))

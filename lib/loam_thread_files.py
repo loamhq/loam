@@ -148,6 +148,19 @@ def renamed(meta):
         _binding(pid, meta, spec)
 
 
+def has_content(meta):
+    """Called under the writer lock before discarding a never-sent thread."""
+    for pid, spec in threads.load_state(REGISTRY).items():
+        row = _bindings().get(pid, {}).get(meta["id"])
+        if row:
+            path = _path(row["path"])
+            if path.exists():
+                initial = spec["initial"].replace("{title}", row["title"]) + "\n\n"
+                if path.read_bytes() != initial.encode("utf-8"):
+                    return True
+    return False
+
+
 def removed(thread_id):
     """Called under the thread lock for a confirmed delete. An inactive plugin's
     files remain ordinary notes. A missing file is an idempotent deletion."""

@@ -45,6 +45,10 @@ class ThreadFileTest(TestCase):
         before = Path(first).stat()
         files.document("checklists", a["id"], {**snap, "base_revision": snap["revision"]})
         self.assertEqual(Path(first).stat().st_mtime_ns, before.st_mtime_ns)
+        with self.assertRaises(threads.ThreadError) as refused:
+            threads.delete(a["id"], only_empty=True)
+        self.assertEqual(refused.exception.status, 409)
+        self.assertEqual(Path(first).read_bytes(), raw)
         meta = threads.update(a["id"], title="Holiday")
         moved = Path(files.locations(meta)["checklists"]["path"])
         self.assertFalse(Path(first).exists())
