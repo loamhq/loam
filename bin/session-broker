@@ -1197,7 +1197,8 @@ class Server:
                 if not admitted:
                     raise BrokerError(503, "session maintenance in progress; retry shortly")
                 await self.route(method, path, params, payload, writer,
-                                 raw=body, content_type=ctype)
+                                 raw=body, content_type=ctype,
+                                 if_none_match=headers.get("if-none-match", ""))
         except (BrokerError, threads_rec.ThreadError) as exc:
             writer.write(response(exc.status, {"error": exc.message,
                                                **getattr(exc, "detail", {})}))
@@ -1205,7 +1206,7 @@ class Server:
 
     async def route(self, method: str, path: str, params: dict, payload: dict,
                     writer: asyncio.StreamWriter, raw: bytes = b"",
-                    content_type: str = "") -> None:
+                    content_type: str = "", if_none_match: str = "") -> None:
         parts = [p for p in path.split("/") if p]
         broker = self.broker
         remote = getattr(broker, "remote", False)
@@ -1319,7 +1320,8 @@ class Server:
             return
 
         if parts[:2] == ["v1", "plugins"]:
-            await self.plugins_route(method, parts[2:], payload, writer)
+            await self.plugins_route(method, parts[2:], payload, writer,
+                                     if_none_match=if_none_match)
             return
 
         # Install a Market entry through the plugins route using its link. A missing list reads as empty.
@@ -3214,7 +3216,8 @@ class Server:
         await writer.drain()
 
     async def plugins_route(self, method: str, tail: list[str], payload: dict,
-                            writer: asyncio.StreamWriter) -> None:
+                            writer: asyncio.StreamWriter,
+                            if_none_match: str = "") -> None:
         """``/v1/plugins``: GET the list, POST an install (a preview, then a
         confirm); ``/v1/plugins/<id>``: GET one, PATCH ``{"on"}``, DELETE;
         ``/v1/plugins/<id>/files/<path>``: a page, asset or theme file."""
@@ -3376,13 +3379,24 @@ class Server:
                     raise BrokerError(405, "a plugin's files are read with GET")
                 path, ctype = await asyncio.to_thread(loam_plugins.file_for,
                                                       tail[0], tail[2:])
-                data = await asyncio.to_thread(path.read_bytes)
-                head = (f"HTTP/1.1 200 OK\r\nContent-Type: {ctype}\r\n"
-                        f"Content-Length: {len(data)}\r\n"
-                        f"Cache-Control: no-cache\r\n"
-                        f"X-Content-Type-Options: nosniff\r\n"
-                        f"Connection: close\r\n\r\n").encode()
-                writer.write(head + (b"" if method == "HEAD" else data))
+                st = await asyncio.to_thread(path.stat)
+                etag = f'W/"{st.st_mtime_ns:x}-{st.st_size:x}"'
+                tags = {t.strip() for t in if_none_match.split(",") if t.strip()}
+                if etag in tags or "*" in tags:
+                    head = (f"HTTP/1.1 304 Not Modified\r\nETag: {etag}\r\n"
+                            f"Cache-Control: no-cache\r\n"
+                            f"X-Content-Type-Options: nosniff\r\n"
+                            f"Connection: close\r\n\r\n").encode()
+                    writer.write(head)
+                else:
+                    data = await asyncio.to_thread(path.read_bytes)
+                    head = (f"HTTP/1.1 200 OK\r\nContent-Type: {ctype}\r\n"
+                            f"Content-Length: {len(data)}\r\n"
+                            f"ETag: {etag}\r\n"
+                            f"Cache-Control: no-cache\r\n"
+                            f"X-Content-Type-Options: nosniff\r\n"
+                            f"Connection: close\r\n\r\n").encode()
+                    writer.write(head + (b"" if method == "HEAD" else data))
             else:
                 raise BrokerError(404, f"no route for {method} /v1/plugins/"
                                        f"{'/'.join(tail)}")

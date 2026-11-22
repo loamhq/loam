@@ -38,6 +38,7 @@
 .tt-thread { min-width:0; }
 .tt-thread .tt-title { flex:1; min-width:0; max-width:none; }
 .tt-head > .headspace { flex:0; }
+.tt-header-actions { display:inline-flex; align-items:center; gap:inherit; flex:none; min-height:1px; }
 .tt-title > svg { flex:none; }
 .tt-head .thread-tile { border-radius:14px; }
 .tt-header-menu { min-width:240px; }

@@ -772,19 +772,24 @@ class FakeBroker:
     token = "test-token"
 
 
-async def http(port, method, path, body=None, raw=False):
+async def http(port, method, path, body=None, raw=False, extra_headers=None):
     def go():
+        hdrs = {"Authorization": "Bearer test-token",
+                "Content-Type": "application/json",
+                **(extra_headers or {})}
         req = urllib.request.Request(
             f"http://127.0.0.1:{port}{path}", method=method,
             data=json.dumps(body).encode() if body is not None else None,
-            headers={"Authorization": "Bearer test-token",
-                     "Content-Type": "application/json"})
+            headers=hdrs)
         try:
             with urllib.request.urlopen(req, timeout=60) as r:
                 data = r.read()
                 return r.status, (data, r.headers) if raw else json.loads(data)
         except urllib.error.HTTPError as exc:
-            return exc.code, json.loads(exc.read())
+            raw_body = exc.read()
+            if raw:
+                return exc.code, (raw_body, exc.headers)
+            return exc.code, json.loads(raw_body) if raw_body else {}
     return await asyncio.to_thread(go)
 
 
@@ -840,7 +845,15 @@ async def main():
         check("GET a page file: its bytes as text/javascript, nosniff",
               status == 200 and data == b"export function activate() {}\n"
               and headers["Content-Type"] == "text/javascript; charset=utf-8"
-              and headers["X-Content-Type-Options"] == "nosniff", headers)
+              and headers["X-Content-Type-Options"] == "nosniff"
+              and bool(headers.get("ETag")), headers)
+        status304, (data304, headers304) = await http(
+            port, "GET", "/v1/plugins/lamp/files/page/main.js",
+            raw=True, extra_headers={"If-None-Match": headers["ETag"]})
+        check("GET a page file with matching If-None-Match: 304",
+              status304 == 304 and data304 == b""
+              and headers304.get("ETag") == headers["ETag"],
+              (status304, data304, headers304))
         status, body = await http(port, "GET", "/v1/plugins/lamp/files/server/secret.py")
         check("GET server code: 404", status == 404, body)
         status, body = await http(port, "GET", "/v1/plugins/lamp/files/page/%2e%2e/notes.txt")
@@ -1268,6 +1281,44 @@ path, ctype = P.file_for("pictured", ["shots", "one.webp"])
 check("files: a screenshot it names is served", ctype == "image/webp", (path, ctype))
 ok, said = refuses(lambda: P.file_for("pictured", ["shots", "other.webp"]), "")
 check("files: a picture beside it that it does not name is not", ok, said)
+
+# Targeted lookup: file_for and one() avoid scanning unrelated plugins while
+# preserving _copies > yours > shipped (and falling back past broken yours).
+plugin(SHIPPED, "fast-target", {"kind": ["extension"]},
+       files={"page/main.js": "export const layer = 'shipped'\n"})
+plugin(YOURS, "fast-target", {"kind": ["extension"]},
+       files={"page/main.js": "export const layer = 'yours'\n"})
+real_read_folder = P.read_folder
+seen_reads: list[str] = []
+def spy_read_folder(folder, expected_id=None):
+    seen_reads.append(folder.name)
+    return real_read_folder(folder, expected_id)
+P.read_folder = spy_read_folder
+try:
+    p_yours, _ = P.file_for("fast-target", ["page", "main.js"])
+    check("files: file_for reads only the requested plugin (yours over shipped)",
+          p_yours.parent.parent == YOURS / "fast-target" and seen_reads == ["fast-target"],
+          (p_yours, seen_reads))
+    seen_reads.clear()
+    one_row = P.one("fast-target")
+    check("one: reads only the requested plugin across layers",
+          one_row["plugin"]["layer"] == "yours" and set(seen_reads) == {"fast-target"},
+          (one_row["plugin"]["layer"], seen_reads))
+    plugin(YOURS / "_copies", "fast-target", {"kind": ["extension"]},
+           files={"page/main.js": "export const layer = 'copy'\n"})
+    seen_reads.clear()
+    p_copy, _ = P.file_for("fast-target", ["page", "main.js"])
+    check("files: _copies takes precedence over yours",
+          p_copy.parent.parent == YOURS / "_copies" / "fast-target" and seen_reads == ["fast-target"],
+          (p_copy, seen_reads))
+    (YOURS / "_copies" / "fast-target" / "PLUGIN.md").write_text("---\nnot valid: [", encoding="utf-8")
+    seen_reads.clear()
+    p_fallback, _ = P.file_for("fast-target", ["page", "main.js"])
+    check("files: broken yours/_copies falls back to shipped just like _rows()",
+          p_fallback.parent.parent == SHIPPED / "fast-target",
+          (p_fallback, seen_reads))
+finally:
+    P.read_folder = real_read_folder
 
 real_themes = (Path(__file__).resolve().parent.parent / "app") / "public" / "themes"
 # Compare shipped theme options with the actual core table.

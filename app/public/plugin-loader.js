@@ -72,7 +72,18 @@ export function createPluginLoader({ registry, request, ui, changed = () => {}, 
       const key = JSON.stringify(row)
       if (!css.has(key) && styles) css.set(key, styles.add(row, 'theme.css', local))
     }
-    for (const row of eligible) if (!active.has(row.id)) settling.add(row.id)
+    const pendingRows = eligible.filter(row => !active.has(row.id))
+    for (const row of pendingRows) settling.add(row.id)
+    // Fetch and parse every layer's module graph in parallel while still
+    // running defaults' activate() before Yours' activate().
+    const preloaded = new Map()
+    for (const row of pendingRows) {
+      if (!Number.isInteger(row.api) || row.api > 0) continue
+      const url = local && row.local ? row.local : `/api/plugins/${segment(row.id)}/files/page/main.js?load=${++serial}`
+      const load = bounded(Promise.resolve().then(() => importer(url)), 'import')
+      load.catch(() => {})
+      preloaded.set(row.id, load)
+    }
     const activate = async row => {
       try { await activateRow(row) } finally { if (settling.delete(row.id)) changed() }
     }
@@ -87,8 +98,10 @@ export function createPluginLoader({ registry, request, ui, changed = () => {}, 
         return async () => { if (done) return; done = true; await fn?.() }
       }
       try {
-        const url = local && row.local ? row.local : `/api/plugins/${segment(row.id)}/files/page/main.js?load=${++serial}`
-        const mod = await bounded(Promise.resolve().then(() => importer(url)), 'import')
+        const load = preloaded.get(row.id) ?? bounded(Promise.resolve().then(() => importer(
+          local && row.local ? row.local : `/api/plugins/${segment(row.id)}/files/page/main.js?load=${++serial}`,
+        )), 'import')
+        const mod = await load
         if (disposed || entry.cancelled) return
         if (typeof mod.activate !== 'function') throw new Error('The page module must export activate(loam).')
         const activation = Promise.resolve().then(() => mod.activate(api))

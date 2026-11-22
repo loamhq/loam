@@ -132,9 +132,11 @@ export function createBroker(config, { fetchImpl = fetch } = {}) {
     },
 
     // Plugin modules/assets are bytes. HEAD must remain HEAD upstream too.
-    async file(path, { method = 'GET', signal } = {}) {
-      const res = await fetchImpl(url(path), { method, headers: headers({ accept: '*/*' }), signal })
-      return { status: res.status, contentType: res.headers.get('content-type'), cacheControl: res.headers.get('cache-control'),
+    async file(path, { method = 'GET', ifNoneMatch = null, signal } = {}) {
+      const reqHeaders = { accept: '*/*' }
+      if (ifNoneMatch) reqHeaders['if-none-match'] = ifNoneMatch
+      const res = await fetchImpl(url(path), { method, headers: headers(reqHeaders), signal })
+      return { status: res.status, contentType: res.headers.get('content-type'), cacheControl: res.headers.get('cache-control'), etag: res.headers.get('etag'),
         stream: res.body ? Readable.fromWeb(res.body) : null }
     },
 

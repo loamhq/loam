@@ -31,7 +31,7 @@ import { readField, caretPoint, setMarkdown } from './compose.js'
 import { applyThreadEvent, threadTurns, readThreadRecord, readThreadSummary, readThreadList, readAcceptedMessage, compareThreads, messageSegments, firstMessageTitle, groupJoinNotices, withPending, withMarks, createdAgentId } from './thread-record.js'
 
 const button = (text, onclick, props = {}) => h('button', { class: 'pillbtn', type: 'button', onclick, ...props }, text)
-export function createThreads({ registry = createCoreRegistry(), linePending = () => false, api, redraw, agents, changedAgent = () => {}, agentsReady = () => false, loadAgents = () => {}, providers = () => [], rail, nav, enter, leave, compose, openProfile, openSettings = null, openRef, address = () => {}, viewAddress = () => {}, archiveAddress = () => false, historyButton = () => null, visitId = () => null, messageState = createMessageState(), sidebar = null, renderText = markdown, marketCards = null, fixture = false, running = null, stepUI = null, dom = document, navigate = null, side = () => null, sidePanel = false, visible = () => true, listIsMain = () => true, missing = () => {} }) {
+export function createThreads({ registry = createCoreRegistry(), linePending = () => false, headerActionPending = () => false, api, redraw, agents, changedAgent = () => {}, agentsReady = () => false, loadAgents = () => {}, providers = () => [], rail, nav, enter, leave, compose, openProfile, openSettings = null, openRef, address = () => {}, viewAddress = () => {}, archiveAddress = () => false, historyButton = () => null, visitId = () => null, messageState = createMessageState(), sidebar = null, renderText = markdown, marketCards = null, fixture = false, running = null, stepUI = null, dom = document, navigate = null, side = () => null, sidePanel = false, visible = () => true, listIsMain = () => true, missing = () => {} }) {
 
   const follow = follower()
   const elementId = id => sidePanel ? `side-${id}` : id
@@ -938,6 +938,79 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     })
     lineObserver.observe(slot)
   }
+  const headerActionsKey = 'loam.thread.headerActions.'
+  const HEADER_ACTIONS_LIMIT = 200
+  function readHeaderActionsWidths(layout) {
+    const out = new Map()
+    try {
+      const raw = JSON.parse(localStorage.getItem(headerActionsKey + layout) || '{}')
+      if (raw && typeof raw === 'object') {
+        for (const [id, val] of Object.entries(raw)) {
+          const width = Number(val)
+          if (id && Number.isFinite(width) && width > 0) out.set(id, width)
+        }
+      }
+    } catch {}
+    return out
+  }
+  const headerActionsWidths = {
+    compact: readHeaderActionsWidths('compact'),
+    wide: readHeaderActionsWidths('wide'),
+  }
+  function rememberHeaderActionsWidth(layout, threadId, width) {
+    if (!threadId) return
+    const map = headerActionsWidths[layout]
+    const clean = width > 0 ? Math.ceil(width * 1000) / 1000 : 0
+    if (clean > 0) {
+      if (map.get(threadId) === clean) return
+      map.delete(threadId)
+      map.set(threadId, clean)
+      while (map.size > HEADER_ACTIONS_LIMIT) map.delete(map.keys().next().value)
+    } else {
+      if (!map.has(threadId)) return
+      map.delete(threadId)
+    }
+    try {
+      if (map.size) localStorage.setItem(headerActionsKey + layout, JSON.stringify(Object.fromEntries(map)))
+      else localStorage.removeItem(headerActionsKey + layout)
+    } catch {}
+  }
+  let observedHeaderActions, observedHeaderActionsKey, headerActionsObserver
+  function observeHeaderActions(slot) {
+    const key = slot ? `${slot.dataset.headerActionsLayout ?? ''}:${slot.dataset.headerActionsThread ?? ''}` : ''
+    if (observedHeaderActions === slot && observedHeaderActionsKey === key) return
+    headerActionsObserver?.disconnect()
+    observedHeaderActions = slot
+    observedHeaderActionsKey = key
+    if (!slot || !globalThis.ResizeObserver) return
+    headerActionsObserver ??= new ResizeObserver(([{ target }]) => {
+      const layout = target.dataset.headerActionsLayout
+      const threadId = target.dataset.headerActionsThread
+      if (!target.isConnected || !layout || !threadId) return
+      const width = layoutPixels(target.getBoundingClientRect().width)
+      if (width > 0) rememberHeaderActionsWidth(layout, threadId, width)
+    })
+    headerActionsObserver.observe(slot)
+  }
+  function headerActionsSlot(o, controls) {
+    const layout = st.wide ? 'wide' : 'compact'
+    const threadId = o.thread.id
+    const pending = headerActionPending()
+    const reserved = headerActionsWidths[layout].get(threadId) ?? 0
+    const items = pending ? [] : controls('header').filter(Boolean)
+    if (!pending && !items.length) {
+      rememberHeaderActionsWidth(layout, threadId, 0)
+      return null
+    }
+    if (!items.length) {
+      if (!reserved) return null
+      return h('div', { class: 'tt-header-actions', key: 'header-actions', 'aria-hidden': 'true',
+        'data-header-actions-pending': 'true', style: { width: `${reserved}px` } })
+    }
+    return h('div', { class: 'tt-header-actions', key: 'header-actions',
+      'data-header-actions-layout': layout, 'data-header-actions-thread': threadId }, ...items)
+  }
+
   function listLine() {
     const layout = st.wide ? 'wide' : 'compact'
     const pending = linePending()
@@ -1651,7 +1724,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       onRename: general ? null : beginRename, renameLabel: 'Rename thread', titleField: o.renaming ? kept(title) : null,
       titleProps: { class: `${st.wide ? 'chattitle' : 'headtitle'} tt-title` },
       props: { class: `${st.wide ? 'chat-head' : 'thread-head'} tt-head` },
-      actions: [...(sidePanel ? side().controls().slice(0, 2) : [...controls('header'), taskIndicator()]),
+      actions: [...(sidePanel ? side().controls().slice(0, 2) : [headerActionsSlot(o, controls), taskIndicator()]),
         round('Thread actions', icon.dots(20), () => { o.headerMenu = !o.headerMenu; redraw() }, { class: 'iconbtn ghost', 'aria-expanded': String(Boolean(o.headerMenu)) }),
         sidePanel ? side().controls().at(-1) : null] })
     const chosenModel = defaultMember?.engine && composerModel(defaultMember, o.messages, providerCatalog())
@@ -1782,6 +1855,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     if (systemChanged) redraw()
     const list = dom.querySelector('.tt-list .scroll')
     observeLine(st.wide && collapsed() ? null : list?.querySelector('.tt-chats-line[data-line-layout]'))
+    observeHeaderActions(sidePanel ? null : dom.querySelector('.tt-head .tt-header-actions[data-header-actions-layout]'))
     if (list && st.resetListScroll) { list.scrollTop = 0; st.resetListScroll = false }
     if (st.focusList) {
       const target = dom.querySelector(st.archived ? '[aria-label="Back to Chats"]' : '[aria-label="Thread list actions"]')
