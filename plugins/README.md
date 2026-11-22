@@ -23,6 +23,3 @@ the five themes that left the shipped set, for its tests
 Dictation and Read aloud left the shipped set for the Market in 0.2.9; their
 copies are in `_listed/` too, for the tests and as the release's fallback
 (`lib/loam_to_market.py`).
-
-Hetzner Cloud became optional in 0.2.23. Its migration uses the same
-fallback for owners who already had it on.

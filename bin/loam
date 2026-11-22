@@ -1,7 +1,7 @@
 #!/bin/sh
 # Dispatch the public verbs to their sibling scripts. Other loam-* programs are internal.
 set -eu
-VERBS="status update report market host tell hetzner plugin"
+VERBS="status update report market host tell plugin"
 here=$(dirname "$(readlink -f "$0")")
 # Python's bytecode never lands in the checkout, however `loam` was reached
 # (a root shell over ssh reads no profile): an update refuses a tree with
@@ -27,6 +27,12 @@ esac
 shift
 case " $VERBS " in
   *" $verb "*) [ -x "$here/loam-$verb" ] && exec "$here/loam-$verb" "$@" ;;
+esac
+# A host administrator can install an extra local command here.
+case "$verb" in
+  *[!a-z0-9-]*|'') ;;
+  *) local_command="/etc/loam/commands/loam-$verb"
+     [ "$(id -u)" = 0 ] || [ ! -x "$local_command" ] || exec "$local_command" "$@" ;;
 esac
 echo "loam: there is no \"$verb\". Type: loam help" >&2
 exit 2

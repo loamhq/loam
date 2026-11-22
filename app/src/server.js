@@ -275,7 +275,7 @@ export function createApp({
     const keysAll = /^\/keys(?:\/([^/]+))?$/.exec(rest)
     const keysCheck = /^\/keys\/([^/]+)\/check$/.exec(rest)
     const keysPlugin = /^\/keys\/([^/]+)\/plugins\/([^/]+)$/.exec(rest)
-    const keysProject = /^\/keys\/hetzner\/projects\/([^/]+)$/.exec(rest)
+    const keysProject = /^\/keys\/([^/]+)\/projects\/([^/]+)$/.exec(rest)
     if (keysAll || keysCheck || keysPlugin || keysProject) {
       if (rest.split('/').some(part => /[/\\\x00]/.test(dec(part)))) return sendJson(res, 400, { error: 'Invalid key path.' })
       const allowed = keysCheck ? ['POST'] : keysPlugin || keysProject ? ['PUT', 'DELETE'] : keysAll[1] ? ['GET', 'PUT', 'DELETE'] : ['GET']

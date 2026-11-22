@@ -35,6 +35,24 @@ os.environ["LOAM_SECRETS_FILE"] = str(TMP / "box-secrets.env")
 (TMP / "vault").mkdir()
 (TMP / "box-secrets.env").write_text("# the box's own\nGEMINI_API_KEY=AIzaBOX\n")
 
+# Register a provider in an install's configuration, with an isolated validator.
+checker = TMP / "check-project.py"
+checker.write_text("""import json, sys
+token = json.load(sys.stdin)["EXAMPLE_TOKEN"]
+print(json.dumps({"ok": token == "fixture-project-token", "why": f"Checked {token}"}))
+""")
+config = TMP / "loam.toml"
+original = os.environ.get("LOAM_CONFIG")
+config.write_text((Path(original).read_text() if original else "") + f"""
+[keys.providers.example-cloud]
+name = "Example Cloud"
+fields = [{{name = "EXAMPLE_TOKEN", label = "API token"}}]
+check_command = [{json.dumps(sys.executable)}, {json.dumps(str(checker))}]
+projects = true
+""")
+os.environ["LOAM_CONFIG"] = str(config)
+
+
 
 def plugin(pid, head, layer=SHIPPED):
     folder = layer / pid
@@ -110,8 +128,7 @@ check("a later version that adds a provider asks again",
 class Fake(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         auth = self.headers.get("Authorization", "")
-        good = auth == "Bearer sk-good-0000000000001234" or (
-            self.path == "/locations?per_page=1" and auth == "Bearer fixture-hetzner-token")
+        good = auth == "Bearer sk-good-0000000000001234"
         code = 200 if good else 401
         data = json.dumps({"data": []} if code == 200 else {"error": {"message": "bad"}}).encode()
         self.send_response(code)
@@ -126,7 +143,6 @@ class Fake(http.server.BaseHTTPRequestHandler):
 srv = http.server.HTTPServer(("127.0.0.1", 0), Fake)
 threading.Thread(target=srv.serve_forever, daemon=True).start()
 os.environ["LOAM_OPENAI_URL"] = f"http://127.0.0.1:{srv.server_address[1]}"
-os.environ["LOAM_HETZNER_URL"] = os.environ["LOAM_OPENAI_URL"]
 
 GOOD = "sk-good-0000000000001234"
 try:
@@ -148,8 +164,7 @@ check("the listing never carries the value; it shows the last four",
       and answer["source"] == "saved" and answer["checked"]["ok"], answer)
 ids = [p["id"] for p in k.listing()["providers"]]
 check("API keys lists Loam's two first, then the ones plugins declare",
-      ids[:2] == ["openai", "google"] and "hetzner" not in ids and "replicate" in ids
-      and "modal" not in ids, ids)
+      ids == ["openai", "google", "replicate"], ids)
 
 # -- resolution ---------------------------------------------------------------------
 check("a declaring plugin gets the shared key", c.secret_for("pics", "OPENAI_API_KEY") == GOOD)
@@ -274,12 +289,18 @@ async def routes():
               st == 404 and "own secrets file" in body["error"], body)
         st, body = await call(port, "GET", "/v1/keys/nothing")
         check("an unknown provider: 404", st == 404, body)
-        path = "/v1/keys/hetzner/projects/Example"
-        st, body = await call(port, "PUT", path, {"value": "fixture-hetzner-token", "by": "iris"})
+        path = "/v1/keys/example-cloud/projects/Example"
+        st, body = await call(port, "PUT", path, {"value": "fixture-project-token", "by": "iris"})
         check("a persona saves a named project through the Settings route",
               st == 200 and body["projects"][0]["id"] == "example"
               and body["projects"][0]["checked"]["by"] == "iris"
-              and "fixture-hetzner-token" not in json.dumps(body), st)
+              and body["projects"][0]["checked"]["why"] == "Checked [redacted]"
+              and "fixture-project-token" not in json.dumps(body), st)
+        st, body = await call(port, "PUT", path, {"value": "fixture-refused"})
+        check("a refused project replacement keeps the previous token",
+              st == 422 and k.project_token("example-cloud", "example") == "fixture-project-token", st)
+        st, body = await call(port, "PUT", "/v1/keys/openai/projects/Example", {"value": GOOD})
+        check("built-in providers without project support refuse named keys", st == 404, st)
         st, body = await call(port, "GET", path)
         check("a named project token has no read route", st == 405, st)
         st, body = await call(port, "DELETE", path)
@@ -287,16 +308,16 @@ async def routes():
         token_file = TMP / "broker.token"
         token_file.write_text("t")
         cli = await asyncio.create_subprocess_exec(
-            str(AGENTS / "bin" / "settings"), "--by", "iris", "--target", "Example",
+            str(AGENTS / "bin" / "settings"), "--by", "iris", "--target", "example-cloud/Example",
             "--value-stdin", "--", "do", "keys.project.set",
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env={**os.environ, "LOAM_BROKER_URL": f"http://127.0.0.1:{port}",
                  "LOAM_BROKER_TOKEN_FILE": str(token_file)})
-        stdout, stderr = await cli.communicate(b"fixture-hetzner-token")
+        stdout, stderr = await cli.communicate(b"fixture-project-token")
         check("Settings CLI saves a persona's token from stdin without echoing it",
-              cli.returncode == 0 and b"fixture-hetzner-token" not in stdout + stderr
-              and k.hetzner_project_token("example") == "fixture-hetzner-token", cli.returncode)
+              cli.returncode == 0 and b"fixture-project-token" not in stdout + stderr
+              and k.project_token("example-cloud", "example") == "fixture-project-token", cli.returncode)
     finally:
         tcp.close()
         await tcp.wait_closed()

@@ -66,10 +66,8 @@ every setting with its route; then `get`, `set`, and `do` for actions.
 Sign-ins and config are the owner's hands. Shared API keys live in Settings ›
 Connections, under API keys. When the owner hands you one to save, `do
 keys.set` with the provider (`openai`, `google`, …) as the target. Nobody
-can read a key back, you included. With the Hetzner Cloud plugin on, agents
-and engineers name the project on every Hetzner Cloud call. Use `personal`
-for the shared key. Add another project's token under **Project keys** on
-the same page, or use `do keys.project.set` with the project name as target
+can read a key back, you included. If a provider has a **Project keys**
+section, use `do keys.project.set` with `provider/project` as the target
 when the owner gives you the token. Deleting a thread or ending a session
 waits for their word, and never happens from a wake.
 

@@ -55,7 +55,7 @@ server:                     # how its server starts (only with server/; 2026-11-
   run: python3 server/main.py
 icon: assets/icon.svg       # its picture in Apps and Settings > Plugins (2026-11-13)
 keys:                       # the providers whose API keys it uses (2026-11-18)
-  - provider: openai          # a provider Loam knows: openai, google, hetzner, cloudflare, modal
+  - provider: openai          # a provider Loam knows: openai, google
     why: makes the pet's portrait   # shown before install, beside touches
     optional: true            # it works without this one (another key will do)
 description: Listen to your agents instead of reading them.   # its promise, one line (2026-11-19)
@@ -561,16 +561,14 @@ keys:
 |---|---|---|
 | `openai` | `OPENAI_API_KEY` | listing its models |
 | `google` | `GEMINI_API_KEY` | listing its models |
-| `hetzner` | `HCLOUD_TOKEN` | reading one location |
-| `cloudflare` | `CLOUDFLARE_API_KEY`, `CLOUDFLARE_EMAIL` (optional: a global key needs it, a token does not) | `/user` or `/user/tokens/verify` |
-| `modal` | `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` | not checked |
+
 
 A provider Loam knows takes Loam's fields whatever the manifest says (a
 warning). Another must name itself and its fields, and its key is kept as
 given. `optional: true` says the plugin works without that provider: Images
 declares OpenAI and Google, each optional, and uses whichever is there.
-API keys shows OpenAI, Google and Hetzner always, and any other provider
-once a plugin in either layer declares it or a key of it is saved.
+API keys always shows OpenAI and Google Gemini. Other providers appear when
+a plugin declares them or a provider configured on this host has a saved key.
 
 **The declaration.** `keys:` is shown before install as `touches.keys`
 (`[{provider, name, why, optional?}]`), and a later version that declares a
@@ -594,16 +592,21 @@ when that provider has none yet (`adopt`, run with the five-minute reconcile
 and when API keys are read); one equal to the shared key is dropped; a
 different one stays that plugin's own.
 
-The built-in Hetzner Cloud plugin uses the shared Settings token for
-`personal`. Each additional project has an alias and a separate token in
-`<state>/plugins/keys/hetzner-projects/<alias>.json` (0600). The owner adds,
-replaces and forgets these under **Project keys** on the Hetzner Cloud key
-page. A persona in conversation can use `keys.project.set` and
-`keys.project.forget` with the alias as target. The save checks the token
-against Hetzner and accepts it only on success. Aliases have up to 48
-letters, digits or dashes and are stored in lower case. `personal` is
-reserved for the shared key. These tokens are routed by the built-in tool
-on each call. Other plugins use the standard provider-key resolution above.
+A host administrator can add `[keys.providers.<provider>]` in `loam.toml`
+with a `name`, `fields` (the same format as a manifest), and an optional
+`where` URL. Local plugins can declare that provider by ID. To validate
+tokens, set `check_command` to an argument array starting with an absolute
+path to a trusted program. It receives the fields as JSON on stdin and
+answers with `{"ok": true, "why": "…"}` on stdout. A failed check leaves the
+previous key in place. Keep credentials in Settings.
+
+For a local provider with a single required secret field, `projects = true`
+enables **Project keys** on its page. The shared token is for `personal`.
+Additional tokens stay in `<state>/plugins/keys/<provider>-projects/<alias>.json`
+(0600). Use `keys.project.set` or `keys.project.forget` with
+`provider/project` as the target. Aliases have up to 48 letters, digits or
+dashes and are stored in lower case. A local tool can resolve the token
+with `loam_keys.project_token(provider, alias)`.
 
 **What a plugin's process reads**: `LOAM_PLUGIN_KEYS`, the path of
 `<private>/keys.env`, which Loam writes with every field of every provider
@@ -638,8 +641,8 @@ plugins that use it.
 | `POST /v1/keys/<provider>/check` | check the key in force again |
 | `PUT /v1/keys/<provider>/plugins/<id>` | give one plugin its own key of that provider, checked the same way; 409 when it did not declare the provider |
 | `DELETE /v1/keys/<provider>/plugins/<id>` | put it back on the shared key |
-| `PUT /v1/keys/hetzner/projects/<alias>` | check and save a named project token, as `{"value": "…"}` |
-| `DELETE /v1/keys/hetzner/projects/<alias>` | forget a named project's token |
+| `PUT /v1/keys/<provider>/projects/<alias>` | check and save a named project token, as `{"value": "…"}` |
+| `DELETE /v1/keys/<provider>/projects/<alias>` | forget a named project's token |
 
 Every write takes `by` like any other setting route.
 

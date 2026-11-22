@@ -1,7 +1,7 @@
 // Settings › Connections › API keys: by provider, entered once (2026-11-18).
 //
 // The one place a person goes for keys. Each provider (OpenAI, Google,
-// Hetzner, and any a plugin declares) holds one shared key; every plugin that
+// and any a plugin declares) holds one shared key; every plugin that
 // declared that provider in its PLUGIN.md uses it, unless the person gives
 // that plugin a different key of its own. The host checks a key before it is
 // kept and never sends one back: the page sees whether a key is set, where it
@@ -109,15 +109,15 @@ export function createApiKeys({ api, changed = () => {}, openPlugin = null }) {
     changed()
   }
 
-  function saveProject(form) {
+  function saveProject(provider, form) {
     const name = st.projectName.trim().toLowerCase()
     const token = form.elements.projectToken
     const value = token.value.trim()
     token.value = ''
-    return act('project:save', 'PUT', `/keys/hetzner/projects/${encodeURIComponent(name)}`, { value }, () => `Key saved for ${name}.`, true)
+    return act('project:save', 'PUT', `/keys/${encodeURIComponent(provider.id)}/projects/${encodeURIComponent(name)}`, { value }, () => `Key saved for ${name}.`, true)
   }
 
-  const forgetProject = name => act('project:forget', 'DELETE', `/keys/hetzner/projects/${encodeURIComponent(name)}`, undefined, () => `Key forgotten for ${name}.`, true)
+  const forgetProject = (provider, name) => act('project:forget', 'DELETE', `/keys/${encodeURIComponent(provider.id)}/projects/${encodeURIComponent(name)}`, undefined, () => `Key forgotten for ${name}.`, true)
 
   function fields(p, prefix, busy) {
     return p.fields.map(f => h('label', { class: 'keys-field', key: f.name },
@@ -175,9 +175,9 @@ export function createApiKeys({ api, changed = () => {}, openPlugin = null }) {
       })))
   }
 
-  function projectForm(existing = false) {
+  function projectForm(provider, existing = false) {
     const busy = Boolean(st.busy)
-    return h('form', { class: 'keys-form', onsubmit: e => { e.preventDefault(); saveProject(e.currentTarget) } },
+    return h('form', { class: 'keys-form', onsubmit: e => { e.preventDefault(); saveProject(provider, e.currentTarget) } },
       existing ? null : h('label', { class: 'keys-field' },
         h('span', { class: 'keys-field-label', text: 'Project name' }),
         h('input', { class: 'field-input', name: 'projectName', value: st.projectName, maxlength: 48,
@@ -191,15 +191,16 @@ export function createApiKeys({ api, changed = () => {}, openPlugin = null }) {
       h('div', { class: 'keys-actions' },
         h('button', { class: 'pillbtn primary', type: 'submit', disabled: busy, text: st.busy === 'project:save' ? 'Checking…' : 'Save project key' }),
         h('button', { class: 'pillbtn', type: 'button', disabled: busy, text: 'Cancel', onclick: () => openProject(null) }),
-        existing ? h('button', { class: 'pillbtn', type: 'button', disabled: busy, text: st.busy === 'project:forget' ? 'Forgetting…' : 'Forget key', onclick: () => forgetProject(st.project) }) : null))
+        existing ? h('button', { class: 'pillbtn', type: 'button', disabled: busy, text: st.busy === 'project:forget' ? 'Forgetting…' : 'Forget key', onclick: () => forgetProject(provider, st.project) }) : null))
   }
 
-  function projectKeys(projects) {
+  function projectKeys(provider) {
+    const { projects } = provider
     const adding = st.project === ''
     return h('section', { class: 'keys-users', 'aria-label': 'Project keys' },
       h('h3', { class: 'kicker', text: 'Project keys' }),
       h('div', { class: 'card keys-card' },
-        h('p', { class: 'note', text: 'Add a token from each additional Hetzner project. Agents use the project name when they call Hetzner.' }),
+        h('p', { class: 'note', text: `Save a separate token for each additional ${provider.name} project. Agents use its project name.` }),
         projects.length ? h('div', { class: 'rows' }, ...projects.map(project => {
           const open = st.project === project.id
           return h('div', { class: `keys-user${open ? ' open' : ''}`, key: project.id },
@@ -207,9 +208,9 @@ export function createApiKeys({ api, changed = () => {}, openPlugin = null }) {
               onclick: () => openProject(open ? null : project.id, project.id) },
             h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: project.id })),
             h('span', { class: 'keys-badge', text: 'Key saved' }), icon.chevronDown(12)),
-            open ? h('div', { class: 'keys-user-detail' }, checkedLine(project.checked), projectForm(true)) : null)
+            open ? h('div', { class: 'keys-user-detail' }, checkedLine(project.checked), projectForm(provider, true)) : null)
         })) : null,
-        adding ? projectForm() : h('div', { class: 'keys-actions' },
+        adding ? projectForm(provider) : h('div', { class: 'keys-actions' },
           h('button', { class: 'pillbtn secondary', type: 'button', disabled: Boolean(st.busy), text: 'Add project', onclick: () => openProject('') })),
         st.projectFeedback && st.message ? h('p', { class: 'note keys-done', role: 'status', text: st.message }) : null,
         st.projectFeedback && st.failure ? h('p', { class: 'note warn', role: 'alert', text: st.failure }) : null))
@@ -234,7 +235,7 @@ export function createApiKeys({ api, changed = () => {}, openPlugin = null }) {
         p.refused?.why && p.refused.why !== p.checked?.why && editing ? h('p', { class: 'note warn', text: p.refused.why }) : null,
         !st.projectFeedback && st.message ? h('p', { class: 'note keys-done', role: 'status', text: st.message }) : null,
         !st.projectFeedback && st.failure ? h('p', { class: 'note warn', role: 'alert', text: st.failure }) : null),
-      p.projects ? projectKeys(p.projects) : null,
+      p.projects ? projectKeys(p) : null,
       usedBy(p)]
   }
 

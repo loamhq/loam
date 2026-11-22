@@ -9,6 +9,7 @@ import fcntl
 import json
 import os
 import re
+import subprocess
 import tempfile
 import urllib.error
 import urllib.request
@@ -17,7 +18,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import loam_config as lc
-import loam_hetzner
 import loam_syncthing
 
 # ---------------------------------------------------------------------------
@@ -34,19 +34,6 @@ PROVIDERS: dict[str, dict] = {
     "google": {"name": "Google Gemini", "shown": True, "check": "gemini",
                "where": "https://aistudio.google.com/apikey",
                "fields": [{"name": "GEMINI_API_KEY", "label": "API key", "secret": True}]},
-    "hetzner": {"name": "Hetzner Cloud", "check": "hetzner",
-                "where": "https://console.hetzner.cloud/",
-                "fields": [{"name": "HCLOUD_TOKEN", "label": "API token", "secret": True}]},
-    "cloudflare": {"name": "Cloudflare", "check": "cloudflare",
-                   "where": "https://dash.cloudflare.com/profile/api-tokens",
-                   "fields": [{"name": "CLOUDFLARE_API_KEY", "label": "API key or token",
-                               "secret": True},
-                              {"name": "CLOUDFLARE_EMAIL", "label": "Account email",
-                               "secret": False, "optional": True}]},
-    "modal": {"name": "Modal", "where": "https://modal.com/settings/tokens",
-              "fields": [{"name": "MODAL_TOKEN_ID", "label": "Token ID", "secret": False},
-                         {"name": "MODAL_TOKEN_SECRET", "label": "Token secret",
-                          "secret": True}]},
     "syncthing": {"name": "Syncthing", "check": "syncthing",
                   "fields": [{"name": loam_syncthing.KEY, "label": "API key", "secret": True},
                              {"name": loam_syncthing.GUI, "label": "Local GUI URL",
@@ -59,7 +46,6 @@ KEYS_MAX = 8                 # providers one plugin may declare
 WHY_MAX, LABEL_MAX = 300, 60
 VALUE_MAX = 4096
 PROJECT_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,47}")
-HETZNER_PLUGIN = "hetzner-cloud"
 
 
 class KeyError_(Exception):
@@ -170,6 +156,32 @@ def declaration_of(keys: list[dict]) -> list[dict]:
     return [{"provider": k["provider"], "name": k["name"], "why": k["why"],
              **({"optional": True} if k["optional"] else {}),
              **({"source": k["source"]} if k.get("source") else {})} for k in keys]
+
+
+
+def _load_local_providers() -> dict[str, dict]:
+    """The host config can register providers for its own plugins."""
+    out = {}
+    for pid, raw in lc.get("keys.providers", {}).items():
+        if pid in PROVIDERS or not PROVIDER_ID.fullmatch(pid):
+            raise ValueError(f"keys.providers: invalid or reserved provider {pid}")
+        name = raw["name"]
+        fields = _fields_of(pid, raw["fields"])
+        command = raw.get("check_command")
+        if command and (not isinstance(command, list)
+                        or not all(isinstance(arg, str) and arg for arg in command)
+                        or not Path(command[0]).is_absolute()):
+            raise ValueError(f"keys.providers.{pid}: check_command must start with an absolute path")
+        projects = raw.get("projects", False)
+        if projects and (len(fields) != 1 or fields[0].get("optional")
+                         or not fields[0]["secret"]):
+            raise ValueError(f"keys.providers.{pid}: project keys require a single secret field")
+        out[pid] = {"name": name, "fields": fields, "where": raw.get("where"),
+                    "check_command": command, "projects": projects}
+    return out
+
+
+PROVIDERS.update(_load_local_providers())
 
 
 # ---------------------------------------------------------------------------
@@ -294,7 +306,9 @@ def provider(pid: str, rows: list[dict] | None = None) -> dict:
     if pid in PROVIDERS:
         p = PROVIDERS[pid]
         return {"id": pid, "name": p["name"], "fields": p["fields"],
-                "check": p.get("check"), "where": p.get("where"), "shown": bool(p.get("shown"))}
+                "check": p.get("check"), "check_command": p.get("check_command"),
+                "where": p.get("where"), "shown": bool(p.get("shown")),
+                "projects": bool(p.get("projects"))}
     users = declared_by(rows).get(pid) or []
     if not users:
         raise KeyError_(f"no provider {pid!r}: Loam knows "
@@ -349,20 +363,20 @@ def shared_source(pid: str, fields: list[dict]) -> str | None:
     return None
 
 
-def _shared_only(plugin_id: str, provider_id: str) -> bool:
-    return plugin_id == HETZNER_PLUGIN and provider_id == "hetzner"
+def _shared_only(provider_id: str) -> bool:
+    return bool(PROVIDERS.get(provider_id, {}).get("projects"))
 
 
 def resolve(plugin_id: str, pid: str, fields: list[dict]) -> tuple[dict[str, str], str | None]:
     """The values ``plugin_id`` gets for provider ``pid``, and where they come
     from: ``own``, ``saved`` (shared), ``box``, or nothing."""
-    own = {} if _shared_only(plugin_id, pid) else own_values(plugin_id, fields)
+    own = {} if _shared_only(pid) else own_values(plugin_id, fields)
     if _complete(own, fields):
         return own, "own"
     shared = shared_values(pid, fields)
     if _complete(shared, fields):
         return shared, "saved"
-    if _shared_only(plugin_id, pid):
+    if _shared_only(pid):
         return {}, None
     box = box_values(fields)
     if _complete(box, fields):
@@ -500,9 +514,9 @@ def adopt(rows: list[dict] | None = None) -> list[str]:
     checks = _checks()
     for pid, users in sorted(declared_by(rows).items()):
         fields = users[0]["fields"] if pid not in PROVIDERS else PROVIDERS[pid]["fields"]
+        if _shared_only(pid):
+            continue
         for u in users:
-            if _shared_only(u["id"], pid):
-                continue
             own = own_values(u["id"], fields)
             # A key given through "use a different key" is a choice, never
             # adopted: only a key from before shared keys has no record.
@@ -547,9 +561,8 @@ def listing(*, include: str | None = None) -> dict:
     saved_providers = {f.stem for f in keys_dir().glob("*.env")}
     if include:
         saved_providers.add(include)
-    hetzner_projects = _hetzner_projects()
-    if hetzner_projects:
-        saved_providers.add("hetzner")
+    saved_providers.update(pid for pid, prov in PROVIDERS.items()
+                           if prov.get("projects") and _project_dir(pid).is_dir())
     ids += sorted(p for p in set(users) | saved_providers
                   if p not in ids and (p in PROVIDERS or p in users))
     out = []
@@ -567,18 +580,18 @@ def listing(*, include: str | None = None) -> dict:
                             "uses": "own" if used == "own" else "shared",
                             "has_key": used is not None,
                             "checked": checks.get(f"{pid}@{u['id']}"),
-                            **({"shared_only": True} if _shared_only(u["id"], pid) else {})})
+                            **({"shared_only": True} if _shared_only(pid) else {})})
         out.append({"id": pid, "name": prov["name"], "where": prov["where"],
-                    "checks": bool(prov["check"]),
+                    "checks": bool(prov["check"] or prov.get("check_command")),
                     "fields": [{k: f[k] for k in ("name", "label", "secret")}
                                | ({"optional": True} if f.get("optional") else {})
                                for f in fields],
                     "set": source is not None, "source": source,
-                    "shown": _shown_values(fields, values) if pid != "hetzner" else {},
+                    "shown": _shown_values(fields, values) if not prov.get("projects") else {},
                     "checked": checks.get(pid) if source else None,
                     "refused": checks.get(f"{pid}:refused"),
                     "plugins": plugins,
-                    **({"projects": hetzner_projects} if pid == "hetzner" else {})})
+                    **({"projects": _projects(pid)} if prov.get("projects") else {})})
     return {"providers": out}
 
 
@@ -646,6 +659,19 @@ def check_values(prov: dict, values: dict[str, str]) -> tuple[bool, str]:
     if name == loam_syncthing.PROVIDER:
         ok, why, _ = loam_syncthing.probe(values)
         return ok, why
+    if command := prov.get("check_command"):
+        try:
+            result = subprocess.run(command, input=json.dumps(values), text=True,
+                                    capture_output=True, timeout=20, check=True)
+            answer = json.loads(result.stdout)
+            ok, why = answer["ok"], answer["why"]
+            if not isinstance(ok, bool) or not isinstance(why, str):
+                raise ValueError("invalid key check response")
+        except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+            return False, f"Could not run the key check for {prov['name']}. Try again."
+        for value in values.values():
+            why = why.replace(value, "[redacted]")
+        return ok, why[:300]
     if not name:
         return True, f"Saved. Loam has no check for a {prov['name']} key, so it was not tried."
     return check(name, values if len(prov["fields"]) > 1 else
@@ -701,8 +727,8 @@ def _user(pid: str, plugin_id: str) -> dict:
     if not any(k["provider"] == pid for k in plugin_keys(plugin_id)):
         raise KeyError_(f"{plugin_id} does not declare a {prov['name']} key, so it "
                         f"is never given one", 409)
-    if _shared_only(plugin_id, pid):
-        raise KeyError_("Hetzner Cloud uses the shared token for personal. "
+    if _shared_only(pid):
+        raise KeyError_(f"{prov['name']} uses the shared token for personal. "
                         "Add a project token in API keys to connect another project.", 409)
     return prov
 
@@ -734,9 +760,9 @@ def use_shared(pid: str, plugin_id: str, by: str | None = None) -> dict:
     return one(pid)
 
 
-# ---- Named Hetzner project tokens ------------------------------------------
+# ---- Named project tokens --------------------------------------------------
 
-def hetzner_project_id(project: str) -> str:
+def _project_id(project: str) -> str:
     name = project.strip().lower()
     if not PROJECT_ID.fullmatch(name):
         raise KeyError_("Use a project name of 1 to 48 letters, digits or dashes, "
@@ -744,8 +770,15 @@ def hetzner_project_id(project: str) -> str:
     return name
 
 
-def _project_dir() -> Path:
-    return keys_dir() / "hetzner-projects"
+def _project_provider(pid: str) -> dict:
+    prov = provider(pid)
+    if not prov.get("projects"):
+        raise KeyError_(f"{prov['name']} does not support project keys.", 404)
+    return prov
+
+
+def _project_dir(pid: str) -> Path:
+    return keys_dir() / f"{pid}-projects"
 
 
 def _project_record(path: Path) -> dict:
@@ -756,9 +789,9 @@ def _project_record(path: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def _hetzner_projects() -> list[dict]:
+def _projects(pid: str) -> list[dict]:
     projects = []
-    for path in sorted(_project_dir().glob("*.json")):
+    for path in sorted(_project_dir(pid).glob("*.json")):
         if PROJECT_ID.fullmatch(path.stem) and path.stem != "personal":
             record = _project_record(path)
             if record.get("token"):
@@ -766,39 +799,44 @@ def _hetzner_projects() -> list[dict]:
     return projects
 
 
-def hetzner_project_token(project: str) -> str | None:
-    name = hetzner_project_id(project)
+def project_token(pid: str, project: str) -> str | None:
+    fields = _project_provider(pid)["fields"]
+    name = _project_id(project)
     if name == "personal":
-        fields = PROVIDERS["hetzner"]["fields"]
-        return shared_values("hetzner", fields).get("HCLOUD_TOKEN")
-    return _project_record(_project_dir() / f"{name}.json").get("token")
+        return shared_values(pid, fields).get(fields[0]["name"])
+    return _project_record(_project_dir(pid) / f"{name}.json").get("token")
 
 
-def _named_project_path(project: str) -> Path:
-    name = hetzner_project_id(project)
+def _named_project_path(pid: str, project: str) -> Path:
+    name = _project_id(project)
     if name == "personal":
-        raise KeyError_("Use the shared Hetzner Cloud key for personal.")
-    return _project_dir() / f"{name}.json"
+        raise KeyError_("Use the shared key for the personal project.")
+    return _project_dir(pid) / f"{name}.json"
 
 
-def set_hetzner_project(project: str, body, by: str | None = None) -> dict:
-    path = _named_project_path(project)
-    fields = PROVIDERS["hetzner"]["fields"]
-    token = _clean(fields, {"value": body.get("value")})["HCLOUD_TOKEN"]
-    ok, why = hetzner(token)
-    if not ok:
-        raise KeyError_(why, 422)
-    checked = {"at": _now(), "ok": True, "why": why, "by": by}
-    _write_private(path, json.dumps({"token": token, "checked": checked}) + "\n")
-    return one("hetzner")
+def set_project(pid: str, project: str, body, by: str | None = None) -> dict:
+    prov = _project_provider(pid)
+    path = _named_project_path(pid, project)
+    values = _clean(prov["fields"], body)
+    token = values[prov["fields"][0]["name"]]
+    with _shared_write(pid):
+        ok, why = check_values(prov, values)
+        if not ok:
+            raise KeyError_(why, 422)
+        checked = {"at": _now(), "ok": True, "why": why, "by": by}
+        _write_private(path, json.dumps({"token": token, "checked": checked}) + "\n")
+    return one(pid)
 
 
-def forget_hetzner_project(project: str) -> dict:
-    try:
-        _named_project_path(project).unlink()
-    except FileNotFoundError:
-        raise KeyError_("There is no saved key for that Hetzner project.", 404) from None
-    return one("hetzner")
+def forget_project(pid: str, project: str) -> dict:
+    _project_provider(pid)
+    path = _named_project_path(pid, project)
+    with _shared_write(pid):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            raise KeyError_("There is no saved key for that project.", 404) from None
+    return one(pid)
 
 
 # ---------------------------------------------------------------------------
@@ -876,49 +914,13 @@ def openai(key: str) -> tuple[bool, str]:
     return False, f"OpenAI answered {code} when the key was checked; try again."
 
 
-def hetzner(key: str) -> tuple[bool, str]:
-    """Reads one location: any project token may, read-only or not."""
-    result = loam_hetzner.request(key, "GET", "/locations?per_page=1",
-                                 base=_base("LOAM_HETZNER_URL", loam_hetzner.API))
-    code = result.get("status")
-    if code is None:
-        return False, "Could not reach Hetzner Cloud to check the key. Try again."
-    if result["ok"]:
-        return True, "Hetzner accepted the token."
-    if code in (401, 403):
-        return False, "Hetzner says this is not a valid API token for a project."
-    return False, f"Hetzner answered {code} when the token was checked; try again."
-
-
-def cloudflare(values) -> tuple[bool, str]:
-    """A global key with its account's email, or an API token alone."""
-    if isinstance(values, str):
-        values = {"CLOUDFLARE_API_KEY": values}
-    key, email = values.get("CLOUDFLARE_API_KEY", ""), values.get("CLOUDFLARE_EMAIL")
-    base = _base("LOAM_CLOUDFLARE_URL", "https://api.cloudflare.com/client/v4")
-    if email:
-        code, body, down = _get(f"{base}/user", {"X-Auth-Key": key, "X-Auth-Email": email},
-                                "Cloudflare")
-    else:
-        code, body, down = _get(f"{base}/user/tokens/verify",
-                                {"Authorization": f"Bearer {key}"}, "Cloudflare")
-    if code is None:
-        return False, down
-    if code < 300 and body.get("success", True):
-        return True, "Cloudflare accepted the key."
-    if code in (400, 401, 403):
-        return False, ("Cloudflare refused this key" + (" and email" if email else "")
-                       + ". A global API key needs its account's email; a token does not.")
-    return False, f"Cloudflare answered {code} when the key was checked; try again."
-
-
-CHECKS = {"gemini": gemini, "openai": openai, "hetzner": hetzner, "cloudflare": cloudflare}
+CHECKS = {"gemini": gemini, "openai": openai}
 
 
 def check(name: str, value) -> tuple[bool, str]:
     fn = CHECKS.get(name)
     if fn is None:
         return False, f"the host has no check named {name!r}"
-    if isinstance(value, dict) and name != "cloudflare":
+    if isinstance(value, dict):
         value = next(iter(value.values()), "")
     return fn(value)

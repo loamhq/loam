@@ -30,11 +30,6 @@ def test_guards() -> None:
         except loam_offline.Offline:
             continue
         raise AssertionError(f"call {i} was not refused")
-    # The off-box resize's API calls, under the run's flag.
-    resize = ROOT / "bin" / "hcloud-resize"
-    if resize.exists():
-        src = resize.read_text()
-        assert 'if os.environ.get("LOAM_OFFLINE")' in src.split("def call(")[1][:600]
 
 
 def test_network() -> None:

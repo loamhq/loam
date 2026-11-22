@@ -141,7 +141,7 @@ with tempfile.TemporaryDirectory() as tmp:
 more = c.contributes_of({
     "schedule.kind": [{"name": "tick", "calendar": "*:*:30", "run": "true", "timeout": 120},
                       {"name": "boot", "boot": True, "run": "true"}],
-    "agent.tool": [{"name": "cf", "run": "true", "secrets": ["CLOUDFLARE_API_KEY"]}]}, None, [])
+    "agent.tool": [{"name": "example", "run": "true", "secrets": ["EXAMPLE_API_KEY"]}]}, None, [])
 check("a raw calendar is kept as written", more["schedule.kind"][0]["calendar"] == "*:*:30")
 with tempfile.TemporaryDirectory() as tmp:
     plug = [{"id": "hr", "folder": Path(tmp), "contributes": more,
@@ -153,12 +153,12 @@ with tempfile.TemporaryDirectory() as tmp:
     check("...a calendar entry has its timer, at its own line",
           "OnCalendar=*:*:30\n" in units["loam-plugin-hr--tick.timer"])
     check("...and its timeout", "TimeoutStartSec=120" in units["loam-plugin-hr--tick.service"])
-    env = c.lane_servers("persona", "ada", plug)["hr-cf"]["env"]
-    check("a tool's secrets are named, never given", env.get("LOAM_PLUGIN_SECRETS") == "CLOUDFLARE_API_KEY"
+    env = c.lane_servers("persona", "ada", plug)["hr-example"]["env"]
+    check("a tool's secrets are named, never given", env.get("LOAM_PLUGIN_SECRETS") == "EXAMPLE_API_KEY"
           and not any("KEY" in k and k != "LOAM_PLUGIN_SECRETS" for k in env), env)
     check("...and it is told its private folder and Loam's lib",
           env["LOAM_PLUGIN_PRIVATE"].endswith("/plugins/private/hr") and env["LOAM_LIB"].endswith("/lib"))
-check("a tool's secrets are in the declaration", c.declared(more).get("secrets") == ["CLOUDFLARE_API_KEY"])
+check("a tool's secrets are in the declaration", c.declared(more).get("secrets") == ["EXAMPLE_API_KEY"])
 for bad, why in (({"schedule.kind": [{"name": "x", "run": "t"}]}, "a schedule entry with no when"),
                  ({"schedule.kind": [{"name": "x", "run": "t", "boot": True, "calendar": "daily"}]}, "two whens"),
                  ({"agent.tool": [{"name": "x", "run": "t", "secrets": ["lower"]}]}, "a secret that is no name")):

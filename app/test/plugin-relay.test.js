@@ -39,15 +39,15 @@ test('plugin bytes and HEAD stay bytes, encode segments, keep MIME/cache/nosniff
   assert.equal(broker.seen.length, 2)
 })
 
-test('named Hetzner project keys relay writes and cannot be read back', async t => {
-  const path = '/keys/hetzner/projects/example'
+test('named provider project keys relay writes and cannot be read back', async t => {
+  const path = '/keys/example-cloud/projects/example'
   const body = { value: 'fixture-token' }
   const broker = await fakeBroker({
     [`PUT /v1${path}`]: (req, res, url, raw) => {
       assert.deepEqual(JSON.parse(raw), body)
-      json(res, 200, { id: 'hetzner', projects: [{ id: 'example' }] })
+      json(res, 200, { id: 'example-cloud', projects: [{ id: 'example' }] })
     },
-    [`DELETE /v1${path}`]: (req, res) => json(res, 200, { id: 'hetzner', projects: [] }),
+    [`DELETE /v1${path}`]: (req, res) => json(res, 200, { id: 'example-cloud', projects: [] }),
   }), app = await appAgainst(broker)
   t.after(closing(app, broker))
   for (const [method, status] of [['PUT', 200], ['GET', 405], ['DELETE', 200]]) {

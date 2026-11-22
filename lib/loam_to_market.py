@@ -5,9 +5,7 @@ Loam. Each is a Market plugin in its maker's own repository, listed in the
 marketplace in their name; a fresh install has neither until it installs
 them from Settings › Market. The release keeps a copy of each in
 ``plugins/_listed/<id>/`` for its tests and as the fallback below; a folder
-there is never read as a plugin. Since 0.2.23 the same migration keeps
-Hetzner Cloud for installations that had switched it on. Its project
-credentials stay with the host's API keys.
+there is never read as a plugin.
 
 An install that had one on must not lose it on the update. So once, at the
 broker's first start on this code, :func:`keep` installs each moved plugin
@@ -63,7 +61,6 @@ import loam_config as lc
 MOVED = {
     "dictation": "0.2.9",
     "read-aloud": "0.2.9",
-    "hetzner-cloud": "0.2.23",
 }
 BY = "loam-update"
 # The first version of each that carries its own server half (0.2.12).

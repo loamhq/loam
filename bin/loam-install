@@ -281,8 +281,7 @@ def step_preflight(a, ans: dict) -> None:
     if not address or (not li.is_public(address) and not a.address):
         raise Stop(f"This server has no public internet address of its own "
                    f"(it sends from {address or 'nowhere'}), so nobody could reach Loam on it.",
-                   "use a server with a public IPv4 address (Hetzner, DigitalOcean and "
-                   "the like give every server one)")
+                   "use a server with a public IPv4 address")
 
     if CONFIG.exists():
         cfg = config_values()
