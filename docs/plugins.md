@@ -656,6 +656,11 @@ provider's key** and is not shown as a key of its own (`declaration` in
 `lib/loam_plugins.py`, since 0.2.12), so no listing can say both. The page
 draws no pasted-key form for a plugin that declares `keys:`.
 
+A `thread.header.action` below the header may declare a `view` name and render
+from the context's `view`. Its control calls `selectView(name)` to enter it or
+`selectView(null)` to close it. The host handles thread history, including reload
+and Back. The context also supplies `panel` and `backButton()`.
+
 ## Thread files (experimental)
 
 An extension can contribute one `thread.file` entry with a short `label`, an optional

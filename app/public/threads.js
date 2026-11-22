@@ -1691,7 +1691,10 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     catch (e) { o.error = e.status === 409 ? `Wait for ${[...o.typing][0] || o.thread.members.some((m) => m.busy || m.running) ? name([...o.typing][0] ?? o.thread.members.find((m) => m.busy || m.running).persona) : 'the current turn'} to finish, then delete.` : e.status === 405 ? 'Deleting threads needs a runtime update.' : failureSentence(e.message); o.deleteBlocked = e.status === 409 ? o.error : null }
     finally { o.patching = false; redraw() }
   }
-  function currentView() { return st.manage ? 'details' : st.open?.boardOpen ? 'board' : null }
+  function hasExtensionView(view) {
+    return registry.entries('thread.header.action', { slot: 'below', thread: st.open?.thread, state: st.open }).some(entry => entry.view === view)
+  }
+  function currentView() { return st.manage ? 'details' : st.open?.boardOpen ? 'board' : st.open?.extensionView || null }
   function setView(view) {
     const o = st.open
     if (!o || (currentView() === (view || null))) return
@@ -1700,9 +1703,12 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     if (view === 'details') {
       const pane = dom.querySelector('.tt-stream')
       o.readingTop = pane?.scrollTop; o.readingPosition = readingAnchor(pane); o.focusDetails = true
-    } else if (view === 'board') o.focusBoard = true
+    } else if (view === 'board' && !hasExtensionView(view)) o.focusBoard = true
     else o.focusChat = true
-    st.manage = view === 'details'; o.boardOpen = view === 'board'; o.choice = null
+    st.manage = view === 'details'
+    o.extensionView = view && view !== 'details' ? view : null
+    o.boardOpen = view === 'board' && !hasExtensionView(view)
+    o.choice = null
     redraw()
   }
   function chooseView(view, options) {
@@ -1895,7 +1901,9 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     const defaultMember = o.thread.members.find((m) => m.persona === o.thread.default)
     const unmatched = [...o.permissions.values()].filter((p) => !o.messages.some((m) => m.id === p.message_id))
     const closeMenu = (act) => () => { o.headerMenu = false; act(); redraw() }
-    const headerContext = { thread: o.thread, state: o, open, patch }
+    const extensionOwnsBoard = hasExtensionView('board')
+    const headerContext = { thread: o.thread, state: o, open, patch, view: currentView(),
+      selectView: chooseView, backButton: historyButton, panel: sidePanel ? 'side' : 'main' }
     const controls = placement => registry.draw('thread.header.action', {
       ...headerContext, slot: 'control', placement, closeMenu: () => { o.headerMenu = false; redraw() },
     })
@@ -1906,7 +1914,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       onRename: general ? null : beginRename, renameLabel: 'Rename thread', titleField: o.renaming ? kept(title) : null,
       titleProps: { class: `${st.wide ? 'chattitle' : 'headtitle'} tt-title` },
       props: { class: `${st.wide ? 'chat-head' : 'thread-head'} tt-head` },
-      actions: [...(sidePanel ? side().controls().slice(0, 2) : [round('Board', [icon.list(18), count ? h('span', { class: 'navdot', 'aria-label': `${count} new board items` }) : null], () => chooseView(o.boardOpen ? null : 'board'), { class: 'iconbtn ghost tt-board-button', 'aria-description': count ? `${count} new board items` : 'Open thread board', 'aria-expanded': String(Boolean(o.boardOpen)) }), ...controls('header'), taskIndicator()]),
+      actions: [...(sidePanel ? side().controls().slice(0, 2) : [extensionOwnsBoard ? null : round('Board', [icon.list(18), count ? h('span', { class: 'navdot', 'aria-label': `${count} new board items` }) : null], () => chooseView(o.boardOpen ? null : 'board'), { class: 'iconbtn ghost tt-board-button', 'aria-description': count ? `${count} new board items` : 'Open thread board', 'aria-expanded': String(Boolean(o.boardOpen)) }), ...controls('header'), taskIndicator()]),
         round('Thread actions', icon.dots(20), () => { o.headerMenu = !o.headerMenu; redraw() }, { class: 'iconbtn ghost', 'aria-expanded': String(Boolean(o.headerMenu)) }),
         sidePanel ? side().controls().at(-1) : null] })
     const chosenModel = defaultMember?.engine && composerModel(defaultMember, o.messages, providerCatalog())
@@ -1943,7 +1951,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       registry.draw('app.overlay', { slot: 'player' }),
       o.headerMenu ? menuSurface(h('div', { key: 'header-menu', class: 'popover tt-header-menu', role: 'menu' },
         side()?.available() && !o.creating && !o.createFailed ? settingsRow({ title: 'Open to the side', lead: icon.panelRight(18), onclick: closeMenu(() => side().openSide({ kind: 'thread', id: o.thread.id })) }) : null,
-        sidePanel ? settingsRow({ title: 'Board', lead: icon.list(18), onclick: closeMenu(() => chooseView('board')) }) : null,
+        sidePanel && !extensionOwnsBoard ? settingsRow({ title: 'Board', lead: icon.list(18), onclick: closeMenu(() => chooseView('board')) }) : null,
         sidePanel ? controls('menu') : null,
         sidePanel ? settingsRow({ title: 'Tasks', lead: icon.code(18), onclick: closeMenu(() => { o.tasksOpen = true; o.focusTasks = true }) }) : null,
         settingsRow({ title: 'Thread details', lead: icon.users(18), onclick: closeMenu(showDetails) }),
@@ -1954,7 +1962,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
         h('p', { text: 'Delete this thread and its conversation? This cannot be undone.' }),
         button('Keep thread', () => { o.confirmDelete = false; o.focusActions = true; redraw() }),
         button('Delete permanently', deleteThread, { class: 'pillbtn tt-danger', disabled: o.patching })), { title: 'Delete thread?', anchor: '[aria-label="Thread actions"]', close: () => { o.confirmDelete = false; redraw() } }) : null,
-      h('section', { key: 'conversation', class: `tt-conversation pane-body${o.listeners.size ? ' has-listeners' : ''}`, inert: o.boardOpen ? true : null, style: { '--tt-listening-inset': `${LISTENING_INSET}px` } },
+      h('section', { key: 'conversation', class: `tt-conversation pane-body${o.listeners.size ? ' has-listeners' : ''}`, inert: o.boardOpen || (o.extensionView && hasExtensionView(o.extensionView)) ? true : null, style: { '--tt-listening-inset': `${LISTENING_INSET}px` } },
         h('div', { class: 'msgs tt-stream', role: 'log', 'aria-label': 'Thread messages', style: { paddingBottom: o.dockHeight ? `${o.dockHeight + 10 + o.listeningInset}px` : '' }, 'aria-busy': String(o.loading || o.typing.size > 0), onscroll: (e) => {
           const was = o.atEnd, previous = o.scrollTop ?? e.target.scrollTop
           if (Math.abs(e.target.scrollTop - previous) > 1) { o.openingBoundary = null; o.replyAnchor = null; o.taskReplyAnchor = null; o.readingPosition = readingAnchor(e.target) }
@@ -1980,8 +1988,8 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
           o.error ? h('div', { class: 'banner', role: 'alert' }, o.error, o.createFailed ? button('Try creating again', () => create(o.thread.default, { promptTitle: o.promptTitle, promptBody: o.promptBody, placeholder: o.promptPlaceholder, draft: draft.value, source: o.replyTo?.thread ? o.replyTo : null })) : button('Refresh thread', () => open(o.thread.id))) : null,
           o.connection ? h('div', { class: 'noticerow', role: 'status', text: o.connection }) : null,
           composingReply(), renderedComposer), compose.hint?.())),
-      o.boardOpen ? h('button', { class: 'tt-board-scrim', title: 'Dismiss board panel', tabindex: '-1', onclick: () => chooseView(null) }) : null,
-      board(),
+      o.boardOpen && !extensionOwnsBoard ? h('button', { class: 'tt-board-scrim', title: 'Dismiss board panel', tabindex: '-1', onclick: () => chooseView(null) }) : null,
+      extensionOwnsBoard ? null : board(),
       branchPanel(),
     ] })
   }

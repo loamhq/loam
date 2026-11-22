@@ -58,7 +58,7 @@ export function panelAncestors(url) {
     return [filesHref(null), ...parts.map((_, i) => filesHref(folder.root, parts.slice(0, i).join('/')))]
   }
   const item = itemFromURL(url)
-  if (item?.kind === 'thread') return ['/', ...(['board', 'details'].includes(url.searchParams.get('view')) ? [threadHref(item.id)] : [])]
+  if (item?.kind === 'thread') return ['/', ...(Boolean(url.searchParams.get('view')) ? [threadHref(item.id)] : [])]
   if (item) return [placeHref(placeFromURL(url))]
   return []
 }
