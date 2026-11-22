@@ -3195,6 +3195,8 @@ class Server:
                 pid = tail[0]
                 if method == "GET":
                     body = await asyncio.to_thread(loam_plugins.one, pid)
+                    if pid == "images" and body["plugin"]["effective"]:
+                        body["image_routing"] = await asyncio.to_thread(self.image_routing, body["plugin"])
                 elif method == "PATCH":
                     by = author(payload)
                     fields = {k: v for k, v in payload.items() if k != "by"}
@@ -3344,6 +3346,20 @@ class Server:
         except BrokerError as exc:
             writer.write(response(exc.status, {"error": exc.message}, nocache))
         await writer.drain()
+
+    @staticmethod
+    def image_routing(plugin: dict) -> dict:
+        """The Images switch preview contains display facts, never a key value."""
+        import loam_contributions as contrib
+        value = contrib.setting_values("images").get("backend")
+        backend = value.strip().lower() if isinstance(value, str) else "auto"
+        if backend == "gemini":
+            backend = "google"
+        if backend not in ("openai", "google"):
+            backend = next((provider for provider, key in (
+                ("openai", "OPENAI_API_KEY"), ("google", "GEMINI_API_KEY")
+            ) if loam_keys.secret_for("images", key, [plugin])), None)
+        return {"providers": provider_defaults.native_image_providers(), "backend": backend}
 
     def _attachment(self, raw) -> dict:
         """A stored path a client sent back, checked before it is read.

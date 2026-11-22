@@ -56,6 +56,7 @@ import loam_skills  # noqa: E402
 import loam_deploy  # noqa: E402  the browser's URL and server name, one home
 import loam_provider_memory as provider_memory  # noqa: E402  L8: the memory pins
 import loam_contributions as contributions  # noqa: E402  L4: what plugins add
+import loam_antigravity as agy  # noqa: E402
 
 
 def die(msg: str) -> None:
@@ -393,6 +394,7 @@ CODEX_HOOK_EVENTS = ("PostToolUse", "Stop")
 def codex_config(name: str, workspace: Path) -> str:
     claude = settings(workspace)
     deny = claude["permissions"]["deny"]
+    servers = mcp_config(name, workspace)["mcpServers"]
     out = [
         "# Rendered by bin/provision --codex from the sources of .mcp.json and",
         "# .claude/settings.json. The runtime's, how the persona is assembled;",
@@ -409,10 +411,12 @@ def codex_config(name: str, workspace: Path) -> str:
         # Enable interactive questions in ordinary conversations so the page can render their
         # answers.
         "default_mode_request_user_input = true",
+        # Images bills the plugin's API key instead of Codex's subscription.
+        *(["image_generation = false"] if "images" in servers else []),
         "",
     ]
 
-    for server, spec in mcp_config(name, workspace)["mcpServers"].items():
+    for server, spec in servers.items():
         out.append(f"[mcp_servers.{_toml_key(server)}]")
         if spec.get("type") == "http":
             out.append(f"url = {_toml(spec['url'])}")
@@ -509,12 +513,14 @@ def provision_antigravity(names: list[str], dry: bool = False) -> None:
         workspace = AI_LABS / name
         if not (workspace / "agent.json").is_file():
             die(f"no provisioned agent at {workspace}")
-        text = json.dumps(antigravity_mcp(name, workspace), indent=2) + "\n"
+        mcp = antigravity_mcp(name, workspace)
+        text = json.dumps(mcp, indent=2) + "\n"
         if dry:
             print(f"[dry-run] {workspace}/.agents/mcp_config.json ({len(text)}B)")
             continue
         (workspace / ".agents").mkdir(exist_ok=True)
         changed = write_if_changed(workspace / ".agents" / "mcp_config.json", text)
+        changed = agy.sync_images_hook(workspace, "images" in mcp["mcpServers"]) or changed
         # A personal skill takes precedence over a shared skill with the same name.
         if loam_skills.render_view(workspace):
             changed = True

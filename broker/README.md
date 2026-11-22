@@ -4357,6 +4357,12 @@ address `/x/<id>/`, process, restarts, and its log when failing), and `POST
 /v1/plugins/<id>/restart` starts that one server fresh
 (`lib/loam_plugin_servers.py`; tests `tests/test_plugin_servers.py`).
 
+`GET /v1/plugins/images` includes `image_routing` for the effective Images
+plugin. `providers` lists connected persona providers with native image
+tools. `backend` is `openai`, `google` or `null` when Auto has neither key.
+Settings reads this before enabling Images so the owner can confirm the
+switch from subscription-backed tools to an API key.
+
 ## Agent profiles, engineers and the reviewer (2026-11-13)
 
 Settings > Agents: an agent's profile, the engineers, the nightly reviewer, and

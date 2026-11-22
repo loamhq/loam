@@ -226,9 +226,9 @@ async def exercise(case, root, baseline=False):
             assert int(head.split()[1]) == code, (method, path, writer.data)
             return json.loads(body)
 
-        async def say(tid, who):
+        async def say(tid, who, submission_id="hello-test"):
             await route("PUT", f"/threads/{tid}/messages", {
-                "text": "Hello from the test", "submission_id": "hello-test"})
+                "text": "Hello from the test", "submission_id": submission_id})
             await asyncio.wait_for(server.threads.workers[(tid, who)], 15)
             last = threads.read(tid)[1][-1]
             turns = (lc.WORKSPACES / who / "turns.txt")
@@ -250,6 +250,9 @@ async def exercise(case, root, baseline=False):
         rows = {r["id"]: r for r in (await route("GET", "/providers"))["providers"]}
         assert {p for p in PROVIDERS if rows[p]["connected"]} == {
             p for p in PROVIDERS if credentials[p].exists()}
+        image_preview = (await route("GET", "/plugins/images"))["image_routing"]
+        assert image_preview == {"backend": None, "providers": [rows[p]["name"]
+            for p in ("codex", "antigravity") if rows[p]["connected"]]}, image_preview
         settings = await route("GET", f"/agents/{agent}")
         assert settings["defaults"]["effective"]["provider"] == expected, settings["defaults"]
         assert settings["defaults"]["wakes"]["provider"] == (
@@ -275,6 +278,20 @@ async def exercise(case, root, baseline=False):
                 assert turns == [] and last["author"] == threads.OWNER, (turns, last)
                 assert "Connect a provider" in server.threads.marks_for(target)[0]["text"]
         print(f"PASS {case}: hello and New agent turn -> {expected or 'setup'}", flush=True)
+
+        if case == "codex":
+            sid = threads.session_for(hello, agent)["session_id"]
+            original = host.load(sid)
+            config = original.workspace / ".codex" / "config.toml"
+            for enabled, body in ((True, '[mcp_servers.images]\ncommand = "false"\n'), (False, '')):
+                config.write_text(body)
+                last, _ = await say(hello, agent, f"images-{enabled}")
+                assert last["engine"] == "codex" and last["text"] == "Reply from codex", last
+                current = host.load(sid)
+                assert current.id == sid and current.thread_id == original.thread_id
+                assert current.images_tool is enabled and current.proc.pid != original.proc.pid
+                original = current
+            print("PASS Codex: an idle conversation resumes on each Images route without changing its IDs", flush=True)
 
         draft = await route("POST", "/agents/drafts", {
             "name": "Scout", "soul": "A test agent.", "config": "Test only."}, code=201)

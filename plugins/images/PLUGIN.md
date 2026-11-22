@@ -34,7 +34,7 @@ contributes:
       lanes: [persona, engineer]
   agent.prompt:
     - lanes: [persona]
-      text: "You can make and change images with generate_image (the Images plugin): from words, or from pictures you pass as sources. It saves each into the vault as an ordinary file. Read the file to see what you made before you show it. To show an image in your reply, put ![a few words](its path) on a line of its own; up to three show in your message."
+      text: "Use generate_image from the images MCP server for all image generation and editing, including on a provider with its own image tools. It saves each image into the vault as an ordinary file. Read the file to see what you made before you show it. To show an image in your reply, put ![a few words](its path) on a line of its own. Up to three show in your message."
   settings.entry:
     - key: folder
       label: Save new images in
@@ -77,7 +77,7 @@ yours like any other.
 
 1. Add an OpenAI key or a Google (Gemini) key in **Settings › Connections ›
    API keys**.
-2. Turn Images on here.
+2. Turn Images on here to use that key for image generation across providers.
 3. Ask an agent: "Draw me a watercolour of the garden in spring."
 
 ## What you need, and what leaves your server
@@ -95,5 +95,5 @@ The models are `gpt-image-2` and `gemini-3-pro-image-preview` unless set under
 Advanced. A high-quality OpenAI image costs roughly 35 times a low-quality
 one; each call's cost is in the agent's answer. Pictures are saved as PNG,
 JPEG or WebP. An agent shows one by writing `![a few words](path)` on a line
-of its own. Every engine that speaks MCP gets the same tool,
-`generate_image`; an engine with image making of its own may use either.
+of its own. With Images on, agents use the plugin's `generate_image` tool.
+Turning Images off restores the provider's own image tools where available.

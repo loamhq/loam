@@ -31,6 +31,12 @@ def automatic(eligible: tuple[str, ...] = ORDER) -> str | None:
     return next((provider for provider in eligible if available(provider)[0]), None)
 
 
+def native_image_providers() -> list[str]:
+    """Connected persona CLIs with a subscription-backed image tool."""
+    return [broker.PROVIDER_NAMES[provider] for provider in ("codex", "antigravity")
+            if available(provider)[0]]
+
+
 def compatible_defaults(provider: str | None, model: str | None,
                         effort: str | None) -> tuple[str | None, str | None]:
     """Use the CLI's own defaults when its catalog cannot take a built-in."""

@@ -7,10 +7,14 @@ Run: python3 tests/test_built_in_images.py"""
 from __future__ import annotations
 
 import json
+import importlib.machinery
+import importlib.util
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -33,6 +37,7 @@ sys.path.insert(0, str(ROOT / "lib"))
 import loam_built_in as built_in  # noqa: E402
 import loam_contributions  # noqa: E402
 import loam_plugins  # noqa: E402
+import loam_antigravity as agy  # noqa: E402
 
 FAILURES = 0
 SHIPPED = ROOT / "plugins" / "images"
@@ -83,6 +88,37 @@ def market_copy(repo: str = "loamhq/plugins", on: bool = True) -> Path:
     return folder
 
 
+def provider_routes() -> None:
+    loader = importlib.machinery.SourceFileLoader("provision", str(ROOT / "bin" / "provision"))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    prov = importlib.util.module_from_spec(spec)
+    loader.exec_module(prov)
+    workspace = TMP / "ada"
+    hook_path = workspace / agy.HOOKS_FILE
+    hook_path.parent.mkdir(parents=True)
+    personal = {"checks": {"enabled": False}}
+    hook_path.write_text(json.dumps(personal))
+    for enabled in (True, False):
+        loam_plugins.set_on("images", enabled)
+        codex = tomllib.loads(prov.codex_config("ada", workspace))
+        mcp = prov.antigravity_mcp("ada", workspace)["mcpServers"]
+        agy.sync_images_hook(workspace, "images" in mcp)
+        check(f"Images on={enabled}: Codex installs the tool and sets the native feature",
+              ("images" in codex["mcp_servers"], codex["features"].get("image_generation")),
+              (enabled, False if enabled else None))
+        check(f"Images on={enabled}: Antigravity installs the tool and matching hook group",
+              ("images" in mcp, agy.workspace_hooks(workspace)),
+              (enabled, {**personal, **({agy.IMAGES_HOOK: agy.images_hook()} if enabled else {})}))
+    for tool, args, expected in (
+        ("generate_image", {}, "deny"),
+        ("invoke_subagent", {"TypeName": "image-generator"}, "deny"),
+        ("invoke_subagent", {"TypeName": "researcher", "Role": "Find an image"}, "allow"),
+    ):
+        cmd = [sys.executable, str(ROOT / "hooks" / "antigravity_images.py")]
+        out = subprocess.check_output(cmd, input=json.dumps({"toolCall": {"name": tool, "args": args}}), text=True)
+        check(f"Antigravity hook: {tool} {args}", json.loads(out)["decision"], expected)
+
+
 try:
     # -- A fresh install ----------------------------------------------------
     reset()
@@ -100,6 +136,7 @@ try:
           [True, True])
     check("its tool runs from the shipped folder",
           str(SHIPPED) in json.dumps(loam_contributions.lane_servers("persona", "ada")["images"]), True)
+    provider_routes()
     check("a fresh install has nothing to take over", built_in.take_over()["images"]["how"], "absent")
     check("and it is settled once", built_in.take_over(), {})
 

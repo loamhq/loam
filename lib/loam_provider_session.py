@@ -15,6 +15,7 @@ import shlex
 import signal
 import sys
 import time
+import tomllib
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -317,6 +318,8 @@ class Session:
         self.effort = effort or None
         self.workspace = cfg.workspace(agent)
         self.proc: asyncio.subprocess.Process | None = None
+        self.stdout_task: asyncio.Task | None = None
+        self.images_tool = False
         self.seq = 0
         # A session id survives resumption. This identity belongs to the
         # particular host object which owns outstanding provider writes.
@@ -686,6 +689,13 @@ class Session:
 
     # -- the process -------------------------------------------------------
 
+    def has_images_tool(self) -> bool:
+        """Read the generated tool list that the next provider process will load."""
+        try:
+            return "images" in json.loads((self.workspace / ".mcp.json").read_text())["mcpServers"]
+        except (OSError, ValueError, KeyError, TypeError):
+            return False
+
     def argv(self, resume: bool) -> list[str]:
         """Build the conversation invocation using the persona's own workspace settings. Pass
         model and effort overrides only when the session requests them. Keep the provider's
@@ -772,6 +782,7 @@ class Session:
         # This is the process boundary, and it is the only thing that knows
         # where the CLI's running cost total starts over. See _cost_delta.
         self._process_cost = None
+        self.images_tool = self.has_images_tool()
         self.proc = await asyncio.create_subprocess_exec(
             *first_to_go(self.argv(resume)),
             cwd=str(self.workspace),
@@ -787,7 +798,7 @@ class Session:
         )
         self.state = "running"
         self.save()
-        asyncio.create_task(self._pump_stdout())
+        self.stdout_task = asyncio.create_task(self._pump_stdout())
         asyncio.create_task(self._pump_stderr())
         # The SDK handshake. The CLI answers with its commands and output
         # styles; what matters is that the channel is open in both directions
@@ -1824,6 +1835,13 @@ class CodexSession(Session):
     def argv(self, resume: bool) -> list[str]:
         return [codex.CODEX, *codex.APP_SERVER_ARGV]
 
+    def has_images_tool(self) -> bool:
+        try:
+            with (self.workspace / ".codex" / "config.toml").open("rb") as handle:
+                return "images" in tomllib.load(handle).get("mcp_servers", {})
+        except (OSError, ValueError, TypeError):
+            return False
+
     async def start(self, resume: bool = False) -> None:
         if not (self.workspace / "agent.json").is_file():
             raise BrokerError(404, f"no agent named {self.agent!r}")
@@ -1854,13 +1872,14 @@ class CodexSession(Session):
         self._wakes.clear()
         self.last_activity = time.time()
         self._process_cost = None
+        self.images_tool = self.has_images_tool()
         self.proc = await asyncio.create_subprocess_exec(
             *first_to_go(self.argv(resume)), cwd=str(self.workspace),
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE, env=env, limit=16 * 1024 * 1024,
             start_new_session=True)
         self.state = "running"
-        asyncio.create_task(self._pump_stdout())
+        self.stdout_task = asyncio.create_task(self._pump_stdout())
         asyncio.create_task(self._pump_stderr())
         try:
             await self.request("initialize", {
@@ -2464,7 +2483,6 @@ class AntigravitySession(Session):
         if not login["connected"]:
             raise BrokerError(409, f"Antigravity is not connected: "
                                    f"{login['reason']}")
-        await asyncio.to_thread(agy.write_instructions, self.workspace)
         await asyncio.to_thread(loam_skills.quiet_refresh, self.workspace)
         self.resumed = resume
         self._restored_status = None
@@ -2490,7 +2508,7 @@ class AntigravitySession(Session):
                            dispatch_id: str | None = None) -> int:
         if self.state != "running":
             raise BrokerError(409, f"session {self.id} is not running")
-        if self.proc is not None and self.proc.returncode is None:
+        if self._turn_active or (self.proc is not None and self.proc.returncode is None):
             raise BrokerError(409, f"session {self.id} has a turn in flight")
         attachments = attachments or []
         event = {"type": "broker.user_message", "session_id": self.id,
@@ -2524,6 +2542,7 @@ class AntigravitySession(Session):
         self._agy = agy.Translator(self.id)
         self._agy.model = self.model
         try:
+            await asyncio.to_thread(agy.write_instructions, self.workspace)
             self.proc = await asyncio.create_subprocess_exec(
                 *first_to_go(agy.argv(prompt, self.thread_id, self.model,
                                       self.effort)),
@@ -2532,7 +2551,7 @@ class AntigravitySession(Session):
                 env=env, start_new_session=True, limit=16 * 1024 * 1024)
         except OSError as exc:
             await Session._handle(self, self._agy.result(
-                {"status": "ERROR", "error": f"agy did not start: {exc}"}))
+                {"status": "ERROR", "error": f"Antigravity could not start its turn: {exc}"}))
             return event["seq"]
         asyncio.create_task(self._pump_stdout())
         asyncio.create_task(self._pump_stderr())

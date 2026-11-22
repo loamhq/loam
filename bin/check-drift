@@ -1088,6 +1088,16 @@ def main() -> int:
                 "persona's skills. Run bin/provision --codex " + name + ".",
             ))
 
+        agy = prov.agy
+        hook_path = ws / agy.HOOKS_FILE
+        expected = agy.images_hook() if "images" in prov.antigravity_mcp(name, ws)["mcpServers"] else None
+        try:
+            if agy.workspace_hooks(ws).get(agy.IMAGES_HOOK) != expected:
+                findings.append((f"{name} Antigravity Images hook", str(hook_path),
+                                 f"Run bin/provision --antigravity {name}."))
+        except (OSError, ValueError) as exc:
+            findings.append((f"{name} Antigravity Images hook", str(hook_path), str(exc)))
+
         # agent.json against what provision renders. The display name and
         # the default provider, model and thinking level are the profile's
         # (2026-11-13: the owner sets them on the page), so the file's own

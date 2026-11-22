@@ -8,7 +8,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -50,6 +52,8 @@ SIGN_IN_RE = re.compile(r"sign in|log in|authenticat", re.I)
 # hand-edit is overwritten.
 RULES_FILE = Path(".agents") / "rules" / "loam-persona.md"
 MCP_FILE = Path(".agents") / "mcp_config.json"
+HOOKS_FILE = Path(".agents") / "hooks.json"
+IMAGES_HOOK = "loam-images"
 
 PROVIDER_LINE = ("You are running on Antigravity through Loam's broker: the "
                  "box's shell and Antigravity's own tools, and the MCP tools "
@@ -539,6 +543,52 @@ def reader() -> usage_store.Reader:
 
 # -- the persona -----------------------------------------------------------
 
+def images_hook() -> dict:
+    return {"PreToolUse": [{
+        "matcher": "^(generate_image|invoke_subagent)$",
+        "hooks": [{"type": "command", "timeout": 10,
+                   "command": "python3 " + shlex.quote(str(lc.ROOT / "hooks" / "antigravity_images.py"))}],
+    }]}
+
+
+def workspace_hooks(workspace: Path) -> dict:
+    path = workspace / HOOKS_FILE
+    try:
+        hooks = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    if not isinstance(hooks, dict):
+        raise ValueError(f"{path} must contain an object of hook groups")
+    return hooks
+
+
+def sync_images_hook(workspace: Path, enabled: bool) -> bool:
+    """Render Loam's named hook group in the CLI's shared workspace file."""
+    hooks = workspace_hooks(workspace)
+    desired = images_hook() if enabled else None
+    if hooks.get(IMAGES_HOOK) == desired:
+        return False
+    if enabled:
+        hooks[IMAGES_HOOK] = desired
+    else:
+        del hooks[IMAGES_HOOK]
+    _write_workspace_file(workspace / HOOKS_FILE, json.dumps(hooks, indent=2) + "\n")
+    return True
+
+
+def _write_workspace_file(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                     prefix=f".{path.name}-", delete=False) as tmp:
+        temp_path = Path(tmp.name)
+        try:
+            tmp.write(text)
+            tmp.close()
+            temp_path.replace(path)
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+
 def instructions(workspace: Path) -> str:
     """The same files Codex is given (``loam_codex.instructions``), under
     this provider's line."""
@@ -549,19 +599,15 @@ def instructions(workspace: Path) -> str:
 
 def write_instructions(workspace: Path) -> Path:
     path = workspace / RULES_FILE
-    path.parent.mkdir(parents=True, exist_ok=True)
-    text = ("<!-- Rendered by Loam's broker at every Antigravity session "
-            "start from CLAUDE.md and its imports. Not the persona's to "
-            "edit: the next start writes it again. -->\n\n"
+    text = ("<!-- Rendered by Loam's broker before each Antigravity turn "
+            "from CLAUDE.md and its imports. Generated file. -->\n\n"
             + instructions(workspace))
     try:
         if path.read_text(encoding="utf-8") == text:
             return path
     except OSError:
         pass
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    tmp.replace(path)
+    _write_workspace_file(path, text)
     return path
 
 

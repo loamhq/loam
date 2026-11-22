@@ -259,19 +259,31 @@ class SessionHost:
             if owner != agent or (requested and requested != engine):
                 raise BrokerError(409, "session is starting for another agent or provider")
             return await asyncio.shield(task)
-        # Reusing a resident process needs no new admission.
+        # A resident CLI keeps its tools from launch. Apply an Images switch
+        # when the next turn resumes, after work on the old route has finished.
+        retire = None
         if session_id and session_id in self.sessions:
             existing = self.sessions[session_id]
             if existing.agent != agent or (requested and requested != existing.provider):
                 raise BrokerError(409, "session belongs to another agent or provider")
             if existing.state == "running":
-                return existing
+                if (existing.provider not in ("claude-code", "codex") or existing.busy()
+                        or existing.images_tool == existing.has_images_tool()):
+                    return existing
+                retire = existing
+                resume = True
         sid = session_id or str(uuid.uuid4())
 
         async def open_session():
             try:
                 if self.stopping:
                     raise BrokerError(503, "the broker is stopping")
+                if retire is not None:
+                    if retire.busy():
+                        return retire
+                    await retire.stop()
+                    if retire.stdout_task is not None:
+                        await retire.stdout_task
                 await self.make_room(agent)
                 if self.stopping:
                     raise BrokerError(503, "the broker is stopping")

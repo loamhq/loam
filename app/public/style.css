@@ -2574,8 +2574,12 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .plugin-declaration ul { padding-left:20px; margin:0; }
 .plugin-declaration li { font-size:15px; line-height:1.5; margin:8px 0; }
 .plugin-guide summary { padding:12px 0; cursor:pointer; color:var(--paper-ink-2); }
-.plugin-remove-question { display:flex; flex-wrap:wrap; gap:10px; }
-.plugin-remove-question > p { flex-basis:100%; }
+:is(.plugin-remove-question,.plugin-enable-question) { display:flex; flex-wrap:wrap; gap:10px; }
+:is(.plugin-remove-question,.plugin-enable-question) > p { flex-basis:100%; }
+.plugin-enable-question { margin:4px 8px 8px; padding:14px; border:1px solid var(--paper-rule); border-radius:14px; }
+.plugin-enable-question > p { margin:0; font-size:14px; line-height:1.45; }
+.plugin-enable-question > p:first-child { font-weight:600; }
+.plugin-enable-question button { margin-top:2px; }
 .plugin-source { display:inline-flex; align-items:center; min-height:44px; }
 /* Plugin details sit below its primary controls. */
 .plugin-hero { display:flex; align-items:center; gap:16px; margin:4px 0 4px; }

@@ -8,6 +8,7 @@ import { listingAddress, personalUpdate, skippedUpdate } from './market-card.js'
 const label = id => ({ 'core.message': 'the message bubble', 'core.thread-list': 'the thread list', 'core.composer': 'the composer', 'core.files.viewer': 'the Files viewer', 'core.files.editor': 'the Files editor', 'core.rail': 'the navigation rail', 'core.activity': 'Activity', 'core.apps': 'Apps', 'core.settings': 'Settings' }[id] ?? id)
 const ORIGINS = { loam: 'Built into Loam', market: 'From the Market', yours: 'Made by you', link: 'From a link' }
 const UNREVIEWED = 'Unreviewed by Loam'
+const IMAGE_KEYS = { openai: 'OpenAI', google: 'Google Gemini' }
 
 export function pluginOrigin(row, entry) {
   const source = row.source
@@ -61,6 +62,7 @@ const SERVICE = { running: 'Running', starting: 'Starting', failing: 'Failing', 
 const external = source => { try { const u = new URL(source?.url); return u.protocol === 'https:' ? u.href : null } catch { return null } }
 export function createPluginSettings({ loader, theme, host, changed = () => {} }) {
   const st = { keys: null, how: {}, selected: null, detail: null, detailError: '', opening: false, remove: false, error: '', done: '', guide: false, focusDetail: false, restarting: null, serviceError: null, logs: new Set(), advanced: null }
+  let images = null, focusImagesSwitch = false
   let hostSettings = null, secretSettings = null
   const showcase = createThemeShowcase({ schedule: () => changed(), mode: () => theme.current === 'dark' ? 'dark' : 'light' })
   const failedShots = new Set()
@@ -152,11 +154,13 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
   }
   function clear() {
     st.selected = null; st.detail = null; st.error = ''
+    images = null
     changed()
   }
   const select = row => host.appModalHistory ? host.goSettings('plugins', row.id) : open(row)
   async function open(row) {
     hostSettings = null; secretSettings = null; reviewAnswer = null
+    images = null
     st.selected = row; st.detail = null; st.detailError = ''; st.opening = true; st.guide = false; st.remove = false; st.error = ''; st.focusDetail = true; changed()
     opened()
     // Whether its keys are saved, for whether it is set up (below).
@@ -186,13 +190,52 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
     catch (error) { if (st.selected?.key === row.key) st.detailError = error.message }
     finally { if (st.selected?.key === row.key) st.opening = false; changed() }
   }
-  async function toggle(row) {
+  async function writeToggle(row, on) {
     st.error = ''; changed()
     try {
-      await loader.toggle(row.id, !row.on)
+      await loader.toggle(row.id, on)
       if (st.selected?.id === row.id && loader.st.rows.some(current => current.id === row.id && current.effective && current.on)) host.registry?.emit('plugin.settings.opened', { id: row.id })
     } catch (error) { st.error = error.message }
     changed()
+  }
+  async function toggle(row) {
+    if (row.id !== 'images' || row.on) return writeToggle(row, !row.on)
+    if (images) return
+    const request = { key: row.key }
+    images = request; st.error = ''; changed()
+    try {
+      const out = await host.api('GET', '/plugins/images')
+      if (images !== request) return
+      if (out.plugin?.on) {
+        images = null
+        await loader.refresh()
+      } else if (!Array.isArray(out.image_routing?.providers)) {
+        throw new Error('Could not check which providers already make images. Try again.')
+      } else if (out.image_routing.providers.length) {
+        request.route = out.image_routing
+        request.focus = true
+      } else {
+        images = null
+        await writeToggle(row, true)
+      }
+    } catch (error) {
+      if (images === request) { images = null; st.error = error.message }
+    } finally { changed() }
+  }
+  function imageQuestion(row) {
+    const route = images?.key === row.key && images.route
+    if (row.on || !route) return null
+    const names = new Intl.ListFormat('en').format(route.providers), one = route.providers.length === 1
+    const key = IMAGE_KEYS[route.backend] ?? 'OpenAI or Google Gemini'
+    return h('div', { class: 'plugin-enable-question', role: 'group', 'aria-labelledby': 'images-already-supported' },
+      h('p', { id: 'images-already-supported', text: `${names} already ${one ? 'supports' : 'support'} image generation for your agents.` }),
+      h('p', { id: 'images-switch-route', text: `Turn on Images to switch agents on every provider to this plugin. It will use your ${key} API key instead of ${one ? `your ${names} subscription` : 'those subscriptions'}.` }),
+      button('Keep off', () => { images = null; focusImagesSwitch = true; changed() }, 'pillbtn content-mark', { 'aria-describedby': 'images-already-supported images-switch-route' }),
+      button('Turn on Images', async () => {
+        images = null
+        await writeToggle(row, true)
+        focusImagesSwitch = true; changed()
+      }, 'pillbtn primary'))
   }
   async function remove(row) {
     st.error = ''; changed()
@@ -233,7 +276,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
       onerror: event => { if (event.currentTarget.isConnected) { failedIcons.add(src); changed() } } })
   }
   const pluginSwitch = row => row.switch === 'plugin' && !row.broken
-    ? h('button', { type: 'button', class: 'schedule-switch plugin-switch', role: 'switch', 'aria-checked': String(Boolean(row.on)), 'aria-label': `Enable ${row.name || row.id}`, disabled: loader.st.writing.has(`/plugins/${row.id}`), onclick: () => toggle(row) }, h('span', { 'aria-hidden': 'true' }))
+    ? h('button', { type: 'button', class: 'schedule-switch plugin-switch', role: 'switch', 'aria-checked': String(Boolean(row.on)), 'aria-label': `Enable ${row.name || row.id}`, disabled: images?.key === row.key || loader.st.writing.has(`/plugins/${row.id}`), onclick: () => toggle(row) }, h('span', { 'aria-hidden': 'true' }))
     : null
   function rowNotices(row) {
     const overrides = [...new Set([...(row.overrides ?? []), ...(host.registry?.overrides(row.id) ?? [])])]
@@ -258,7 +301,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
           unreviewed ? h('div', { class: 'plugin-row-origin', text: UNREVIEWED }) : null,
           rowNotices(row)),
         icon.chevronRight(12)), control),
-      row.on && row.service && row.service.state !== 'running' ? serviceView(row) : null)
+      imageQuestion(row), row.on && row.service && row.service.state !== 'running' ? serviceView(row) : null)
   }
   const failedCovers = new Set()
   function themeCover(row) {
@@ -407,7 +450,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
       notice(row.broken), notice(loader.st.failures.get(row.id)),
       row.service && row.on && row.service.state !== 'running' ? serviceView(row) : null,
       theme ? picture(row) : null,
-      ready ? null : how,
+      ready || row.id === 'images' ? null : how,
       row.shadows ? h('p', { class: 'plugin-mark', text: 'Changes a shipped plugin.' }) : null,
       updateControls(row),
       notice(st.error), notice(st.detailError),
@@ -415,8 +458,8 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
       row.switch === 'plugin' && row.id !== 'daily-notes' && !row.broken ? h('div', { class: 'rows plugin-enable' }, h('div', { class: 'setrow' },
         h('div', { class: 'setrow-who' },
           h('div', { class: 'setrow-title', text: row.on ? 'On' : row.id === 'git-backup' ? 'Off-box backup is off' : 'Off' }),
-          h('div', { class: 'setrow-sub', text: row.on ? 'Settings are kept when you turn this off.' : row.id === 'git-backup' ? 'Nothing is backed up off this machine yet. Turn on Git backup to back up your vault and agents to private repositories.' : 'Turn on to use this plugin and its settings.' })),
-        h('button', { class: 'schedule-switch', role: 'switch', 'aria-label': `Enable ${row.name || row.id}`, 'aria-checked': String(Boolean(row.on)), disabled: st.opening || loader.st.writing.has(`/plugins/${row.id}`), onclick: () => toggle(row) }, h('span')))) : null,
+          h('div', { class: 'setrow-sub', text: row.on ? (row.id === 'images' ? 'Agents use Images with an OpenAI or Google Gemini API key.' : 'Settings are kept when you turn this off.') : row.id === 'git-backup' ? 'Nothing is backed up off this machine yet. Turn on Git backup to back up your vault and agents to private repositories.' : 'Turn on to use this plugin and its settings.' })),
+        h('button', { class: 'schedule-switch', role: 'switch', 'aria-label': `Enable ${row.name || row.id}`, 'aria-checked': String(Boolean(row.on)), disabled: st.opening || images?.key === row.key || loader.st.writing.has(`/plugins/${row.id}`), onclick: () => toggle(row) }, h('span'))), imageQuestion(row)) : null,
       row.id === 'daily-notes' ? h('section', { class: 'plugin-host-settings', 'aria-label': 'Daily notes settings' },
         h('div', { class: 'profile-choice' }, h('span', { text: 'Daily notes' }), h('button', { class: 'schedule-switch', role: 'switch', 'aria-label': 'Enable daily notes', 'aria-checked': String(Boolean(row.on)), disabled: loader.st.writing.has(`/plugins/${row.id}`), onclick: () => toggle(row) }, h('span'))),
         hostSettings ? h('form', { onsubmit: async e => {
@@ -437,7 +480,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
           : `Uses your ${row.keys.map(k => k.name).join(' and ')} ${row.keys.length > 1 ? 'keys' : 'key'}, saved under API keys in Connections.` }),
         host.goSettings ? button('Open API keys', () => row.keys.length === 1 ? host.goSettings('api-key', row.keys[0].provider) : host.goSettings('api-keys'), 'pillbtn content-mark') : null) : null,
       loader.st.failures.has(row.id) ? button('Try again', () => loader.refresh(), 'pillbtn content-mark') : null,
-      ready ? how : null,
+      ready || row.id === 'images' ? how : null,
       details(row, declaration, guide.technical, url),
       row.layer === 'yours' ? (st.remove ? h('div', { class: 'plugin-remove-question' }, h('p', { text: `Remove ${row.name || row.id}?${row.shadows ? ' The shipped copy will take over.' : ''}` }),
         button('Keep plugin', () => { st.remove = false; changed() }, 'pillbtn content-mark'), button('Remove', () => remove(row), 'pillbtn primary danger', { disabled: loader.st.writing.has(`/plugins/${row.id}`) })) : button('Remove plugin', () => { st.remove = true; changed() }, 'pillbtn content-mark danger')) : null]
@@ -474,6 +517,14 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
         const scroll = back.closest('.app-modal-body') ?? back.closest('.setmain') ?? back.closest('.settings')
         if (scroll) scroll.scrollTop = 0
       }
+    }
+    if (images?.focus) {
+      const keep = document.querySelector('.settings .plugin-enable-question button')
+      if (keep) { images.focus = false; keep.focus() }
+    }
+    if (focusImagesSwitch) {
+      focusImagesSwitch = false
+      document.querySelector('.settings [role="switch"][aria-label="Enable Images"]')?.focus({ preventScroll: true })
     }
   }
   return { st, view, open, clear, opened, sync, checkUpdates }
