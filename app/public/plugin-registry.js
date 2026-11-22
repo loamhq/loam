@@ -1,5 +1,5 @@
 // Public registration and lifecycle contract, shared by core and plugins.
-export const PLACE_NAMES = Object.freeze(['agent.profile', 'rail.section', 'panel.item', 'app.overlay', 'settings.section', 'thread.list.decoration', 'thread.header.action', 'message.renderer', 'message.footer.action', 'composer.tool', 'files.viewer', 'files.action', 'files.root', 'activity.kind', 'apps.source', 'apps.icon', 'thread.list.line', 'command'])
+export const PLACE_NAMES = Object.freeze(['agent.profile', 'rail.section', 'panel.item', 'app.overlay', 'settings.section', 'thread.list.decoration', 'thread.header.action', 'message.renderer', 'message.footer.action', 'composer.tool', 'files.viewer', 'files.action', 'files.root', 'files.share', 'activity.kind', 'apps.source', 'apps.icon', 'thread.list.line', 'command'])
 export const COMPONENT_IDS = Object.freeze(['core.thread-list', 'core.message', 'core.composer', 'core.files.viewer', 'core.files.editor', 'core.rail', 'core.activity', 'core.apps', 'core.settings'])
 export function createRegistry({ changed = () => {}, failed = () => {} } = {}) {
   const records = new Map(PLACE_NAMES.map(name => [name, []])), listeners = new Map(), owners = new Map(), scopes = new Map()

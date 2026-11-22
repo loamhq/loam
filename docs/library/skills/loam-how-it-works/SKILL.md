@@ -234,8 +234,25 @@ In Files, **Delete** is the last item in the ⋯ menu on a deletable file's row
 or open header. Confirm to move the file to trash. **Undo** is available in the
 status message for five seconds and restores the saved file to its original
 path if the name is free. Trash stays on the vault disk until restored or
-cleared by the operator.
-Agents use `delete_file` and `restore_file` for the same vault operations.
+cleared by the operator. **Move…** in a vault file's ⋯ menu moves it to another
+folder. Agents use `move_file`, `delete_file` and `restore_file` for the same
+vault operations.
+
+**Sharing and Comments & suggestions.** Two independent built-in plugins
+extend Files for any file in the vault (never folders): **Sharing** creates
+password-protected links (`/s/<token>`) with safe browser viewing (Markdown,
+images, static SVG, PDF, sandboxed HTML, audio, video, text/code) or a clean
+download card, and adds **Files › Shared** for files shared by you and links
+shared with you. **Comments & suggestions** adds whole-file comments on any
+file, plus anchored comments, suggestions, accept/reject, and history on
+Markdown — usable privately between the owner and agents even with Sharing
+off. When both are on, Share offers comment (and on Markdown, edit) modes and
+shows comments on the share page; turning either off leaves the other clean
+with no dead controls. Notes and share links follow files across renames,
+moves, deletes and restores. Agents use `share_*` / `shared_*` when Sharing is
+on and `file_*` / `doc_*` / `comments_appear` when Comments & suggestions is
+on. `plugin.comments.appear` controls whether agent names appear to outside
+visitors (`names` or `alias`), with per-file overrides.
 
 **Settings › Plugins** shows installed themes and extensions and where each
 copy came from. About opens the Market listing for a Market plugin and shows

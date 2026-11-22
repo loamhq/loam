@@ -1,0 +1,1 @@
+"""Sharing plugin server package."""

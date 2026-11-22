@@ -181,12 +181,11 @@ copies are kept.
 
 **`<system>/Loam/data/` is kept** (since 2026-11-16): the one folder inside
 Loam's that is the person's, where plugins keep data that belongs in the
-vault (`data/<plugin id>/`; the doc-comments sidecars first,
-`plugins/doc-comments`). It is never in the library, so it is never counted
+vault (`data/<plugin id>/`; `comments` sidecars and `sharing` link records). It is never in the library, so it is never counted
 as an edit; replacing the folder carries it across (`carry_kept` in
 lib/loam_skills.py); an update's backup leaves it out; and undoing an update
 keeps it as it is now, never as the backup had it, so a note made after the
-update is not lost by the undo. `tests/test_doc_comments.py` proves the
+update is not lost by the undo. `tests/test_sharing_comments.py` proves the
 four.
 
 ## After the move

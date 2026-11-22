@@ -111,7 +111,7 @@ def ask(port: int, method: str, path: str, host: str, headers: dict | None = Non
 plugin, app, door_plugin = backend("plugin"), backend("app"), backend("door")
 (TMP / "state").mkdir()
 (TMP / "state" / "ports.json").write_text(json.dumps({"ports": {
-    "doc-comments": plugin.server_port, "sharer": door_plugin.server_port}}))
+    "comments": plugin.server_port, "sharer": door_plugin.server_port}}))
 loader = importlib.machinery.SourceFileLoader("plugin_gateway", str(ROOT / "bin" / "plugin-gateway"))
 spec = importlib.util.spec_from_loader("plugin_gateway", loader)
 gw = importlib.util.module_from_spec(spec)
@@ -138,25 +138,25 @@ wait_port(dport)
 H = f"127.0.0.1:{gport}"
 NOTE = json.dumps({"root": "vault", "path": "scratch.md", "text": "x"}).encode()
 JSON = {"Content-Type": "application/json"}
-s, t, who = ask(gport, "POST", "/x/doc-comments/doc/notes", H,
+s, t, who = ask(gport, "POST", "/x/comments/doc/notes", H,
                 {**JSON, "Sec-Fetch-Site": "cross-site", "Origin": "https://evil.example"}, NOTE)
 check("gateway: a cross-site POST to /x/<id>/ is a 403, never the plugin's",
       (s, who, "own origin" in t), (403, None, True))
-s, t, who = ask(gport, "POST", "/x/doc-comments/doc/notes", H,
+s, t, who = ask(gport, "POST", "/x/comments/doc/notes", H,
                 {"Content-Type": "text/plain", "Origin": "https://evil.example"}, NOTE)
 check("gateway: ...and a no-cors POST that only says its Origin", (s, who), (403, None))
-s, t, who = ask(gport, "POST", "/x/doc-comments/doc/notes", H,
+s, t, who = ask(gport, "POST", "/x/comments/doc/notes", H,
                 {**JSON, "Sec-Fetch-Site": "same-site"}, NOTE)
 check("gateway: ...and a same-site one (another subdomain is another origin)", (s, who), (403, None))
-s, t, who = ask(gport, "GET", "/x/doc-comments/ws", H,
+s, t, who = ask(gport, "GET", "/x/comments/ws", H,
                 {"Upgrade": "websocket", "Connection": "Upgrade", "Sec-Fetch-Site": "cross-site"})
 check("gateway: ...and a cross-site WebSocket upgrade", (s, who), (403, None))
-s, t, who = ask(gport, "POST", "/x/doc-comments/doc/notes", H,
+s, t, who = ask(gport, "POST", "/x/comments/doc/notes", H,
                 {**JSON, "Sec-Fetch-Site": "same-origin", "Origin": f"http://{H}"}, NOTE)
 check("gateway: a same-origin POST reaches the plugin", (s, who), (200, "plugin"))
-s, t, who = ask(gport, "POST", "/x/doc-comments/doc/notes", H, JSON, NOTE)
+s, t, who = ask(gport, "POST", "/x/comments/doc/notes", H, JSON, NOTE)
 check("gateway: a POST with no fetch metadata (a tool, not a page) reaches it", (s, who), (200, "plugin"))
-s, t, who = ask(gport, "GET", "/x/doc-comments/doc?root=vault&path=a.md", H,
+s, t, who = ask(gport, "GET", "/x/comments/doc?root=vault&path=a.md", H,
                 {"Sec-Fetch-Site": "cross-site"})
 check("gateway: a cross-site GET reaches it (reading is the page's own SOP's)", (s, who), (200, "plugin"))
 
@@ -195,29 +195,29 @@ else:
         # this test's port, which a real host on 443 does not.
         same = {"Sec-Fetch-Site": "same-origin", "Origin": f"http://{HH}"}
         rows = [
-            ("a cross-site POST to a plugin route (doc-comments' notes)", "POST",
-             "/x/doc-comments/doc/notes", {**JSON, **cross}, (403, None)),
+            ("a cross-site POST to a plugin route (comments' notes)", "POST",
+             "/x/comments/doc/notes", {**JSON, **cross}, (403, None)),
             ("a cross-site POST to an app route (/api/files)", "POST",
              "/api/files/write", {**JSON, **cross}, (403, None)),
             ("a cross-site PATCH to an app route (/api/settings)", "PATCH",
              "/api/settings", {**JSON, **cross}, (403, None)),
             ("a POST that says nothing of where it came from", "POST",
-             "/x/doc-comments/doc/notes", JSON, (403, None)),
+             "/x/comments/doc/notes", JSON, (403, None)),
             ("a POST whose only word is another site's Origin", "POST",
              "/api/threads", {"Content-Type": "text/plain", "Origin": "https://evil.example"}, (403, None)),
             ("a same-site POST from a sibling subdomain", "POST",
-             "/x/doc-comments/doc/notes", {**JSON, "Sec-Fetch-Site": "same-site",
+             "/x/comments/doc/notes", {**JSON, "Sec-Fetch-Site": "same-site",
                                            "Origin": "https://evil.owner.example"}, (403, None)),
-            ("a cross-site WebSocket upgrade", "GET", "/x/doc-comments/ws",
+            ("a cross-site WebSocket upgrade", "GET", "/x/comments/ws",
              {"Upgrade": "websocket", "Connection": "Upgrade", **cross}, (403, None)),
             ("a same-origin POST to the plugin route", "POST",
-             "/x/doc-comments/doc/notes", {**JSON, **same}, (200, "plugin")),
+             "/x/comments/doc/notes", {**JSON, **same}, (200, "plugin")),
             ("a same-origin POST to the app route", "POST",
              "/api/files/write", {**JSON, **same}, (200, "app")),
             ("a POST with only this host's Origin (no fetch metadata)", "POST",
              "/api/threads", {**JSON, "Origin": f"https://{host}"}, (200, "app")),
             ("a cross-site GET of the app's page (sight reads)", "GET", "/", cross, (200, "app")),
-            ("a cross-site GET of a plugin's page", "GET", "/x/doc-comments/", cross, (200, "plugin")),
+            ("a cross-site GET of a plugin's page", "GET", "/x/comments/", cross, (200, "plugin")),
             ("a navigation typed into the address bar", "GET", "/files",
              {"Sec-Fetch-Site": "none"}, (200, "app")),
             ("a cross-site OPTIONS (a preflight)", "OPTIONS", "/api/threads", cross, (200, "app")),

@@ -49,10 +49,10 @@ test('a cold address in a plugin root is a file, even before its plugin is there
 })
 
 test("a plugin root's file has a panel address; path tricks do not", () => {
-  const item = { kind: 'file', root: '@doc-comments', path: 'with-me/w-abcdefghij.md' }
+  const item = { kind: 'file', root: '@sharing', path: 'with-me/w-abcdefghij.md' }
   assert.deepEqual(itemDescriptor(item), item)
   assert.deepEqual(itemFromURL(itemHref(item)), item)
-  assert.equal(itemDescriptor({ kind: 'file', root: '@doc-comments', path: '../vault/x.md' }), null)
+  assert.equal(itemDescriptor({ kind: 'file', root: '@sharing', path: '../vault/x.md' }), null)
   assert.equal(itemDescriptor({ kind: 'file', root: '@Bad Root', path: 'x.md' }), null)
   assert.equal(itemDescriptor({ kind: 'file', root: 'elsewhere', path: 'x.md' }), null)
 })

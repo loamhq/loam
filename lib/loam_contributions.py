@@ -71,7 +71,10 @@ PLACES = ("agent.tool", "agent.prompt", "schedule.kind", "settings.entry",
           # 2026-11-16 (doc-comments' share links): the one path, /s/, that
           # reaches a plugin without the owner's login (docs/plugins.md, "The
           # share door").
-          "web.door")
+          "web.door",
+          # 2026-11-22: a named loopback HTTP service a server plugin offers
+          # to other enabled plugins via GET /v1/plugins/services (docs/plugins.md).
+          "plugin.service")
 # The checks the host runs itself for a `settings.secret` (`check: builtin:<n>`),
 # so a plugin needs no code of its own to have its key checked:
 # lib/loam_keys.py.
@@ -79,6 +82,8 @@ BUILTIN_CHECKS = ("gemini",)
 SECRET_MAX = 4096
 LANES = ("persona", "engineer", "reviewer")
 NAME = re.compile(r"^[a-z][a-z0-9-]{0,30}$")
+INTERFACE = re.compile(r"^[a-z][a-z0-9-]{0,30}(\.[a-z][a-z0-9-]{0,30})*$")
+MOUNT = re.compile(r"^/[A-Za-z0-9_/-]{1,64}$")
 VAR = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 KEY = re.compile(r"^[a-z][a-z0-9_-]{0,47}$")
 PROMPT_MAX = 2000
@@ -375,6 +380,32 @@ def contributes_of(value, folder: Path | None, warnings: list[str]) -> dict:
                 if items:
                     raise ContributionError(f"{where}: a plugin has one door")
                 items.append({"why": why.strip()})
+            elif place == "plugin.service":
+                iface = e.get("interface")
+                if not isinstance(iface, str) or not INTERFACE.match(iface) or len(iface) > 64:
+                    raise ContributionError(f"{where}: `interface` is a dotted lower-case name "
+                                            f"(e.g. share.collaboration)")
+                ver = e.get("version", 1)
+                if not isinstance(ver, int) or isinstance(ver, bool) or not 1 <= ver <= 99:
+                    raise ContributionError(f"{where}: `version` is an integer, 1 to 99")
+                mount = e.get("mount")
+                if not isinstance(mount, str) or not MOUNT.match(mount) or "//" in mount or ".." in mount:
+                    raise ContributionError(f"{where}: `mount` is a route prefix starting with '/'")
+                if any(x["interface"] == iface for x in items):
+                    raise ContributionError(f"{where}: duplicate service interface {iface!r}")
+                svc = {"interface": iface, "version": ver, "mount": mount.rstrip("/") or "/"}
+                page = e.get("page")
+                if page is not None:
+                    if not isinstance(page, dict):
+                        raise ContributionError(f"{where}: `page` is a mapping with `entry` and optional `styles`")
+                    entry = page.get("entry")
+                    if not isinstance(entry, str) or not _plugin_rel(entry) or not entry.endswith(".js"):
+                        raise ContributionError(f"{where}: `page.entry` is a relative .js path inside the plugin")
+                    styles = page.get("styles", [])
+                    if not isinstance(styles, list) or not all(isinstance(s, str) and _plugin_rel(s) and s.endswith(".css") for s in styles):
+                        raise ContributionError(f"{where}: `page.styles` is a list of relative .css paths inside the plugin")
+                    svc["page"] = {"entry": entry, "styles": list(styles)}
+                items.append(svc)
             elif place == "box.listener":
                 proc = e.get("process")
                 why = e.get("why")
@@ -397,6 +428,15 @@ def _vault_rel(path) -> bool:
     parts = path.strip().strip("/").split("/")
     return (not path.startswith("/") and all(p and p not in (".", "..") for p in parts)
             and not any(ord(c) < 32 or c in "\\" for c in path))
+
+
+def _plugin_rel(path) -> bool:
+    """A file path relative to a plugin's folder: no leading slash, no `..`,
+    plain segments only."""
+    if not isinstance(path, str) or not path or len(path) > 200 or path.startswith("/"):
+        return False
+    parts = path.split("/")
+    return all(re.fullmatch(r"[A-Za-z0-9._-]+", p) and p not in (".", "..") for p in parts)
 
 
 def declared(contrib: dict) -> dict:
@@ -437,6 +477,9 @@ def declared(contrib: dict) -> dict:
         out["inbound"] = sorted(f"{l['process']}: {l['why']}" for l in contrib["box.listener"])
     if contrib.get("web.door"):
         out["open_web"] = contrib["web.door"][0]["why"]
+    if contrib.get("plugin.service"):
+        out["services"] = sorted(f"{s['interface']} (v{s['version']})"
+                                 for s in contrib["plugin.service"])
     return out
 
 
@@ -446,6 +489,36 @@ def door_owner(plugins: list[dict] | None = None) -> str | None:
         if p["contributes"].get("web.door"):
             return p["id"]
     return None
+
+
+def services_for(interface: str | None = None, *, plugins: list[dict] | None = None,
+                 ports: dict[str, int] | None = None) -> list[dict]:
+    """Enabled plugins declaring ``contributes.plugin.service`` (optionally
+    filtered by ``interface``), with each running plugin's loopback URL.
+
+    Used by ``GET /v1/plugins/services`` so plugins discover and call each
+    other over documented HTTP interfaces without importing each other's code
+    or hardcoding ports or plugin ids."""
+    if ports is None:
+        import loam_plugin_servers as servers  # noqa: PLC0415
+        ports = servers.read_ports()
+    out = []
+    for p in sorted(active() if plugins is None else plugins, key=lambda p: p["id"]):
+        if p.get("on") is False or p.get("effective") is False:
+            continue
+        port = ports.get(p["id"])
+        if not port:
+            continue
+        for svc in p["contributes"].get("plugin.service") or []:
+            if interface and svc["interface"] != interface:
+                continue
+            row = {"plugin": p["id"], "interface": svc["interface"],
+                   "version": svc["version"], "mount": svc["mount"],
+                   "url": f"http://127.0.0.1:{port}{svc['mount']}"}
+            if svc.get("page"):
+                row["page"] = svc["page"]
+            out.append(row)
+    return out
 
 
 # ---------------------------------------------------------------------------

@@ -2782,3 +2782,33 @@ listener for immediate notification in an open page.
   recoverably into `<vault>/.trash/loam-cleanup-<stamp>/`, and migrates active
   inbox/daily installs into `quick-actions`. New installs seed only
   `About me.md`, `<projects>/Loam/Start here.html`, `README.md`, and Loam files.
+
+## 2026-11-22 — Split into Sharing and Comments & suggestions for any vault file
+
+- **Two independent built-in plugins with public inter-plugin seams.**
+  `plugins/doc-comments/` is retired in favor of `plugins/sharing/` ("Sharing")
+  and `plugins/comments/` ("Comments & suggestions"), with zero cross-imports
+  or hard-coded sibling paths. Server plugins discover versioned loopback peers
+  via `contributes.plugin.service` and `GET /v1/plugin-services` (`share.collab`
+  v1 and `share.remote` v1); page plugins compose via `files.viewer`
+  (`slot: 'panel'` beside core's viewer, plus descending-order fallback on
+  `slot: 'viewer'`) and `files.share` (`control`, `section`, `row`).
+- **Vault file lifecycle tracking.** `lib/loam_files.py` records `move`,
+  `delete`, and `restore` in an append-only vault journal (`GET /v1/files/events`)
+  plus `GET /v1/files/fingerprint` and `GET /v1/files/locate` (unwraps
+  `body["resource"]`), hooked into both Files UI (`rename`, `delete`, `restore`,
+  plus `Move…`) and `mcp__loam__move_file`. Both `sharing` and `comments`
+  replay events and fall back to inode/sha256 rediscovery on external moves,
+  while treating deleted files and copies cleanly.
+- **Cold-open non-text files in `app/public/files.js`.** `openFile()` previously
+  fetched `/files/stat` for missing `capabilities` only when `view === 'html'`,
+  causing cold URLs to images, PDFs, audio, video, and binaries to render
+  "The host does not offer this file for download." Extending `metadataLoading`
+  to all non-text views fixes cold opens across every file type.
+- **Active-content isolation on `/s/<token>`.** Shared HTML renders only inside
+  an `<iframe sandbox="allow-scripts">` with no `allow-same-origin` and a
+  restrictive CSP (`sandbox allow-scripts; default-src 'none'; ...`) so both
+  framed and direct `/frame` opens stay in an opaque `null` origin. Shared SVG
+  renders statically via `<img>` with `Content-Security-Policy: sandbox; default-src 'none'`
+  on `/raw`. `DOOR_HEADERS` in `bin/plugin-gateway` adds `range` (206 audio/video
+  seeking) and `x-loam-agent-name`.

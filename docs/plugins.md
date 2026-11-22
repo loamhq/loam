@@ -260,7 +260,9 @@ A theme's display faces are its own `fonts.css`, which the app serves checked
 runtime's own `plugins/` (2026-11-14, first release L9), the third shipped
 folder after loam-ui's two: `reviewer` (on by default: its timer, its
 instructions, what every agent is told about it) and `daily-notes` (off by
-default: its folder; the page's button), then `doc-comments` (off) and,
+default: its folder; the page's button), `sharing` (off: password-protected
+share links for any vault file and Files › Shared), `comments` (off: whole-file
+comments on any file, plus anchored comments and suggestions on Markdown) and,
 since 0.2.10, `images` (off: its agents' `generate_image` tool, its keys and
 settings). `default_on` is a shipped plugin's
 default and nothing more: any saved choice in `installed.json` wins, on or
@@ -389,7 +391,33 @@ contributes:
       check: builtin:gemini    # or a line run in the folder, the key on stdin
   vault.folder:                # a vault folder it uses (2026-11-14, L9)
     - setting: folder          # or path: Daily
+  plugin.service:              # a versioned loopback interface offered to peer plugins (new, 2026-11-22)
+    - interface: share.remote
+      version: 1
+      mount: /remote
 ```
+
+**`plugin.service`** *(new, 2026-11-22)* lets a server plugin advertise a
+versioned local HTTP interface to other enabled plugins without cross-imports
+or hard-coded plugin ids. Each entry declares `interface` (lowercase dotted
+name), `version` (positive integer), and `mount` (local route prefix on the
+plugin's server, e.g. `/collab` or `/remote`). While the declaring plugin is on
+and running, the broker lists it in `GET /v1/plugin-services` (with optional
+`?interface=<name>`), returning `{plugin, interface, version, mount, url}` where `url`
+is `http://127.0.0.1:<port><mount>`. A plugin server stops appearing the moment
+its switch turns off; callers degrade cleanly when no provider is present.
+Services are loopback-only — `plugin-gateway` does not route `/x/<id>/` browser
+traffic to internal-only routes unless the plugin explicitly accepts it. See
+`docs/sharing-and-comments.md` for `share.collab` v1 and `share.remote` v1.
+
+**Vault file lifecycle hooks for plugins** *(new, 2026-11-22)*. So plugins that
+attach metadata to vault files survive renames, moves, deletes, restores, and
+copies, the broker exposes three read-only endpoints under `/v1/files/`:
+`GET /v1/files/events?since=<seq>` (append-only journal of `move`, `delete`,
+and `restore` events recorded by Files UI and `mcp__loam__move_file`),
+`GET /v1/files/fingerprint?root=vault&path=…` (inode, device, size, mtime, and
+SHA-256 content hash), and `GET /v1/files/locate?root=vault&inode=…&sha256=…`
+(best-effort rediscovery after an external disk move or rename).
 
 **A `settings.entry` reads for a person** (2026-11-18, 0.2.5): `labels`
 gives a choice its words in the page's menu (the stored value is still the
@@ -454,7 +482,7 @@ value of one of its settings. It is made when the plugin is on (at the
 switch, at a setting's change) and never removed: turning a plugin off takes
 its button away and leaves the notes.
 
-**What an agent's tool is told** (2026-11-16, first for doc-comments; any
+**What an agent's tool is told** (2026-11-16; any
 plugin's `agent.tool` gets it), besides what every plugin process is told:
 `LOAM_LANE`; `LOAM_AGENT`, the persona it serves (persona lane only);
 `LOAM_VAULT` and `LOAM_WORKSPACES`, so a tool can take the absolute paths an
@@ -463,7 +491,7 @@ server's loopback address (`http://127.0.0.1:<port>/`), so the tool can be a
 thin client of the one process that writes the plugin's data. A plugin
 server trusts what it is told on loopback the way the box trusts its own
 user: a tool says which agent it is with a header of the plugin's own
-(doc-comments: `X-Loam-Agent`).
+(`sharing` and `comments`: `X-Loam-Agent`).
 
 **Lanes.** `persona` covers a persona's conversation, wakes and crons: the
 three share one workspace, and so one set of tools and one `CLAUDE.md`.
@@ -1325,8 +1353,8 @@ carry one; until then it stays a design.
 ## The share door (2026-11-16)
 
 The one path of the app's host that does not meet the owner's login:
-`/s/*`. It exists for share links (doc-comments: an outside person opens a
-doc by a password-protected link) and is general: **a plugin opts in with
+`/s/*`. It exists for share links (`sharing`: an outside person opens a
+shared file by a password-protected link) and is general: **a plugin opts in with
 `contributes: web.door: [{why: …}]`**, and the first plugin in force by id
 that has one holds it. The `why` is shown in the plugin's declaration before
 it is installed (`open_web`), because it is the plugin's reach onto the
@@ -1341,15 +1369,16 @@ open web.
   (32 to 64 of `A-Z a-z 0-9 _ -`) and only for the door's holder, as
   `/door/<token>…` on the plugin's own port with `X-Loam-Door: 1`. It passes
   an allowlist of headers: `Host`, `Content-Type`, `Content-Length`,
-  `Accept`, `Accept-Language`, `User-Agent`, `Origin`, `X-Forwarded-For`,
-  `X-Loam-Share`, the one cookie `loam_share`, and `Authorization` only when
-  it is `Bearer lak_…`. Never the login's cookie, never a header naming a
-  user. No upgrade, no chunked body, at most 2 MiB. Anything else is a 404.
+  `Accept`, `Accept-Language`, `User-Agent`, `Origin`, `Range`,
+  `X-Forwarded-For`, `X-Loam-Share`, `X-Loam-Agent-Name`, the one cookie
+  `loam_share`, and `Authorization` only when it is `Bearer lak_…`. Never the
+  login's cookie, never a header naming a user. No upgrade, no chunked body,
+  at most 2 MiB. Anything else is a 404.
 - **On the login's port** (`/x/…`) the gateway takes `X-Loam-Door` off, so
   only the door's port can say a request came through the door.
 - **The plugin** must treat a request marked `X-Loam-Door: 1` as a
   stranger's: it answers only its `/door/` routes for those, decides from
-  its own credentials (doc-comments: the link's password and its session,
+  its own credentials (`sharing`: the link's password and its session,
   or an agent key) and never from a path, a root or a header the visitor
   sent. Unmarked requests on `/door/` are refused.
 

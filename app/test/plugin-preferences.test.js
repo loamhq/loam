@@ -76,7 +76,7 @@ test('a plugin’s own settings (settings.entry) are drawn on its page and saved
   const registry = createRegistry(), calls = []
   const entries = [{ key: 'reach', label: 'Where the editor and share links work', choices: ['everywhere', 'staging'], default: 'everywhere' },
     { key: 'home', label: 'Where “Made with Loam” points', choices: null, default: '' }]
-  const row = { id: 'doc-comments', key: 'shipped:doc-comments', name: 'Comments & suggestions', layer: 'shipped', on: true, effective: true, switch: 'plugin', contributes: { 'settings.entry': entries } }
+  const row = { id: 'comments', key: 'shipped:comments', name: 'Comments & suggestions', layer: 'shipped', on: true, effective: true, switch: 'plugin', contributes: { 'settings.entry': entries } }
   const loader = { st: { rows: [row], loaded: true, failures: new Map(), writing: new Set() } }
   const api = async (method, path, body) => {
     calls.push([method, path, body])
@@ -94,7 +94,7 @@ test('a plugin’s own settings (settings.entry) are drawn on its page and saved
   select.value = 'staging'
   select.fire('change', { currentTarget: select })
   await new Promise(resolve => setImmediate(resolve))
-  assert.deepEqual(calls.at(-1), ['PATCH', '/plugins/doc-comments/settings', { values: { reach: 'staging' } }])
+  assert.deepEqual(calls.at(-1), ['PATCH', '/plugins/comments/settings', { values: { reach: 'staging' } }])
   assert.match(text(draw()), /Saved\./)
 })
 

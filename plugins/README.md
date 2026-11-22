@@ -9,7 +9,8 @@ third folder of the Shipped layer, after loam-ui's `public/themes` and
 |---|---|---|
 | `reviewer/` | the reviewer: its timer, its instructions, what agents are told of it | on |
 | `quick-actions/` | one-tap New note and Today’s note actions at the top of Files | off |
-| `doc-comments/` | comments and suggestions on Markdown docs: the calm editor, its server, the agents' `doc_*` tools (`docs/doc-comments.md`) | off |
+| `comments/` | Comments & suggestions: whole-file comments on any file type, plus the calm Markdown editor with anchored comments, suggestions, authorship and history (`docs/sharing-and-comments.md`) | off |
+| `sharing/` | Sharing: password-protected share links (`/s/<token>`) for any vault file, Files › Shared, Shared with me from other Loams, and agent sharing tools (`docs/sharing-and-comments.md`) | off |
 | `images/` | your agents make and change pictures with OpenAI or Google, saved in the vault: the agents' `generate_image` tool, its keys and settings (built in since 0.2.10; in the Market before) | off |
 | `git-backup/` | the vault and AI Spaces pushed to private git repositories of the owner's, with a deploy key per repository; health, warnings and restore (`docs/backup.md`) | off |
 

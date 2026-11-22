@@ -11,12 +11,15 @@ import ctypes
 import errno
 import fcntl
 import fnmatch
+import hashlib
+import json
 import mimetypes
 import os
 import re
 import secrets
 import stat
 import struct
+import tempfile
 import time
 import unicodedata
 import zipfile
@@ -1376,6 +1379,9 @@ def rename(payload: dict) -> dict:
         import loam_recent  # noqa: PLC0415
         loam_recent.record_rename("/".join(parts), "/".join(dest),
                                   vault=root_path("vault"))
+        record_file_event("move", root, **{"from": "/".join(parts),
+                          "to": "/".join(dest), "kind": kind,
+                          "dev": st.st_dev, "ino": st.st_ino})
     return out
 
 
@@ -1486,6 +1492,8 @@ def delete(payload: dict) -> dict:
         raise FilesError(409, f"could not move vault/{where} to trash: {exc.strerror}") from None
     finally:
         os.close(source)
+    record_file_event("delete", root, path=where, restore_id=restore_id,
+                      dev=st.st_dev, ino=st.st_ino)
     return {"ok": True, "restore_id": restore_id}
 
 
@@ -1510,7 +1518,8 @@ def restore(payload: dict) -> dict:
                 root, parts = _trash_target({"root": "vault", "path": path})
                 dest = _walk(root, parts[:-1])
                 try:
-                    if not stat.S_ISREG(os.stat("file", dir_fd=entry, follow_symlinks=False).st_mode):
+                    fst = os.stat("file", dir_fd=entry, follow_symlinks=False)
+                    if not stat.S_ISREG(fst.st_mode):
                         raise FilesError(404, "that deletion is no longer in the vault trash")
                     try:
                         _renameat2(entry, "file", dest, parts[-1])
@@ -1528,6 +1537,8 @@ def restore(payload: dict) -> dict:
         raise FilesError(404, "that deletion is no longer in the vault trash") from None
     except OSError as exc:
         raise FilesError(409, f"could not restore the vault file: {exc.strerror}") from None
+    record_file_event("restore", root, path=row["path"], restore_id=restore_id,
+                      dev=fst.st_dev, ino=fst.st_ino)
     return {**row, "ok": True}
 
 
@@ -1940,3 +1951,204 @@ def _with_md(parts: list[str]) -> list[list[str]]:
     if parts and not parts[-1].lower().endswith(".md"):
         return [parts, parts[:-1] + [parts[-1] + ".md"]]
     return [parts] if parts else []
+
+
+# --- Vault file identity & mutation events (2026-11-22) ----------------------
+# Plugins that attach metadata to any vault file (comments, share links) track
+# files across rename, move, delete and restore through three public broker
+# endpoints:
+#   GET /v1/files/events?since=<seq>      vault move/delete/restore journal
+#   GET /v1/files/fingerprint?root=&path= inode + content sha256 + row
+#   GET /v1/files/locate?root=vault&...   find a moved file by inode/doc_id/hash
+
+EVENTS_KEEP = 5000
+_DOC_ID_RE = re.compile(r"(?m)^loam_doc_id\s*:\s*([df]-[a-z0-9]{10})\s*$")
+
+
+def events_path(vault_dir: Path | None = None) -> Path:
+    env = os.environ.get("LOAM_FILES_EVENTS")
+    if env:
+        return Path(env)
+    v = vault_dir if vault_dir is not None else cfg.VAULT
+    if v == lc.VAULT:
+        return lc.STATE / "files-events.jsonl"
+    key = hashlib.sha256(str(v).encode("utf-8", "surrogatepass")).hexdigest()[:12]
+    return Path(tempfile.gettempdir()) / f"loam-files-events-{key}.jsonl"
+
+
+def _read_events_locked(path: Path) -> list[dict]:
+    if not path.is_file():
+        return []
+    out = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+            if isinstance(obj, dict) and isinstance(obj.get("seq"), int):
+                out.append(obj)
+        except ValueError:
+            continue
+    return out
+
+
+def record_file_event(op: str, root: str, *, vault_dir: Path | None = None, **fields) -> dict | None:
+    """Append one vault file mutation event (move, delete, restore) to the
+    bounded journal so plugins follow files across renames and moves."""
+    if root != "vault":
+        return None
+    path = events_path(vault_dir)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = path.with_suffix(".lock")
+        with open(lock_path, "a+", encoding="utf-8") as lf:
+            fcntl.flock(lf, fcntl.LOCK_EX)
+            try:
+                rows = _read_events_locked(path)
+                seq = (rows[-1]["seq"] + 1) if rows else 1
+                ev = {"seq": seq, "at": _iso(time.time()), "op": op,
+                      "root": root, **fields}
+                rows.append(ev)
+                if len(rows) > EVENTS_KEEP:
+                    rows = rows[-EVENTS_KEEP:]
+                tmp = path.with_suffix(".tmp")
+                tmp.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
+                               encoding="utf-8")
+                os.replace(tmp, path)
+                return ev
+            finally:
+                fcntl.flock(lf, fcntl.LOCK_UN)
+    except OSError:
+        return None
+
+
+def file_events(since: str | int | None = None) -> dict:
+    """Vault file mutation events with ``seq > since``."""
+    after = _bounded(str(since) if since is not None else None, "since", 0, 10**12)
+    path = events_path()
+    if not path.is_file():
+        return {"events": [], "seq": 0}
+    lock_path = path.with_suffix(".lock")
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(lock_path, "a+", encoding="utf-8") as lf:
+            fcntl.flock(lf, fcntl.LOCK_SH)
+            try:
+                rows = _read_events_locked(path)
+            finally:
+                fcntl.flock(lf, fcntl.LOCK_UN)
+    except OSError:
+        rows = []
+    latest = rows[-1]["seq"] if rows else 0
+    return {"events": [r for r in rows if r["seq"] > after], "seq": latest}
+
+
+def _fd_hash_and_doc_id(fd: int, size: int, is_md: bool) -> tuple[str | None, str | None]:
+    if size > DOWNLOAD_MAX:
+        return None, None
+    h = hashlib.sha256()
+    head = bytearray()
+    total = 0
+    while True:
+        chunk = os.read(fd, CHUNK)
+        if not chunk:
+            break
+        h.update(chunk)
+        total += len(chunk)
+        if is_md and len(head) < 8192:
+            head.extend(chunk[:8192 - len(head)])
+        if total > DOWNLOAD_MAX:
+            return None, None
+    doc_id = None
+    if is_md and head:
+        try:
+            text = head.decode("utf-8", errors="ignore")
+            m = FRONTMATTER.match(text)
+            if m and m.group(2):
+                dm = _DOC_ID_RE.search(m.group(2))
+                if dm:
+                    doc_id = dm.group(1)
+        except Exception:
+            pass
+    return "sha256:" + h.hexdigest(), doc_id
+
+
+def fingerprint(root: str, raw_path: str | None) -> dict:
+    """A regular file's row plus its filesystem identity (``dev``, ``ino``),
+    content digest (``sha256``), and frontmatter ``doc_id`` if Markdown."""
+    fd, st, parts = open_file(root, raw_path)
+    is_md = _ext(parts[-1]) in ("md", "markdown")
+    try:
+        digest, doc_id = _fd_hash_and_doc_id(fd, st.st_size, is_md)
+    finally:
+        os.close(fd)
+    out = _entry(root, parts, st, include_workspace=True)
+    out.update({"dev": st.st_dev, "ino": st.st_ino, "sha256": digest})
+    if doc_id:
+        out["doc_id"] = doc_id
+    return out
+
+
+def locate(root: str, *, dev: str | int | None = None, ino: str | int | None = None,
+           sha256: str | None = None, size: str | int | None = None,
+           doc_id: str | None = None) -> dict:
+    """Find a moved visible vault file without following links.
+
+    Tries in order: unique ``(dev, ino)`` match, unique Markdown frontmatter
+    ``doc_id`` match, then unique ``(size, sha256)`` match (for non-empty files).
+    Never guesses when multiple files match."""
+    if root != "vault":
+        raise FilesError(400, "locate is for the vault root only")
+    want_dev = int(dev) if dev not in (None, "") and str(dev).isdigit() else None
+    want_ino = int(ino) if ino not in (None, "") and str(ino).isdigit() else None
+    want_size = int(size) if size not in (None, "") and str(size).isdigit() else None
+    want_hash = sha256 if isinstance(sha256, str) and sha256.startswith("sha256:") else None
+    want_did = doc_id if isinstance(doc_id, str) and re.fullmatch(r"[df]-[a-z0-9]{10}", doc_id) else None
+    if (want_dev is None or want_ino is None) and not want_did and not (want_hash and want_size):
+        raise FilesError(400, "give dev+ino, doc_id, or sha256+size")
+    files_, _, truncated = _vault_tree()
+    base = root_path("vault")
+    ino_hits, did_hits, hash_hits = [], [], []
+    for parts in files_:
+        full = base.joinpath(*parts)
+        try:
+            st = os.stat(full, follow_symlinks=False)
+        except OSError:
+            continue
+        if not stat.S_ISREG(st.st_mode):
+            continue
+        if want_dev is not None and want_ino is not None and st.st_dev == want_dev and st.st_ino == want_ino:
+            ino_hits.append((parts, st))
+        if want_did and _ext(parts[-1]) in ("md", "markdown") and st.st_size <= TEXT_READ_MAX:
+            try:
+                fd, fst = open_regular_at(base, parts)
+                try:
+                    head = os.read(fd, 8192).decode("utf-8", errors="ignore")
+                finally:
+                    os.close(fd)
+                m = FRONTMATTER.match(head)
+                if m and m.group(2):
+                    dm = _DOC_ID_RE.search(m.group(2))
+                    if dm and dm.group(1) == want_did:
+                        did_hits.append((parts, fst))
+            except OSError:
+                pass
+        if want_hash and want_size and want_size > 0 and st.st_size == want_size and st.st_size <= DOWNLOAD_MAX:
+            try:
+                fd, fst = open_regular_at(base, parts)
+                try:
+                    digest, _ = _fd_hash_and_doc_id(fd, fst.st_size, False)
+                finally:
+                    os.close(fd)
+                if digest == want_hash:
+                    hash_hits.append((parts, fst))
+            except OSError:
+                pass
+    for by, hits in (("inode", ino_hits), ("doc_id", did_hits), ("sha256", hash_hits)):
+        if len(hits) == 1:
+            parts, st = hits[0]
+            row = _entry("vault", parts, st, include_workspace=True)
+            row.update({"dev": st.st_dev, "ino": st.st_ino})
+            return {"found": True, "by": by, "resource": row}
+    return {"found": False, "truncated": truncated}

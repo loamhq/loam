@@ -11,7 +11,7 @@ const out = process.env.PANEL_HISTORY_EVIDENCE
 const before = process.env.PANEL_HISTORY_BASELINE === '1'
 const text = '# The weekly plan\n\nSet aside Friday morning for a quiet review. Bring the open questions from our conversation.\n\n## Next steps\n\n- Read the notes from Monday.\n- Choose one idea to try next week.\n- Share the revised outline.\n\n' +
   Array.from({ length: 18 }, (_, i) => '## Review ' + (i + 1) + '\n\nKeep the original notes close by. Record the decision and who will follow up.').join('\n\n')
-const plugin = new URL('../../plugins/doc-comments/', import.meta.url)
+const plugin = new URL('../../plugins/comments/', import.meta.url)
 const source = await readFile('public/app.js', 'utf8')
 if (out) await mkdir(out, { recursive: true })
 try {
@@ -33,10 +33,10 @@ try {
       app.routes['GET /v1/threads/a-quieter-week'] = (_, res) => res.end(JSON.stringify({ ...records, messages }))
       const appearance = { theme: 'latte', mode, size: 100 }
       app.routes['GET /v1/settings/appearance'] = (_, res) => res.end(JSON.stringify({ phone: appearance, desktop: appearance }))
-      app.routes['GET /v1/plugins'] = (_, res) => res.end(JSON.stringify({ plugins: [{ id: 'doc-comments', version: '1.0.0', api: 0, layer: 'default', switch: 'plugin', effective: true, on: true, has: { page_main: true } }] }))
+      app.routes['GET /v1/plugins'] = (_, res) => res.end(JSON.stringify({ plugins: [{ id: 'comments', version: '1.0.0', api: 0, layer: 'default', switch: 'plugin', effective: true, on: true, has: { page_main: true } }] }))
       for (const rel of await readdir(plugin, { recursive: true })) {
         if (!/^(page|assets)\/.*\.(js|css)$/.test(rel)) continue
-        app.routes['GET /v1/plugins/doc-comments/files/' + rel] = async (_, res) => {
+        app.routes['GET /v1/plugins/comments/files/' + rel] = async (_, res) => {
           res.setHeader('content-type', rel.endsWith('.css') ? 'text/css' : 'text/javascript')
           res.end(await readFile(new URL(rel, plugin)))
         }
@@ -50,7 +50,7 @@ try {
       const errors = []
       page.on('pageerror', e => { errors.push(e.message); console.error(e.message) })
       await page.route('**/app.js', route => route.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.testPage = page;' }))
-      await page.route('**/x/doc-comments/**', route => route.fulfill({ json: { text, revision: 'r1', notes: [], links: [], can: { edit: true, comment: true }, reach: 'everywhere' } }))
+      await page.route('**/x/comments/**', route => route.fulfill({ json: { text, revision: 'r1', notes: [], can: { edit: true, comment: true }, reach: 'everywhere' } }))
       const capture = async name => {
         await page.evaluate(async () => { await document.fonts.ready; await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame) })
         if (out) await page.screenshot({ path: join(out, name + '-' + width + '-' + mode + '.png'), animations: 'disabled' })
@@ -287,7 +287,7 @@ try {
       const tabs = page.locator(wide ? '.rail-tabs' : '.navpill:visible')
       const selectTab = name => tabs.getByRole('button', { name, exact: true }).click()
       const noBack = async () => assert.equal(await main.locator('.panel-history-back:visible').count(), 0)
-      const vault = page.getByRole('button', { name: /Vault Your notes/ })
+      const vault = page.getByRole('button', { name: /Your files/ })
       if (wide) {
         await selectTab('Chats')
         await page.locator('.tt-row[title="A little room for the week"]').click()
