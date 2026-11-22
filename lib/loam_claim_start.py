@@ -53,8 +53,6 @@ def prepare() -> None:
         meta["engines"] = {}
         meta["models"] = {}
         threads._write_atomic(path, threads.render_front(meta))
-        board = threads.VAULT / threads.GENERAL_BOARD
-        threads._write_atomic(board, threads.empty_board(meta))
         for name in ("threads.json", "sessions.json", "handoffs.json"):
             state = threads.load_state(name)
             if state.pop(threads.GENERAL_ID, None) is not None:

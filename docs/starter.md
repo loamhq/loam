@@ -62,9 +62,8 @@ A first-weeks starter marker identifies this Hello as the place for release
 news, even if renamed. Older starters keep their original routing.
 
 Each update identifies the original Hello by its seed marker. It compares the
-installed greeting, board and workspace files with historical starter templates
-expanded for this install. Until the owner replies, a stock preset and board
-can refresh. Each workspace file refreshes independently if its bytes still
+installed greeting and workspace files with historical starter templates
+expanded for this install. Until the owner replies, a stock preset can refresh. Each workspace file refreshes independently if its bytes still
 match a shipped version. The first-week clock starts at claim.
 
 **Once per install.** A marker, `<state>/agents/starter.json` (the agent,

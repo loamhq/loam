@@ -112,8 +112,6 @@ def refresh() -> None:
             if (not meta.get("hello") or meta.get("archived") or meta["default"] != agent
                     or any(threads.is_owner(m["author"]) for m in messages)):
                 return
-            refresh_file(threads.VAULT / meta["board"], threads.empty_board(meta),
-                         versions("hello-board.md"))
             if len(messages) != 1:
                 return
             msg = messages[0]

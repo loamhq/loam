@@ -167,9 +167,8 @@ connected provider those runs support. An explicit unsupported provider
 pauses those runs. The nightly reviewer can use Claude Code or Antigravity
 and waits if neither is connected and automatic selection is on.
 
-**When something needs attention.** Loam itself posts no notices in a thread
-or on General's board. A turn that is waiting for room, could not run or ended
-without a reply shows so on the turn in the app. An agent whose own
+**When something needs attention.** The app shows a turn’s status in its thread when it is waiting for room,
+could not run or ended without a reply. An agent whose own
 scheduled run failed is told at the top of its next turn. A problem that is
 no one agent's (drift, memory pressure, a check or a plugin's event, an
 update) goes to the one agent the owner chose in

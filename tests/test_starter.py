@@ -342,9 +342,9 @@ def check_retirement(ws: Path) -> None:
     (ws / "nights.md").write_text(edited)
     refresh()
     meta, messages, path = threads.read(tid)
-    check("legacy marker without first_weeks refreshes greeting, board and engine",
+    check("refreshing the legacy greeting and engine preserves the original note",
           (messages[0]["text"], messages[0]["id"], meta["engines"], board.read_text()),
-          (st.read_hello()[1], msg["id"], {}, threads.empty_board(meta)))
+          (st.read_hello()[1], msg["id"], {}, previous_board))
     check("each unchanged sibling refreshes and the edited Iris file survives",
           [(ws / name).read_text() for name in ("map.md", *st.OWN_FILES)],
           [st.draft()["map"], st.own_files()["how-i-am-here.md"], edited])
@@ -389,9 +389,9 @@ def check_retirement(ws: Path) -> None:
     with patch.object(claim, "unclaimed", return_value=True), patch.object(
             subprocess, "check_output", return_value=""):
         claim.prepare()
-    check("claim clears the old facts, General message, board and failure log",
+    check("claim clears the old facts, General message and failure log and preserves inbox notes",
           (attention.pending(), threads.read("general")[1], general.read_text(), log.exists()),
-          ([], [], "# General — board\n\n", False))
+          ([], [], "An old drift finding", False))
     general.write_text("The owner read this.")
     try:
         claim.prepare()
