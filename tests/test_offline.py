@@ -61,6 +61,27 @@ def test_ranges() -> None:
         assert not loam_offline.global_ipv4(ip), ip
 
 
+def test_child_propagation() -> None:
+    saved_offline = os.environ.pop("LOAM_OFFLINE", None)
+    saved_test = os.environ.pop("LOAM_TEST", None)
+    try:
+        assert loam_offline.offline()
+        assert os.environ.get("LOAM_TEST") == "1"
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("LOAM_OFFLINE", "LOAM_ATTENTION_DIR", "LOAM_CONFIG")}
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        out = subprocess.run([str(ROOT / "bin" / "loam"), "tell", "direct child probe",
+                              "--by", "test"], env=env, capture_output=True, text=True, timeout=30)
+        assert out.returncode == 1, (out.returncode, out.stdout, out.stderr)
+        assert out.stdout.strip().startswith("failed: refused in a test:"), (out.stdout, out.stderr)
+    finally:
+        os.environ.pop("LOAM_TEST", None)
+        if saved_offline is not None:
+            os.environ["LOAM_OFFLINE"] = saved_offline
+        if saved_test is not None:
+            os.environ["LOAM_TEST"] = saved_test
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

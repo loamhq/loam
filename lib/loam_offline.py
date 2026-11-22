@@ -13,10 +13,11 @@ import urllib.parse
 from pathlib import Path
 
 ENV = "LOAM_OFFLINE"
+TEST_ENV = "LOAM_TEST"
 
 
 class Offline(RuntimeError):
-    """A test reached for a real external service."""
+    """A test reached for a real external service or live install store."""
 
 
 class Blocked(ConnectionRefusedError):
@@ -24,15 +25,32 @@ class Blocked(ConnectionRefusedError):
     an unreachable network handles this the same way."""
 
 
-def offline() -> bool:
-    if os.environ.get(ENV):
+def _running_test_script() -> bool:
+    if os.environ.get("PYTEST_CURRENT_TEST"):
         return True
     main = sys.modules.get("__main__")
     script = getattr(main, "__file__", None) or (sys.argv[0] if sys.argv else "")
-    if not script:
-        return False
-    p = Path(script).resolve()
-    return p.parent.name == "tests" and p.name.startswith("test_")
+    if script:
+        p = Path(script).resolve()
+        if p.parent.name == "tests" and p.name.startswith("test_"):
+            return True
+        if p.name in ("__main__.py", "pytest", "pytest3") and any(
+            Path(a).name.startswith("test_") and Path(a).suffix == ".py"
+            for a in sys.argv[1:]
+        ):
+            return True
+    return False
+
+
+def offline() -> bool:
+    if os.environ.get(ENV) or os.environ.get(TEST_ENV):
+        return True
+    if _running_test_script():
+        # Propagate test detection to child processes (e.g., bin/loam-tell, bin/wake)
+        # without setting LOAM_OFFLINE (which marks tests/run-all's full seal).
+        os.environ.setdefault(TEST_ENV, "1")
+        return True
+    return False
 
 
 def guard(what: str) -> None:

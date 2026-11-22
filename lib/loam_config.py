@@ -11,9 +11,37 @@ import pwd
 import tomllib
 from pathlib import Path
 
-CONFIG_FILE = Path(os.environ.get("LOAM_CONFIG") or "/etc/loam/loam.toml")
+INSTALL_CONFIG_FILE = Path("/etc/loam/loam.toml")
+CONFIG_FILE = Path(os.environ.get("LOAM_CONFIG") or str(INSTALL_CONFIG_FILE))
 
 _CHECKOUT = Path(__file__).resolve().parent.parent
+
+try:
+    import loam_offline as _loam_offline
+    _loam_offline.offline()
+except ImportError:
+    pass
+
+
+def install_state_dir() -> Path:
+    """The host install's live state folder (from /etc/loam/loam.toml or the
+    current user's default), independent of LOAM_CONFIG."""
+    try:
+        raw = tomllib.loads(INSTALL_CONFIG_FILE.read_text())
+    except OSError:
+        raw = {}
+    paths = raw.get("paths") if isinstance(raw.get("paths"), dict) else {}
+    if paths.get("state"):
+        return Path(str(paths["state"])).expanduser().resolve()
+    if paths.get("home"):
+        home = Path(str(paths["home"])).expanduser()
+    else:
+        user = raw.get("user")
+        try:
+            home = Path(pwd.getpwnam(user).pw_dir) if user else Path(pwd.getpwuid(os.getuid()).pw_dir)
+        except KeyError:
+            home = HOME
+    return (home / ".local" / "state" / "loam").resolve()
 
 
 def _load() -> dict:
