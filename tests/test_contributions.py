@@ -280,6 +280,137 @@ with tempfile.TemporaryDirectory() as tmp:
           and seq == ["disable", "daemon-reload", "daemon-reload", "enable", "start"], seq)
     check("...and its file is back where it was", (d / "loam-x.timer").is_file()
           and not (d / ".loam-x.timer.aside").exists())
+    f = Fake("failed", "373094343313")
+    did = loam_units.arm_timer("loam-x.timer", d, run=f)
+    seq = [a[0] for a in f.calls if a[0] != "show"]
+    check("a failed timer that stood before: reset-failed before making fresh and starting",
+          did == "made fresh, started"
+          and seq == ["reset-failed", "disable", "daemon-reload", "daemon-reload", "enable", "start"],
+          seq)
+    check("...and its file is back where it was after recovery", (d / "loam-x.timer").is_file()
+          and not (d / ".loam-x.timer.aside").exists())
+
+
+# -- apply_units: ordering, recovery, removal, and test isolation ---------------
+
+class FakeApplyCtl:
+    """Fake systemctl that tracks unit state and checks on-disk invariants."""
+    def __init__(self, unit_dir: Path):
+        self.unit_dir = unit_dir
+        self.calls: list[tuple[str, ...]] = []
+        self.states: dict[str, dict[str, str]] = {}
+        self.service_present_on_disable: list[tuple[str, bool]] = []
+
+    def __call__(self, *args):
+        self.calls.append(args)
+        cmd = args[0]
+        if cmd == "show":
+            prop = args[2]
+            unit = args[-1]
+            val = self.states.get(unit, {}).get(prop, "0" if "Timestamp" in prop else "")
+            return subprocess.CompletedProcess(args, 0, val + "\n", "")
+        if cmd == "disable" and "--now" in args:
+            unit = args[-1]
+            if unit.endswith(".timer"):
+                svc = unit[:-len(".timer")] + ".service"
+                self.service_present_on_disable.append((unit, (self.unit_dir / svc).is_file()))
+            st = self.states.setdefault(unit, {})
+            st["ActiveState"] = "inactive"
+            st["UnitFileState"] = "disabled"
+        elif cmd == "disable":
+            unit = args[-1]
+            self.states.setdefault(unit, {})["UnitFileState"] = "disabled"
+        elif cmd == "enable":
+            unit = args[-1]
+            self.states.setdefault(unit, {})["UnitFileState"] = "enabled"
+        elif cmd == "start":
+            unit = args[-1]
+            st = self.states.setdefault(unit, {})
+            st["ActiveState"] = "active"
+            st.setdefault("InactiveExitTimestampMonotonic", "100")
+        elif cmd == "reset-failed":
+            for unit in args[1:]:
+                st = self.states.get(unit)
+                if st and st.get("ActiveState") == "failed":
+                    st["ActiveState"] = "inactive"
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+
+check("real_layer is False inside a test process", c.real_layer() is False, c.real_layer())
+with tempfile.TemporaryDirectory() as tmp:
+    udir = Path(tmp) / "units"
+    udir.mkdir()
+    ctl = FakeApplyCtl(udir)
+    plug_v1 = [{"id": "boards", "folder": Path(tmp), "settings": Path(tmp) / "s",
+                "data": Path(tmp) / "d",
+                "contributes": {"schedule.kind": [
+                    {"name": "expire", "schedule": "*-*-* *:23:00",
+                     "calendar": "*-*-* *:23:00", "run": "true", "timeout": 300}]}}]
+
+    # 1. Fresh install writes both files, reloads, and arms the timer.
+    acts = c.apply_units(unit_dir=udir, plugins=plug_v1, run=ctl)
+    check("apply_units install: .service written before .timer, then armed",
+          [a["unit"] for a in acts] == ["loam-plugin-boards--expire.service",
+                                        "loam-plugin-boards--expire.timer"]
+          and acts[1].get("armed") == "started"
+          and (udir / "loam-plugin-boards--expire.service").is_file()
+          and (udir / "loam-plugin-boards--expire.timer").is_file(),
+          (acts, ctl.calls))
+
+    # 2. Re-applying a changed service (e.g. timeout/update) reloads without stopping active timer.
+    ctl.calls.clear()
+    plug_v2 = [{"id": "boards", "folder": Path(tmp), "settings": Path(tmp) / "s",
+                "data": Path(tmp) / "d",
+                "contributes": {"schedule.kind": [
+                    {"name": "expire", "schedule": "*-*-* *:23:00",
+                     "calendar": "*-*-* *:23:00", "run": "true", "timeout": 120}]}}]
+    acts = c.apply_units(unit_dir=udir, plugins=plug_v2, run=ctl)
+    check("apply_units recut: reloads standing timer without stopping or restarting it",
+          acts == [{"unit": "loam-plugin-boards--expire.service", "action": "recut"}]
+          and ("daemon-reload",) in ctl.calls
+          and not any(a[0] in ("stop", "start", "disable") for a in ctl.calls),
+          (acts, ctl.calls))
+
+    # 3. Re-applying when the timer is failed (even with unchanged files) recovers it cleanly.
+    ctl.calls.clear()
+    ctl.states["loam-plugin-boards--expire.timer"].update(
+        ActiveState="failed", InactiveExitTimestampMonotonic="373094343313")
+    acts = c.apply_units(unit_dir=udir, plugins=plug_v2, run=ctl)
+    seq = [a[0] for a in ctl.calls if a[0] != "show"]
+    check("apply_units recovers a failed timer via reset-failed + fresh start",
+          acts == [{"unit": "loam-plugin-boards--expire.timer", "action": "recovered",
+                    "armed": "made fresh, started"}]
+          and seq == ["reset-failed", "disable", "daemon-reload", "daemon-reload", "enable", "start"]
+          and ctl.states["loam-plugin-boards--expire.timer"]["ActiveState"] == "active",
+          (acts, seq))
+
+    # 4. Re-applying when an active timer is disabled re-enables without restarting.
+    ctl.calls.clear()
+    ctl.states["loam-plugin-boards--expire.timer"]["UnitFileState"] = "disabled"
+    acts = c.apply_units(unit_dir=udir, plugins=plug_v2, run=ctl)
+    check("apply_units re-enables an active but disabled timer without starting",
+          acts == [{"unit": "loam-plugin-boards--expire.timer", "action": "enabled"}]
+          and [a[0] for a in ctl.calls if a[0] != "show"] == ["enable"],
+          (acts, ctl.calls))
+
+    # 5. Turning the plugin off disables/stops .timer BEFORE unlinking .service, then resets failed.
+    ctl.calls.clear()
+    wants = udir / "timers.target.wants"
+    wants.mkdir()
+    (wants / "loam-plugin-boards--expire.timer").symlink_to(
+        udir / "loam-plugin-boards--expire.timer")
+    acts = c.apply_units(unit_dir=udir, plugins=[], run=ctl)
+    check("apply_units remove: .service still exists when .timer is disabled --now",
+          ctl.service_present_on_disable == [("loam-plugin-boards--expire.timer", True)],
+          ctl.service_present_on_disable)
+    check("...both unit files and wants symlink gone, reloaded and reset-failed",
+          not (udir / "loam-plugin-boards--expire.service").exists()
+          and not (udir / "loam-plugin-boards--expire.timer").exists()
+          and not (wants / "loam-plugin-boards--expire.timer").exists()
+          and ("daemon-reload",) in ctl.calls
+          and any(a[0] == "reset-failed" and "loam-plugin-boards--expire.timer" in a
+                  for a in ctl.calls),
+          ctl.calls)
 
 import loam_schedule  # noqa: E402
 

@@ -23,6 +23,12 @@ except ImportError:
     pass
 
 
+def is_install_config() -> bool:
+    """True when this process reads the host's own configuration, not a test's
+    scratch LOAM_CONFIG."""
+    return CONFIG_FILE.resolve() == INSTALL_CONFIG_FILE.resolve()
+
+
 def install_state_dir() -> Path:
     """The host install's live state folder (from /etc/loam/loam.toml or the
     current user's default), independent of LOAM_CONFIG."""

@@ -215,6 +215,22 @@ FAILED["user"] = "loam-wake-ada.service loaded failed failed x\n"
 check("...a persona's own failed wake is not machinery",
       all(f["ok"] for f in ck.units(fake_systemctl)))
 
+# A plugin timer that failed and then became active again (absent from --failed)
+# is not reported on the next check, and any undelivered notice is withdrawn.
+healthy()
+FAILED["user"] = "loam-plugin-boards--expire.timer loaded failed failed x\n"
+TOLD.clear()
+s_fail = ck.tick(AT, daily=True, tell=tell)
+check("...a failed plugin timer is reported",
+      any(f["id"] == "unit:loam-plugin-boards--expire.timer" and f["ok"] is False
+          for f in s_fail["facts"]))
+FAILED["user"] = ""
+s_ok = ck.tick(AT + 60, daily=True, tell=None)
+check("...once active again it is not reported and its pending notice is withdrawn",
+      s_ok["ok"] and not any(r["key"] == f"{ck.BY}:unit:loam-plugin-boards--expire.timer"
+                             for r in records()),
+      (s_ok["ok"], [r["key"] for r in records()]))
+
 
 def drift_false():
     DRIFT["facts"] = [ck.fact("drift:installed unit loam-x.timer", False,

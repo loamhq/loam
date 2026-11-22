@@ -50,10 +50,12 @@ still being on.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import re
 import subprocess
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 import loam_config as lc
@@ -1115,9 +1117,10 @@ def desired_units(plugins: list[dict] | None = None) -> dict[str, str]:
     return out
 
 
-def live_units() -> dict[str, str]:
+def live_units(unit_dir: Path | None = None) -> dict[str, str]:
+    base = lc.USER_UNIT_DIR if unit_dir is None else unit_dir
     out = {}
-    for path in sorted(lc.USER_UNIT_DIR.glob(f"{UNIT_PREFIX}*--*")):
+    for path in sorted(base.glob(f"{UNIT_PREFIX}*--*")):
         if path.suffix in (".service", ".timer") and path.is_file():
             out[path.name] = path.read_text(encoding="utf-8")
     return out
@@ -1125,53 +1128,131 @@ def live_units() -> dict[str, str]:
 
 def real_layer() -> bool:
     """Identify the installed Yours layer before touching live units or rendering personas.
-    A scratch layer must reconcile only its own state.
+    A test process, scratch LOAM_CONFIG, scratch Yours layer, or LOAM_PLUGIN_UNITS=0
+    must reconcile only its own state and never touch the host's units or workspaces.
     """
+    import loam_offline  # noqa: PLC0415
+    if loam_offline.offline() or os.environ.get("LOAM_PLUGIN_UNITS") == "0":
+        return False
     import loam_plugins  # noqa: PLC0415
-    return loam_plugins.yours_root() == loam_plugins.YOURS_DEFAULT
+    return (lc.is_install_config()
+            and loam_plugins.yours_root().resolve() == loam_plugins.YOURS_DEFAULT.resolve())
 
 
-def apply_units(dry: bool = False) -> list[dict]:
-    """Make the unit directory hold exactly the contributed timers. A new
-    timer is armed fresh; a changed one is moved by daemon-reload alone; a
-    gone one is disabled, stopped and its files removed."""
+@contextmanager
+def _units_lock():
+    import loam_plugin_servers  # noqa: PLC0415
+    state = loam_plugin_servers.state_dir()
+    state.mkdir(parents=True, exist_ok=True)
+    with open(state / "units.lock", "a+", encoding="utf-8") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+
+
+def apply_units(dry: bool = False, *, unit_dir: Path | None = None,
+                plugins: list[dict] | None = None, run=None) -> list[dict]:
+    """Make the unit directory hold exactly the contributed timers.
+    Removed timers and boot services are disabled and stopped before any unit
+    file is unlinked (so a reload never sees a timer's service vanish) and
+    cleared with reset-failed. Installed and recut services are written
+    atomically before their timers, moved by daemon-reload without stopping
+    standing timers, and any installed, inactive, or failed wanted timer is
+    armed fresh."""
     import loam_units  # noqa: PLC0415
-    if not real_layer():
-        return []
-    want, live = desired_units(), live_units()
-    actions = []
-    for name in sorted(set(want) | set(live)):
-        if want.get(name) == live.get(name):
-            continue
-        timer = name.endswith(".timer")
-        boot = "WantedBy=default.target" in (want.get(name) or live.get(name) or "")
-        if name not in want:
+    live_host = unit_dir is None
+    if live_host:
+        if not real_layer():
+            return []
+        target_dir = lc.USER_UNIT_DIR
+    else:
+        target_dir = unit_dir
+        if run is None and not dry:
+            import loam_offline  # noqa: PLC0415
+            if loam_offline.offline():
+                raise loam_offline.Offline(
+                    "refused in a test: apply_units without a stubbed systemctl")
+    ctl = run or loam_units.systemctl
+    guard = _units_lock() if (live_host and not dry) else nullcontext()
+    with guard:
+        want, live = desired_units(plugins), live_units(target_dir)
+        actions: list[dict] = []
+
+        # 1. Remove gone units: stop and disable timers/boot units BEFORE
+        # unlinking any unit file, so systemd never sees a live timer's
+        # triggered service vanish across a reload.
+        removed = sorted(set(live) - set(want),
+                         key=lambda n: (not n.endswith(".timer"), n))
+        for name in removed:
             actions.append({"unit": name, "action": "removed"})
-            if not dry:
+        if removed and not dry:
+            for name in removed:
+                timer = name.endswith(".timer")
+                boot = "WantedBy=default.target" in (live.get(name) or "")
                 if timer or boot:
-                    subprocess.run(["systemctl", "--user", "disable", "--now", name],
-                                   capture_output=True, check=False)
-                (lc.USER_UNIT_DIR / name).unlink(missing_ok=True)
-            continue
-        actions.append({"unit": name, "action": "installed" if name not in live else "recut"})
+                    ctl("disable", "--now", name)
+            for name in removed:
+                (target_dir / name).unlink(missing_ok=True)
+                for wants in target_dir.glob("*.wants"):
+                    (wants / name).unlink(missing_ok=True)
+
+        # 2. Install or recut wanted units: write .service before .timer via
+        # atomic rename so a concurrent reload or timer fire always sees a
+        # complete service file on disk.
+        changed = sorted((n for n in want if want[n] != live.get(n)),
+                         key=lambda n: (n.endswith(".timer"), n))
+        for name in changed:
+            actions.append({"unit": name, "action": "installed" if name not in live else "recut"})
+            if not dry:
+                target_dir.mkdir(parents=True, exist_ok=True)
+                tmp = target_dir / f".{name}.{os.getpid()}.tmp"
+                tmp.write_text(want[name], encoding="utf-8")
+                os.replace(tmp, target_dir / name)
+
+        # 3. Reload systemd and clear tombstones for removed units.
+        if actions and not dry:
+            ctl("daemon-reload")
+            if removed:
+                ctl("reset-failed", *removed)
+
+        # 4. Arm installed timers, recover any inactive/failed wanted timer,
+        # and ensure every wanted timer/boot service is enabled without
+        # disturbing standing active timers.
         if not dry:
-            lc.USER_UNIT_DIR.mkdir(parents=True, exist_ok=True)
-            tmp = lc.USER_UNIT_DIR / f".{name}.tmp"
-            tmp.write_text(want[name], encoding="utf-8")
-            os.replace(tmp, lc.USER_UNIT_DIR / name)
-    if actions and not dry:
-        subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True,
-                       check=False)
-        for a in actions:
-            if a["action"] == "installed" and a["unit"].endswith(".timer"):
-                a["armed"] = loam_units.arm_timer(a["unit"])
-            elif (a["action"] == "installed"
-                  and "WantedBy=default.target" in want.get(a["unit"], "")):
-                # Enabled, never started: a boot entry runs at the next start.
-                subprocess.run(["systemctl", "--user", "enable", a["unit"]],
-                               capture_output=True, check=False)
-                a["enabled"] = "for the next start of the manager"
-    return actions
+            by_unit = {a["unit"]: a for a in actions}
+            for name in sorted(want):
+                if name.endswith(".timer"):
+                    act = by_unit.get(name)
+                    if act and act["action"] == "installed":
+                        act["armed"] = loam_units.arm_timer(name, target_dir, run=ctl)
+                        continue
+                    state = loam_units._show(name, "ActiveState", ctl)
+                    if state != "active":
+                        armed = loam_units.arm_timer(name, target_dir, run=ctl)
+                        if act is not None:
+                            act["armed"] = armed
+                        else:
+                            actions.append({"unit": name, "action": "recovered", "armed": armed})
+                    elif loam_units._show(name, "UnitFileState", ctl) != "enabled":
+                        ctl("enable", name)
+                        if act is not None:
+                            act["enabled"] = True
+                        else:
+                            actions.append({"unit": name, "action": "enabled"})
+                elif "WantedBy=default.target" in want[name]:
+                    act = by_unit.get(name)
+                    if act and act["action"] == "installed":
+                        ctl("enable", name)
+                        act["enabled"] = "for the next start of the manager"
+                    elif loam_units._show(name, "UnitFileState", ctl) != "enabled":
+                        ctl("enable", name)
+                        if act is not None:
+                            act["enabled"] = "for the next start of the manager"
+                        else:
+                            actions.append({"unit": name, "action": "enabled"})
+        return actions
 
 
 # ---------------------------------------------------------------------------

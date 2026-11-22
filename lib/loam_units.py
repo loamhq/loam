@@ -108,17 +108,24 @@ def arm_timer(timer: str, unit_dir: Path | None = None,
     flags = ["--runtime"] if runtime else []
     ctl = run
 
-    if _show(timer, "ActiveState", run) == "active":
+    state = _show(timer, "ActiveState", run)
+    if state == "active":
         ctl("enable", *flags, timer)
         return "standing"
+    if state == "failed":
+        # A failed unit stays pinned in systemd across daemon-reload, keeping
+        # its previous activation timestamp unless cleared before making fresh.
+        ctl("reset-failed", timer)
     did = "started"
     if stood_before(timer, run):
         path = unit_dir / timer
         aside = unit_dir / f".{timer}.aside"
         ctl("disable", *flags, timer)
         os.replace(path, aside)
-        ctl("daemon-reload")
-        os.replace(aside, path)
+        try:
+            ctl("daemon-reload")
+        finally:
+            os.replace(aside, path)
         ctl("daemon-reload")
         did = "made fresh, started"
     ctl("enable", *flags, timer)

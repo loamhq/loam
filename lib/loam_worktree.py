@@ -1205,7 +1205,7 @@ def sealed_paths() -> list[Path]:
     out = []
     for path in (lc.VAULT, lc.WORKSPACES, lc.PROJECTS, lc.PLUGINS, lc.STATE,
                  lc.LOGS, lc.JOBS, lc.REVIEWER_STATE, lc.SECRETS_ENV.parent,
-                 lc.WAKE_ENV.parent, lc.RUNTIME_DIR):
+                 lc.WAKE_ENV.parent, lc.USER_UNIT_DIR, lc.RUNTIME_DIR):
         if not path.is_dir() or path in out:
             continue
         if any(k == path or path in k.parents for k in keep):
