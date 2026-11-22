@@ -47,7 +47,7 @@ try {
           const measured = await page.evaluate(() => {
             const root = getComputedStyle(document.documentElement)
             const tokens = Object.fromEntries([...root].filter(k => k.startsWith('--')).sort().map(k => [k, root.getPropertyValue(k).trim()]))
-            const components = Object.fromEntries(['.railtab.on', '.tt-title', '.tt-message .md', '#draft', '.tt-board-item', '.theme-preview[data-look="latte"]', '.theme-preview[data-look="plain"]'].map(selector => {
+            const components = Object.fromEntries(['.railtab.on', '.tt-title', '.tt-message .md', '#draft', '.theme-preview[data-look="latte"]', '.theme-preview[data-look="plain"]'].map(selector => {
               const el = document.querySelector(selector); if (!el) return [selector, null]
               const s = getComputedStyle(el), r = el.getBoundingClientRect()
               return [selector, { color: s.color, background: s.backgroundColor, font: s.font, radius: s.borderRadius, x: r.x, y: r.y, width: r.width, height: r.height }]
@@ -70,8 +70,6 @@ try {
         await page.evaluate(() => __regression.threads.open('a-quieter-week'))
         await page.waitForFunction(() => !__regression.threads.st.open.loading && !__regression.threads.st.open.refreshing)
         await page.locator('.tt-message').first().waitFor(); await shot('thread')
-        await page.getByRole('button', { name: 'Board', exact: true }).click(); await page.locator('.tt-board-item').first().waitFor(); await shot('board')
-        await page.getByRole('button', { name: 'Edit board', exact: true }).click(); await page.getByRole('button', { name: 'Done', exact: true }).waitFor(); await shot('done')
         await page.getByRole('button', { name: 'Done', exact: true }).click()
         await page.evaluate(() => __regression.goSettings('appearance')); await page.getByRole('group', { name: 'Theme', exact: true }).waitFor()
         await page.locator('.theme-cover').evaluateAll(nodes => Promise.all(nodes.map(n => { n.loading = 'eager'; return n.decode() }))); await shot('appearance')

@@ -114,7 +114,7 @@ try {
         }
         if (!before) {
           await page.keyboard.press('Tab')
-          for (const sel of ['.tt-board-button', '.plusbtn', '.modelbtn', '.roundmic', '.roundsend']) {
+          for (const sel of ['.plusbtn', '.modelbtn', '.roundmic', '.roundsend']) {
             const control = page.locator(sel).first(); await control.focus()
             const outline = await control.evaluate(n => { const c = getComputedStyle(n); return [c.outlineStyle, parseFloat(c.outlineWidth), n === document.activeElement, n.matches(':focus-visible')] })
             assert.ok(outline[0] !== 'none' && outline[1] >= 2, `${sel} has visible keyboard focus: ${JSON.stringify(outline)}`)
@@ -125,9 +125,6 @@ try {
           await page.waitForFunction(() => !document.querySelector('.roundsend').disabled)
           assert.equal(await page.locator('.roundsend').isEnabled(), true, 'attachment alone activates Send')
           await page.locator('.attachment-chip-x').click(); await page.locator('#draft').fill('One clear next step.'); await settle(page)
-          await page.locator('.tt-board-button').click(); await settle(page)
-          await shot('board')
-          assert.equal(await page.locator('.tt-board-button .navdot').count(), 1, 'board unread dot survives')
           const tokens = await resolvedTheme(look, mode)
           report.contrast = []
           for (const surface of ['paper-page', 'paper-pane', 'paper-card', 'paper-raised', 'paper-hover']) {

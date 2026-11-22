@@ -50,7 +50,7 @@ try {
       await draft.fill(''); await draft.pressSequentially('@qui'); await opened(); await hit(toggle); await closed(); assert.equal(await text(), '')
       await hit(toggle); await draft.press('Escape'); await closed(); assert.equal(await text(), '@')
       await draft.fill(''); await hit(toggle); await hit(page.locator('.tt-stream'), { position: { x: 10, y: 10 } }); await closed(); assert.equal(await text(), '@')
-      await draft.fill(''); await hit(toggle); await page.getByRole('button', { name: 'Board', exact: true }).focus(); await closed(); assert.equal(await text(), '@')
+      await draft.fill(''); await hit(toggle); await page.getByRole('button', { name: 'Thread actions', exact: true }).focus(); await closed(); assert.equal(await text(), '@')
       await draft.fill(''); await hit(toggle); await toggle.focus(); await opened(); await toggle.press('Enter'); await closed(); assert.equal(await text(), '')
       await hit(toggle); await list.getByRole('option').filter({ hasText: 'Quill' }).focus(); await opened(); await page.keyboard.press('Enter'); await closed(); assert.equal(await text(), '@quill ')
       await draft.fill(''); await draft.pressSequentially('@qui'); await draft.press('Enter'); await closed(); assert.equal(await text(), '@quill ')

@@ -64,7 +64,7 @@ try {
       turns = [{ persona: 'sprout', engine: 'claude-code', started_at: now, on_background: true }]
       emit(snapshot()); await page.getByRole('button', { name: '1 background task', exact: true }).waitFor(); await noFlow()
       assert.equal(await indicator.locator('.tt-task-count').innerText(), '1')
-      assert.equal(await indicator.evaluate((n) => n.previousElementSibling.getAttribute('aria-label')), 'Board')
+      assert.equal(await indicator.isVisible(), true)
       await capture('one-task')
       if (width === 390) await indicator.tap(); else { await indicator.focus(); await indicator.press('Enter') }
       await panel.waitFor(); await fullyVisible()
@@ -117,7 +117,7 @@ try {
       await panel.getByText('Nothing running', { exact: true }).waitFor()
       assert.equal(await indicator.evaluate((n) => n.classList.contains('leaving')), true)
       await page.clock.fastForward(1500); await panel.waitFor({ state: 'hidden' }); await indicator.waitFor({ state: 'hidden' })
-      assert.equal(await page.getByRole('button', { name: 'Board', exact: true }).evaluate((n) => n === document.activeElement), true)
+      assert.equal(await page.locator('.tt-title').evaluate(n => n === document.activeElement), true)
       // Actual generation still owns its reply slot and classic waiting words.
       members[0] = { ...members[0], working: true, busy: true }; publish()
       emit({ type: 'turn.started', persona: 'sprout', engine: 'claude-code', started_at: now })

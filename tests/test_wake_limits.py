@@ -87,10 +87,10 @@ def stub(wake, launched: list, today: date) -> None:
 
 
 def inbox(vault: Path) -> tuple[str, str]:
-    """(failure log, the board and every fact told, as one text), empty
+    """(failure log, owner notes and every fact told, as one text), empty
     where nothing was written."""
     out = []
-    for name in ("loam-wake-failures.md", "comms.md"):
+    for name in ("loam-wake-failures.md", "Owner notes.md"):
         path = vault / "00_INBOX" / "from-agents" / name
         out.append(path.read_text(encoding="utf-8") if path.exists() else "")
     attention = Path(os.environ["LOAM_ATTENTION_DIR"])
@@ -182,7 +182,7 @@ try:
          "A warning, not a refusal" in text1),
         ("both wakes ran", first == 0 and second == 0 and len(launched) == 2),
         ("one line per night, not one per wake", len(warning_lines) == 1),
-        ("nothing reached the board or anyone", f"**{AGENT}**" not in comms2),
+        ("nothing reached an owner note or anyone", f"**{AGENT}**" not in comms2),
     ]
     for label, ok in checks:
         results.append(ok)

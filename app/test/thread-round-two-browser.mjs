@@ -25,7 +25,7 @@ const routes = {
 }
 function emit(id, e) { for (const res of streams.get(id) ?? []) res.write(`data: ${JSON.stringify(e)}\n\n`) }
 function addRoutes(id) {
-  for (const [method, suffix] of [['GET', ''], ['PATCH', ''], ['DELETE', ''], ['POST', '/messages'], ['GET', '/board'], ['PUT', '/board']]) routes[`${method} /v1/threads/${id}${suffix}`] = async (req, res, url, raw) => {
+  for (const [method, suffix] of [['GET', ''], ['PATCH', ''], ['DELETE', ''], ['POST', '/messages']]) routes[`${method} /v1/threads/${id}${suffix}`] = async (req, res, url, raw) => {
     if (method === 'DELETE' && deleteBusy) return json(res, { error: 'a turn is running in this thread; delete it when the turn has finished' }, 409)
     const body = raw ? JSON.parse(raw) : undefined
     if (method === 'PATCH' && body.model && refuseModel) return json(res, { error: 'This model is not available for this engine.' }, 400)
@@ -149,9 +149,6 @@ try {
     await page.getByText('An intermediate answer.', { exact: true }).waitFor()
     assert.equal(await page.getByText(text.trim(), { exact: true }).count(), 1)
     await shot('segments-reloaded')
-    await page.getByRole('button', { name: /Board/ }).first().click()
-    await shot('board')
-    if (width === 390) await page.getByRole('button', { name: 'Close board', exact: true }).filter({ hasNot: page.locator('.tt-board-scrim') }).click()
     if (width === 390) await page.getByRole('button', { name: 'Back to threads', exact: true }).click()
     listUp = false
     for (const res of listStreams) res.end()

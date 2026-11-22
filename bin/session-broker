@@ -2323,7 +2323,9 @@ class Server:
             await self.thread_stream(thread_id, params.get("after"), writer,
                                      full=params.get("steps") == "full")
             return
-        raise BrokerError(405, f"no route for {method} /v1/threads/" + "/".join(tail))
+        known = (not rest or (len(rest) == 2 and rest[0] == "files") or
+                 (len(rest) == 1 and rest[0] in {"answer", "branch", "attachments", "messages", "posted", "steps", "events"}))
+        raise BrokerError(405 if known else 404, f"no route for {method} /v1/threads/" + "/".join(tail))
 
     async def thread_list_stream(self, writer: asyncio.StreamWriter,
                                  archived: bool = False) -> None:

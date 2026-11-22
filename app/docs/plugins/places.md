@@ -83,7 +83,7 @@ export function activate(loam) {
 ## Shared services and lifecycle
 
 `loam.data` exposes authenticated relay operations for threads, messages,
-boards and files, including `request(method,path,body)` for the documented
+threads and files, including `request(method,path,body)` for the documented
 relay. It holds no broker credential. `loam.events.emit(name,detail)` broadcasts a custom event.
 `loam.events.on(name,callback)` returns
 a removable handle. Events include `thread.event`, `message.arrived`,
@@ -135,7 +135,7 @@ API for DOM synchronization. Commands may be asynchronous; renderers may not.
 
 The data methods return the relay's JSON promise unchanged and encode each ID:
 `threads.list/get/create/patch`, `messages.parts(message)/list(threadId,query?)/send`,
-`boards.get(threadId)/put(threadId,body)`, and
+and
 `files.read(root,path)/list(root,path?)/write(body)`. Arguments are the same
 request bodies used by core. For example,
 `await loam.data.messages.send(threadId,{text:'Hello'})` posts to that thread.

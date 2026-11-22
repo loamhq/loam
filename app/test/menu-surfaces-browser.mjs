@@ -40,7 +40,7 @@ try {
   const page = await ctx.newPage(); page.setDefaultTimeout(10000); page.on('pageerror', e => errors.push(e.message))
   const stamp = `${width}-${collapsed?'collapsed':'open'}-${theme}`
   const settle = async () => { await page.evaluate(async()=>{ await document.fonts.ready; await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame) }); await page.waitForTimeout(200) }
-  const reset = async () => { await page.evaluate(()=>{ const {state,threads,schedule}=__menu;__menu.picker.close(); state.sheet=null;state.pop=null;state.speakMenu=null;state.tasksOpen=false;threads.st.listMenu=false;if(threads.st.open){ threads.st.open.headerMenu=false;threads.st.open.tasksOpen=false;threads.st.open.configuration=null;threads.st.open.confirmDelete=false;threads.st.open.boardOpen=false;threads.st.open.boardMenu=null }; schedule() }); await settle() }
+  const reset = async () => { await page.evaluate(()=>{ const {state,threads,schedule}=__menu;__menu.picker.close(); state.sheet=null;state.pop=null;state.speakMenu=null;state.tasksOpen=false;threads.st.listMenu=false;if(threads.st.open){ threads.st.open.headerMenu=false;threads.st.open.tasksOpen=false;threads.st.open.configuration=null;threads.st.open.confirmDelete=false; }; schedule() }); await settle() }
   const thread = async () => { await reset(); await page.evaluate(async(id)=>{__menu.state.screen='threads';await __menu.threads.open(id);__menu.schedule()},id); await page.locator('.tt-title').waitFor(); await settle() }
   const check = async (name, trigger, surface, {exception=false, close=true}={}) => {
     await surface.waitFor();await settle()
@@ -102,12 +102,8 @@ try {
     await page.locator('.tt-task-row').first().click();await check('task-details',trigger,page.locator('.tt-tasks-panel'))
     trigger=page.locator('.tt-message .speakbtn').last();await trigger.click()
     await check('read-aloud',trigger,page.locator('.speakmenu'))
-    // Typing and board workspaces are inventoried exceptions, not popup menus.
+    // Typing controls are inventoried exceptions, not popup menus.
     trigger=page.locator('.tt-mention-button');await trigger.click();await check('mentions',trigger,page.locator('.tt-mentions'),{exception:true})
-    trigger=page.locator('.tt-board-button');await trigger.click();await check('board-controls',trigger,page.locator('.tt-board'),{exception:true})
-    await page.locator('.tt-board-button').click();await settle()
-    trigger=page.locator('.tt-item-actions > button').first();await trigger.click();await check('board-item',trigger,page.locator('.tt-item-menu'),{close:false})
-    await page.getByRole('button',{name:'Move to…',exact:true}).click();await check('board-move',trigger,page.locator('.tt-item-menu'))
     await reset();if(width===390){await page.evaluate(()=>__menu.threads.close());await settle()}
     if(collapsed) { trigger=page.getByRole('button',{name:'Settings',exact:true}).first();await trigger.click(); await page.getByRole('button',{name:'Running now',exact:true}).click() }
     else {trigger=page.locator('.run-indicator').first();await trigger.click()}

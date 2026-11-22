@@ -135,7 +135,7 @@ async function audit(page) {
         !visible(node) ||
         (!editableText && ![...node.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) ||
         node.matches(':disabled') ||
-        node.closest('svg,button:disabled,[aria-disabled="true"],.tt-board-item.done')
+        node.closest('svg,button:disabled,[aria-disabled="true"]')
       )
         continue
       // Opacity is allowed for disabled controls only, never body copy.
@@ -598,41 +598,6 @@ try {
         await shot('thread-details')
         await mutate(() => {
           __audit.threads.st.manage = false
-          __audit.threads.st.open.boardOpen = true
-          __audit.schedule()
-        })
-        await shot('board')
-        await page.locator('.tt-item-actions .iconbtn').first().click()
-        await shot('board-item-menu')
-        await page.getByRole('button', { name: 'Move to…', exact: true }).click()
-        await shot('board-move-menu')
-        await page.keyboard.press('Escape')
-        await page.locator('.tt-list-add').first().click()
-        await shot('board-add-item')
-        await mutate(() => {
-          __audit.threads.st.open.addSection = null
-          __audit.schedule()
-        })
-        await mutate(() => {
-          __audit.threads.st.open.editing = true
-          __audit.threads.st.open.editText = __audit.threads.st.open.board.markdown
-          __audit.schedule()
-        })
-        await shot('board-editor')
-        await mutate(() => {
-          __audit.threads.st.open.editing = false
-          __audit.threads.st.open.board.markdown = ''
-          __audit.schedule()
-        })
-        await shot('board-empty')
-        await mutate(() => {
-          __audit.threads.st.open.boardError = 'The board could not be saved. Your text is still here.'
-          __audit.schedule()
-        })
-        await shot('board-error')
-        await mutate(() => {
-          __audit.threads.st.open.boardOpen = false
-          __audit.threads.st.open.boardError = ''
           __audit.threads.st.open.error = ''
           __audit.threads.st.open.messages = []
           __audit.schedule()

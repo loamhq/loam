@@ -17,7 +17,7 @@ emptyState({ object, title, body, action, size, level, titleId, bodyClass, props
 
 - `object`: one of `EMPTY_OBJECTS`, listed below.
 - `size`: `large` (a whole window: the empty Market), `pane` (a pane or a
-  list column; the default), or `small` (a narrow panel: a board, a
+  list column; the default), or `small` (a narrow panel: a
   profile's tab, the file picker, a section of a page).
 - `level`: the title's heading level (`h2` by default; `h3` inside a panel
   that has its own heading).
@@ -47,7 +47,6 @@ animates (`test/empty-state-browser.mjs`).
 | No thread open (wide pane) | speech | Good things start here. / Choose a conversation or start a new thread. | — |
 | A thread search with no match | search | No threads match / Try another word. | — |
 | No archived threads | archive | No archived threads / Threads you archive will appear here. | — |
-| An empty board | page (small) | Nothing on this board yet / A short list for this thread. You and the agents can edit it. | the list's own Add, under it |
 | Files with nothing open (wide pane) | folder | Pick a file / One on the left. It opens here. | — |
 | An empty folder in Files | folder (small) | Nothing here yet / What you or your agents put in this folder shows up here. | — |
 | An empty folder in the file picker | folder (small) | Nothing here yet | — |

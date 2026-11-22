@@ -155,9 +155,6 @@ for (const width of [390, 1440]) test(`outside dismissal owns the gesture at ${w
   await open('Mention an agent')
   await dismiss(page.locator('.tt-mentions'), header, threadURL)
 
-  await open('Board')
-  await page.locator('.tt-item-actions > button').first().click()
-  await dismiss(page.locator('.tt-item-menu'), page.locator('.tt-board-head button'), page.url())
 
   await page.goto(app.url + '/files/vault/Notes')
   const folderURL = page.url(), otherRow = page.locator('.fs-name').getByText('Taken.md', { exact: true })

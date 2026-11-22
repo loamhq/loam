@@ -26,7 +26,6 @@ try {
       }
       const records = await app.f.api('GET', '/threads/a-quieter-week')
       records.messages.at(-1).text += ' Here is [the weekly plan](/files/vault/Notes/plan.md).'
-      records.board = { ...records.board, markdown: '# Board\n\n- [ ] [Read the outline](/files/vault/Notes/plan.md)\n' }
       app.routes['GET /v1/threads/a-quieter-week'] = (_, res) => json(res, records)
       const look = { theme: 'latte', mode, size: 100 }
       app.routes['GET /v1/settings/appearance'] = (_, res) => json(res, { phone: look, desktop: look })

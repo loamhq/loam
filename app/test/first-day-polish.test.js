@@ -39,7 +39,7 @@ function threadsFor(t, { api, agents = [{ id: 'iris', name: 'Iris' }], providers
   t.after(() => threads.close({ navigate: false }))
   return threads
 }
-const record = (messages, extra = {}) => ({ thread: { id: 't-1', title: 'Hello', default: 'iris', members: [{ persona: 'iris', engine: 'claude-code' }], ...extra }, messages, has_more: false, turn: null, turns: [], board: { markdown: '', path: '' } })
+const record = (messages, extra = {}) => ({ thread: { id: 't-1', title: 'Hello', default: 'iris', members: [{ persona: 'iris', engine: 'claude-code' }], ...extra }, messages, has_more: false, turn: null, turns: [] })
 
 // ---------------------------------------------------------------- 1
 const juniper = {

@@ -7,12 +7,12 @@ import { installDom, settle, clearWrites, sinceSettled } from './fakedom.js'
 import { all } from './browser.js'
 
 test('message downloads use root-relative paths without changing attachment records', () => {
-  const suffix = '98_ATTACHMENTS/preview/Board notes.png'
+  const suffix = '98_ATTACHMENTS/preview/Team notes.png'
   for (const value of [suffix, `/some/root/${suffix}`, `/${suffix}`]) assert.equal(attachmentFilePath(value), suffix)
   assert.equal(attachmentFilePath('Notes/image.png'), 'Notes/image.png')
   for (const value of ['', null, '/unknown/image.png', '/root/98_ATTACHMENTS/../secret', 'a/./b', 'a\\b', 'a\u0000b']) assert.equal(attachmentFilePath(value), null, String(value))
   installDom()
-  const host = h('div'), files = [{ path: `/some/root/${suffix}`, name: 'Board notes.png', type: 'image/png' }]
+  const host = h('div'), files = [{ path: `/some/root/${suffix}`, name: 'Team notes.png', type: 'image/png' }]
   morph(host, messageFiles(files))
   const link = all(host, 'message-image')[0]
   const url = new URL(link.getAttribute('href'), 'http://fixture')

@@ -28,7 +28,7 @@ function setup(t, messages) {
   const threads = createThreads({ api: async () => ({}), redraw() {}, agents: () => [{ id: 'sprout', name: 'Sprout' }], nav: () => null,
     compose: { field: () => ({ value: '' }), files: () => [], busy: () => false, clear() {}, render: () => h('div'), dragProps: () => ({}) } })
   threads.st.open = { thread: { id: 'one', title: 'A thread', members: [{ persona: 'sprout', engine: 'claude-code' }] }, messages,
-    permissions: new Map(), typing: new Set(), steps: new Map(), board: { markdown: '', path: '' } }
+    permissions: new Map(), typing: new Set(), steps: new Map() }
   threads.st.listLive = true
   t.after(() => threads.pause())
   const view = () => threads.view(false)

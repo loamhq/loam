@@ -127,7 +127,7 @@ def test_matcher_leaves_real_answers_alone():
 # --- inbox -----------------------------------------------------------------
 
 def comms_of(vault: Path) -> str:
-    """Read the board to detect an unexpected notification."""
+    """Read the owner note to detect an unexpected notification."""
     path = vault / "00_INBOX" / "Owner notes.md"
     return path.read_text(encoding="utf-8") if path.exists() else ""
 
@@ -235,7 +235,7 @@ def test_wake_names_the_night():
               sum(1 for line in log.splitlines() if line.startswith("- `") and
                   "account_refused" in line) == 3)
         check("wake: no account-refused nightly fact is queued", not facts(), facts())
-        check("wake: and nothing on the board", comms == "", comms)
+        check("wake: and no public post", comms == "", comms)
         records = [json.loads(l) for l in
                    (root / "logs" / "wake-pax.jsonl").read_text().splitlines()]
         check("wake: the jsonl stage is account_refused",

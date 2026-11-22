@@ -35,7 +35,7 @@ test('the list, header and Details keep the same base and layer, without decorat
     compose: { field: () => ({ value: '' }), render: () => h('div'), dictating: () => false, files: () => [], dragProps: () => ({}) } })
   t.after(() => threads.pause())
   threads.st.threads = [row]
-  threads.st.open = { thread: row, messages: [], permissions: new Map(), typing: new Set(), turns: [], board: { markdown: '' } }
+  threads.st.open = { thread: row, messages: [], permissions: new Map(), typing: new Set(), turns: [] }
   const view = () => threads.view(true)
   let tree = view()
   assert.ok(find(find(tree, 'tt-row'), 'tt-thread-icon').className.includes('blob'))

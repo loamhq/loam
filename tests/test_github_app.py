@@ -497,9 +497,9 @@ async def main(root: Path, fake_url: str) -> None:
     comms = told()
     check("test_nightly_refresh_near_expiry: one warning",
           len(wrote), 1)
-    check("...a false fact for the check, nothing on the board",
+    check("...a false fact for the check, no public post",
           "the GitHub authorization expires in" in comms
-          and not (vault / "00_INBOX" / "from-agents" / "comms.md").exists(), True)
+          and not (vault / "00_INBOX" / "from-agents" / "Owner notes.md").exists(), True)
     check("...once a day: the next call of the date does nothing",
           gh.daily_check(today="2026-10-01"), None)
 

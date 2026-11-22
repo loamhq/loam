@@ -140,8 +140,7 @@ The auth-expired gate and platform infrastructure stay outside the registry:
 API/auth, routing/history parsing, viewport/redraw/morph, keyboard/page lifecycle,
 focus/menu placement and shared primitives/protocol normalization. Activity and
 Settings utility buttons are inside the registered rail, rather than separate
-`rail.section` entries. Account/sign-in forms, transcript tools/folds, board
-controls, Activity’s mixed-in chat rows and Files format branches are nested implementations of registered
+`rail.section` entries. Account/sign-in forms, transcript tools/folds, Activity’s mixed-in chat rows and Files format branches are nested implementations of registered
 components, not individually registered subcomponents. Built-in Markdown/text/
 HTML/image/PDF selection remains inside `core.files.viewer`; specialized plugin
 viewers run through `files.viewer` before that default body. This is not a claim

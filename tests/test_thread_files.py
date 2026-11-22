@@ -17,7 +17,8 @@ class ThreadFileTest(TestCase):
             root = Path(folder)
             from unittest.mock import patch
             with patch.multiple(threads, VAULT=root / "vault", STATE=root / "state",
-                                AI_LABS=root / "people"), patch.object(threads, "roster", return_value=[]):
+                                AI_LABS=root / "people"), patch.object(threads, "roster", return_value=[]), \
+                    patch.dict("os.environ", {"LOAM_PLUGINS_DIR": str(root / "plugins")}):
                 self.exercise()
 
     def exercise(self):
@@ -53,6 +54,7 @@ class ThreadFileTest(TestCase):
         moved = Path(files.locations(meta)["checklists"]["path"])
         self.assertFalse(Path(first).exists())
         self.assertEqual(moved.read_bytes(), raw)
+        self.assertTrue(files._binding_file().is_file())
         self.assertIn(str(moved), threads.turn_prompt(meta, "tester", [], True))
         files.configure([])
         self.assertNotIn(str(moved), threads.turn_prompt(meta, "tester", [], True))
@@ -65,6 +67,12 @@ class ThreadFileTest(TestCase):
         threads.delete(a["id"])
         self.assertTrue(Path(second).exists())
         self.assertFalse(moved.exists())
+        files.configure([])
+        threads.delete(b["id"])
+        files.configure(install)
+        self.assertTrue(Path(second).is_file())
+        self.assertNotIn(b["id"], files._bindings()["checklists"])
+        self.assertEqual(list(files.existing_documents("checklists")), [])
 
 
 if __name__ == "__main__":

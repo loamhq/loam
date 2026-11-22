@@ -15,7 +15,7 @@ await mkdir(out, { recursive: true })
 
 const f = createThreadFixture()
 const template = (await f.api('GET', '/threads')).threads.find((t) => t.id === 'general')
-const row = (id, title, at, pinned) => ({ ...structuredClone(template), id, title, pinned, unread: 0, board_new: 0,
+const row = (id, title, at, pinned) => ({ ...structuredClone(template), id, title, pinned, unread: 0,
   general: id === 'general', last: { ...template.last, at }, created: at, members: [structuredClone(template.members[0])] })
 const minutes = (n) => new Date(Date.now() - n * 60000).toISOString()
 let rows = [row('newest-pin', 'Newest pinned', minutes(1), true), row('plain-general', 'General', minutes(2), false),

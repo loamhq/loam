@@ -58,7 +58,7 @@ above the Settings sheet. Each comparison shows the same gesture over General.
 ## Inventory before the change
 
 Initial discovery was against `95c62a7`, with the thread selection markers.
-Refreshed main `6e5cd71` added board-item and reply menus while this job was
+Refreshed main `6e5cd71` added reply menus while this job was
 running. Both are integrated below; the before captures use that refreshed
 main so every inventoried menu has a real baseline.
 
@@ -72,9 +72,7 @@ main so every inventoried menu has a real baseline.
 | Provider and model choices | **Already inline** listboxes within configuration, replacing the former `.tt-choice-menu` | Stay inline in the anchored/sheet configuration surface |
 | Thread background tasks and task details | Fixed, one-time right/bottom rectangle; phone sheet | Shared shell at live task count; details stay in it |
 | Mention choices | Absolute `bottom:100%` inside composer; keyboard belongs to typing | Retained, including Everyone, arrow selection and Escape |
-| Board item actions / Move to | Added by refreshed main: absolute `right:0; top:40px`, with an `above` variant chosen at click time | Shared shell at the item’s ⋯ or keyboard drag grip; Move choices stay in the same surface |
-| Board check/seen/add/drag controls | Direct controls and inline lifetime chips, supplied by refreshed main | Retained in the board workspace, including drag moves and list-specific add |
-| Board and thread details | Inset board workspace; full scrolling details page | Retained workspaces, not popup menus |
+| Thread details | Full scrolling details page | Retained workspace |
 | Read aloud (thread and Classic messages) | Absolute relative to 30px glyph, flipped by a fixed 260px threshold; same floating menu on phone | Shared shell at the clicked speaker; phone sheet |
 | Composer + / Add | Absolute above composer row on desktop, existing sheet on phone | Shared shell at +; upload choices retained |
 | Classic This chat / Model / Effort | Same absolute composer-row menu with inline subpages; phone sheet | Shared shell at model chip; subpages retain root anchor |

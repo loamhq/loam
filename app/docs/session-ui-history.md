@@ -37,7 +37,7 @@ session list remains the default. **Settings → Classic chats** keeps the
 existing sessions available. For the new experience without a runtime, open
 `/?threads=fixture` (clearly labelled sample data) or Settings → Preview
 threads. The relay uses the runtime’s `/v1/threads` interface, with message-ID
-reconnection, earlier-message paging and shared permission/question cards. See [threads, boards and the runtime handoff](threads-and-boards.md).
+reconnection, earlier-message paging and shared permission/question cards. See [threads, boards and the runtime handoff](threads.md).
 
 Threads use the **same composer as classic chats**: markdown while typing,
 dictation, file/image upload, Files picking and the expanded editor, with a
@@ -97,7 +97,7 @@ Scrolling up loads earlier messages without moving the reading anchor. A thread
 address (`/threads/<id>`) reloads that conversation; `/` still opens the list.
 The existing runtime supplies an unread count rather than an exact boundary,
 so first-unseen landing uses that count saved before the opening read clears
-it. See [opening behavior and the requested runtime additions](threads-and-boards.md#opening-a-thread)
+it. See [opening behavior and the requested runtime additions](threads.md#opening-a-thread)
 and [measurements, captures and checks](evidence/thread-opening/README.md).
 
 Past thread replies now use the same detailed steps as Classic: ordered prose,
@@ -4073,7 +4073,7 @@ They are the host's, they are binding, and they are cheap to keep:
 
 Thread member activity follows the parallel-turn contract: replies stream in
 independent positions, and the header count opens named background tasks
-and running times. See the [behavior and interface](threads-and-boards.md)
+and running times. See the [behavior and interface](threads.md)
 and [paired captures and verification](evidence/thread-parallel/README.md).
 
 Thread icons use the sole default persona when there is one member; chosen icons
@@ -4081,7 +4081,7 @@ win, and groups keep their own glyph. Row subtitles state who is asking, working
 waiting, or has replied; quiet threads say Quiet. The header's play/count
 opens background tasks grouped by creator; Details saves thread glyphs; previously saved emoji remain readable.
 Typing or dictating reveals small recipient faces on a protected shelf above the composer, and
-mentions carry inline persona marks. See the [behavior](threads-and-boards.md)
+mentions carry inline persona marks. See the [behavior](threads.md)
 and [before/after captures, motion frames and checks](evidence/thread-identity/README.md).
 
 The [listening-face clearance check](evidence/thread-listening-clearance/README.md)
@@ -4091,7 +4091,7 @@ Thread icons share a quiet state layer in the list, header and Details:
 steady attention glow, otherwise a slow working breath. Background-only waiting
 and quiet have no layer; waiting remains in the subtitle and header task count.
 Both glows follow the avatar or tile shape. Reduced motion uses static tones.
-See [behavior](threads-and-boards.md) and
+See [behavior](threads.md) and
 [before/after captures and checks](evidence/thread-icon-no-ring/README.md).
 
 Recipient faces react to typing, the caret and dictation levels without a
@@ -4111,7 +4111,7 @@ Copy preserves Markdown and shows a check for one second. Phone swipe-to-reply
 remains; long press and right-click use native text selection and copy actions.
 A cancellable quote chip preserves the draft. Human and persona replies show a quote that
 jumps to the original through older history. See the
-[behavior](threads-and-boards.md) and
+[behavior](threads.md) and
 [390/1440 light/dark captures and checks](evidence/thread-replies/README.md).
 See the [390/1440/1920 footer layout captures and alignment checks](evidence/thread-footer-layout/README.md),
 the earlier [icon-footer captures and checks](evidence/thread-message-icons/README.md)

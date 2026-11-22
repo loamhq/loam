@@ -13,7 +13,7 @@ const artifact = (name) => path.join(out, prefix + name)
 await mkdir(out, { recursive: true })
 async function pairCaptures() {
   const sharp = (await import(process.env.LOAM_SHARP || 'sharp')).default, manifest = []
-  for (const width of [390, 1440]) for (const state of ['glyph', 'mid-run', 'handover', 'docked-player', 'board-seen']) {
+  for (const width of [390, 1440]) for (const state of ['glyph', 'mid-run', 'handover', 'docked-player']) {
     const a = await readFile(artifact(`${state}-${width}-light.png`)), b = await readFile(artifact(`${state}-${width}-dark.png`))
     const height = a.readUInt32BE(20), file = prefix + `${state}-${width}-pair.png`
     const labels = Buffer.from(`<svg width="${width * 2}" height="32"><text x="14" y="22" font-family="sans-serif" font-size="13" fill="#2A2521">${state} · ${width} · light</text><text x="${width + 14}" y="22" font-family="sans-serif" font-size="13" fill="#2A2521">${state} · ${width} · dark</text></svg>`)
@@ -257,15 +257,6 @@ try {
       assert.equal(posts.length, 1)
       assert.equal(posts[0].text, messages[1].segments.filter((part) => part.text).map((part) => part.text).join('\n\n'))
 
-      // The board's independent seen strip never borrows the thread's marker.
-      await page.getByRole('button', { name: 'Board', exact: true }).click()
-      await page.locator('.tt-seen-strip').waitFor()
-      assert.equal(await page.locator('.tt-conversation').getAttribute('inert'), '')
-      assert.equal(await page.locator('.tt-board .tt-speaker').count(), 0)
-      await page.waitForTimeout(240)
-      await capture('board-seen')
-      assert.equal(await page.evaluate(() => { const r = document.querySelector('#draft').getBoundingClientRect(); return Boolean(document.elementFromPoint(r.left + r.width / 2, r.top + 16)?.closest('.tt-board,.tt-board-scrim')) }), true, 'the board and its scrim still cover the dock')
-      await page.getByRole('button', { name: 'Close board', exact: true }).click()
 
       // New replies, redraw and prepend preserve the author grouping and marker.
       await page.evaluate(() => __authors.schedule()); await page.waitForTimeout(60)
@@ -285,7 +276,7 @@ try {
       assert.ok(g.runs.every((run) => run.marker.bottom <= g.pane.top), 'no author lingers when the reader reaches human messages')
 
       assert.deepEqual(errors, [])
-      results.push({ width, theme, glyphAnchored: true, distinctConsecutiveGlyphs: true, appearAndScrollBack: true, nativeHandover: true, floatingProseFade: true, reducedMotion: true, float, dockAudit, dockedPlayerSeparation: true, boardSeenStrip: true, captures, errors })
+      results.push({ width, theme, glyphAnchored: true, distinctConsecutiveGlyphs: true, appearAndScrollBack: true, nativeHandover: true, floatingProseFade: true, reducedMotion: true, float, dockAudit, dockedPlayerSeparation: true, captures, errors })
       console.log(`PASS ${width} ${theme}`)
     } finally { await context.close(); await fixture.close() }
   }

@@ -114,7 +114,7 @@ async function audit(page) {
         !visible(node) ||
         (!editableText && ![...node.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) ||
         node.matches(':disabled') ||
-        node.closest('svg,button:disabled,[aria-disabled="true"],.tt-board-item.done')
+        node.closest('svg,button:disabled,[aria-disabled="true"]')
       )
         continue
       // Opacity is allowed for disabled controls only, never body copy.

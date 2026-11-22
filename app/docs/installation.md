@@ -13,19 +13,13 @@ and plugin content already uses them; this change does not narrow the policy.
 
 `APP_TIME_ZONE` governs the shared display clock, calendar-day grouping,
 daily/inbox note filenames and Sun's initial fallback location. It does not
-change a saved Sun home or the browser's locale/hour-cycle preference. General
-board quick-note dates and expiry durations remain UTC, as the runtime's board
-format requires. Previously the display clock and filenames used the browser
+change a saved Sun home or the browser's locale/hour-cycle preference. Previously the display clock and filenames used the browser
 zone, not an installation literal. The default zone now comes from the served
 configuration; staging should check with the intended owner's devices.
 
 Saved Files inbox choices still win over the installation default. Daily notes
 uses the enabled `daily-notes` plugin's folder; neither the web environment nor
-browser storage overrides it. Actual
-board and conversation paths come from runtime records and Files resources;
-the web half has no conversations-folder literal or new conversations-folder
-setting. `VAULT_BOARDS_FOLDER` affects only the synthetic design preview.
-`VAULT_GENERAL_BOARD` identifies the general board's special quick-note format.
+browser storage overrides it. Conversation paths come from runtime records and Files resources.
 `VAULT_ATTACHMENTS_FOLDER` identifies the subtree in older absolute attachment
 records. Relative paths returned by uploads are never rewritten.
 
@@ -38,7 +32,7 @@ no personal fallback identity: a failed read leaves ownership unknown.
 `public/owner.js` owns matching against `accepts`, displayed owner names and
 initials. That matching covers Apps attribution, schedules/Activity, thread
 bubbles and reply labels, mention-join grouping and optimistic-send reconciliation.
-Board quick-add comments use the supplied display name. Sending still omits
+Sending still omits
 owner fields where the runtime already supplies them.
 
 The wire values `reach: "owner"` and Activity actor **kind** `"owner"` are
@@ -83,7 +77,7 @@ infer freshness in the browser or send corrective PATCHes.
 
 ## Branching from a message
 
-Branching uses the [thread's reply quote](threads-and-boards.md#branching-from-a-message).
+Branching uses the [thread's reply quote](threads.md#branching-from-a-message).
 The app opens an empty composer and the owner writes the new thread's opening.
 
 ## Checks and staging

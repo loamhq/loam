@@ -26,7 +26,7 @@ groups those actions in its ⋯ menu. The file menu
 contains view modes, copy and download actions where available. For HTML
 previews it also offers **Reload**, plus **Open in new tab** when a live URL
 is available. On a phone these HTML actions are in **This file** when the preview
-was opened from chat. Thread Board and Tasks are in the thread actions menu.
+was opened from chat. Thread tasks are in the thread actions menu.
 Selected rows still mean main. A quiet panel mark identifies the visible side item.
 
 Apps uses the same list column as Chats and Files. Its grouped inventory stays
@@ -37,7 +37,7 @@ Phone Apps embeds installed plugin apps with a local `/x/` URL. Site rows
 open a browser tab.
 On desktop, Activity and Settings open as app-wide dialogs above both panels.
 Their links out use main-panel navigation and its save guard.
-Board and Tasks retain their existing sheet components.
+Tasks retains its sheet component.
 
 With two panes, Latte action tiers follow the last-used pane. Pointer down or
 keyboard focus entering either pane transfers attention, including an embedded
@@ -106,7 +106,7 @@ system Back. Focus controls keyboard shortcuts and pane styling.
 | --- | --- |
 | Select Chats, Files, Apps or a plugin section | Reveal that list at its root. Discard the previous list trail. Both panel histories, mounted contents, drafts and reading positions stay in place. Selecting the current tab also returns its list to root. |
 | Enter a folder or Archived chats from the list | Add one list step. The list arrow returns to the previous listing. At the tab root it disappears. |
-| Open a row, item link, Board, or Thread details | Add a step to the chosen panel. Its arrow restores the preceding panel visit. From its first item, main returns to empty and side closes. |
+| Open a row, item link or Thread details | Add a step to the chosen panel. Its arrow restores the preceding panel visit. From its first item, main returns to empty and side closes. |
 | Open the same item in the other pane | The receiving pane opens its own view. Use **Open as the main panel** to promote, **Swap** to exchange contents, or **Close side panel** to end that side trail. |
 | Open Settings, Activity, the Market, a menu, picker or sheet | Keep all three histories. Back follows the overlay's local parent or dismisses it. Closing a viewer, confirmation or expanded composer reveals the same workspace. |
 | Follow a link out of an overlay | Close the overlay and open the item in main. A linked workspace directory or Apps catalog can also be a panel destination. Its browser or listing stays separate from the tab list. Back restores the previous panel and, on phone, the surface that was visible underneath the overlay. |
@@ -128,7 +128,7 @@ browser entry also stores the selected tab, the phone presentation, and the
 ordered visits and Forward steps for the three surfaces. Reload can therefore
 restore a chat, its companion and a folder unrelated to either. A pasted URL
 starts a new workspace. A file opens above its folder ancestry, including its
-originating plugin list when supplied. A board or details URL starts above
+originating plugin list when supplied. A thread details URL starts above
 its conversation. A directory URL opens the list at that directory. The
 `side` query opens the companion. An overlay query can restore an explicitly
 addressed popup.
@@ -166,7 +166,7 @@ page integration still assumed one open item:
 | --- | --- |
 | One thread controller and one stream generation | `page/conversation.js` mounts the same controller and integration in either slot. Each has its own open record, stream controller, cursor, retry, pending permissions and read tracking. The broker processes keep running during navigation and swaps. |
 | One composer field and shared attachment/menu/editor state | Both mounts use `page/composer.js`. Side owns its fields, attachment state, expanded editor and menus. Input handlers close over that mount. DOM IDs are distinct. |
-| Closing a view parks drafts locally | Handover transfers composer, attachment, quick-add and unsaved Board drafts, plus a data-only visit and reading anchor. Prose DOM is rebuilt in the receiving mount so link callbacks cannot retain the previous destination. File transfers save through the existing edit guard and retain Preview/Edit mode. |
+| Closing a view parks drafts locally | Handover transfers composer text and attachments, plus a data-only visit and reading anchor. Prose DOM is rebuilt in the receiving mount so link callbacks cannot retain the previous destination. File transfers save through the existing edit guard and retain Preview/Edit mode. |
 | Thread focus, scrolling and selection use document-wide selectors | `panelDOM()` scopes stream, dock, listener, selection, focus and menu queries. The shared sidebar and global overlays belong to main. |
 | A section change replaces the desktop shell; removing Show sidebar moves its following pane | One keyed desktop shell, sidebar slot, main/side slot and divider keep unrelated iframe ancestors in place. The sidebar control has its own key. Browser checks keep a script's edited state through main section changes and opening/closing side. |
 | The Files page owns history, default file links and unload | `mountFiles({navigation:false})` provides a second complete viewer/editor without a second history listener. One unload handler checks both mounts. Both retain the original save/conflict guard, source links, embeds, image/PDF validation and live HTML sandbox. |
@@ -191,7 +191,7 @@ The browser matrix covers 1180, 1440 and 1920, Latte and Plain, light and dark,
 plus 390 in both themes and modes. It uses local fixture brokers and an
 isolated content origin. It sends through both real composers, injects separate
 streams, uploads a side attachment, exercises mentions and dictation, changes a
-side model, opens its Board, edits/saves a file, executes HTML and app scripts,
+side model, edits/saves a file, executes HTML and app scripts,
 checks the shared audio engine, moves/swaps items and drafts, drags the divider
 across redraws, checks scaled availability, hides/restores side and checks read
 marks, then reloads with thread and app in either slot. Audio and speech

@@ -672,7 +672,7 @@ under the configured inbox and returns `path`, `markdown`, and `revision`. PUT t
 the same URL with `markdown` and `base_revision`. A stale revision returns 409.
 Thread IDs reserve distinct paths even before any file exists. A rename moves
 the file, a branch gets its own, and confirmed thread deletion removes its active
-file. Scheduled commands can import `loam_thread_files` from `LOAM_LIB` and
+file. Thread file reservations are backed up with the Yours layer in `_data/thread-files.json`. Scheduled commands can import `loam_thread_files` from `LOAM_LIB` and
 iterate `existing_documents(plugin_id)` for pairs of thread ID and document,
 then call `document(plugin_id, thread_id, payload)` with a base revision.
 Switching off the extension leaves the notes in place. This interface may change.

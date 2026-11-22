@@ -17,7 +17,13 @@ import loam_config as lc
 #
 # Keep the existing ledger beside incoming agent notes on older installs.
 _inbox = Path(lc.vault_folder("inbox"))
-_old_log = _inbox / "from-agents" / "loam-wake-failures.md"
+# A customized install may already have a ledger beside its former inbox
+# document. Consult the old configuration solely to retain that ledger.
+_previous_note = lc.get("vault.general_board")
+_previous_folder = Path(_previous_note).parent if _previous_note else _inbox / "from-agents"
+if str(_previous_folder) == lc.get("vault.boards"):
+    _previous_folder = _inbox
+_old_log = _previous_folder / "loam-wake-failures.md"
 FAILURE_LOG = str(lc.get("vault.failure_log") or
                   (_old_log if (lc.VAULT / _old_log).is_file()
                    else _inbox / "loam-wake-failures.md"))

@@ -27,7 +27,7 @@ for (const wide of [false, true]) test(`thread header menus keep conversation an
   const threads = createThreads({ api: async () => row, redraw() {}, agents: () => [{ id: 'sprout', name: 'Sprout' }], rail: () => null, nav: () => null,
     compose: { field: () => field, render: () => h('div', {}, kept(field)), dictating: () => false, files: () => [], dragProps: () => ({}) } })
   t.after(() => threads.pause())
-  const o = threads.st.open = { thread: row, messages: [{ id: 'm1', author: 'sprout', text: 'Keep this reply.' }], permissions: new Map(), typing: new Set(), turns: [], board: { markdown: '' } }
+  const o = threads.st.open = { thread: row, messages: [{ id: 'm1', author: 'sprout', text: 'Keep this reply.' }], permissions: new Map(), typing: new Set(), turns: [] }
   const draw = () => morph(root, threads.view(wide))
   draw()
   const conversation = find(root, 'tt-conversation'), stream = find(root, 'tt-stream'), message = find(root, 'tt-message')

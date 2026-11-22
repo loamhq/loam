@@ -19,10 +19,10 @@ test('addresses round trip main and side identities, independently of navigator 
   assert.equal(sideFromURL('/?side=broken'), null)
   assert.equal(itemFromURL('/panel?id=missing-kind'), null)
 })
-test('a cold link gets the ancestors of its place and includes the chat behind a board', () => {
+test('a cold link gets the ancestors of its place and includes the chat behind a contributed view', () => {
   for (const [path, place, ancestors] of [
     ['/files/vault/Notes/plan.md', 'files', ['/files', '/files/vault', '/files/vault/Notes']],
-    ['/threads/week?view=board', 'chats', ['/', '/threads/week']],
+    ['/threads/week?view=notes', 'chats', ['/', '/threads/week']],
     ['/panel?kind=profile&id=reader', 'chats', ['/']],
     ['/apps?url=https%3A%2F%2Fgarden.example', 'apps', ['/apps']],
     ['/?modal=settings', 'chats', []],

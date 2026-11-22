@@ -146,9 +146,6 @@ try {
       await start('pin'); await page.getByRole('button', { name: 'Thread actions', exact: true }).click()
        await page.getByRole('button', { name: 'Pin thread', exact: true }).click(); await stop('pin')
       assert.equal(await page.evaluate(() => __paint.threads.st.open.thread.pinned), true)
-      await page.getByRole('button', { name: 'Board', exact: true }).click(); await page.locator('.tt-board-item').first().waitFor()
-      await start('board-tick'); await page.locator('.tt-tick input').first().click(); await stop('board-tick')
-      await page.getByRole('button', { name: 'Close board', exact: true }).click()
       // A genuine failed opening remains visible and retryable.
       failRead = true
       await page.evaluate(() => { __paint.threads.close(); __paint.threads.open('a-quieter-week') })
@@ -161,7 +158,7 @@ try {
       assert.equal(await page.locator('#draft').evaluate(n => n.value), 'Keep this unfinished thought')
       assert.deepEqual(errors, [])
       results.push({ stamp, browser: browser.version(), checks, requests, errors })
-      console.log(`PASS ${stamp}: send, incoming/status, catalog, pin, board; drafts, selection, scroll, read failure`)
+      console.log(`PASS ${stamp}: send, incoming/status, catalog and pin; drafts, selection, scroll, read failure`)
     } finally { await context.close(); await app.close() }
   }
 } finally {

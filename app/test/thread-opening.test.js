@@ -79,7 +79,7 @@ test('the page attaches after the newest loaded ID; history and snapshots cannot
   const field = { value: '' }
   const row = { id: 'one', members: [{ persona: 'sprout' }, { persona: 'quill' }], unread: 2 }
   let opening = messages
-  const threads = createThreads({ api: async (method, route) => { reads.push(route); return { thread: { ...row, unread: 0 }, messages: opening, has_more: false, turn: null, board: { path: 'board.md', markdown: '' } } },
+  const threads = createThreads({ api: async (method, route) => { reads.push(route); return { thread: { ...row, unread: 0 }, messages: opening, has_more: false, turn: null } },
     redraw() {}, enter() {}, agents: () => agents,
     compose: { field: () => field, restore() {}, files: () => [], leave() {} } })
   threads.st.checked = true; threads.st.threads = [row]
@@ -120,7 +120,7 @@ test('a lazy full record that finishes during a revisit’s tail read survives t
   const originalFetch = globalThis.fetch
   globalThis.fetch = async (href, { signal }) => new Response(new ReadableStream({ start(controller) { signal.addEventListener('abort', () => controller.close()) } }))
   const row = { id: 'one', members: [{ persona: 'sprout' }], unread: 0 }
-  const record = () => ({ thread: row, messages: [{ id: 'm1', author: 'you', text: 'A thought' }, { id: 'm2', author: 'sprout', text: 'The reply' }], has_more: false, turn: null, board: { path: 'board.md', markdown: '' } })
+  const record = () => ({ thread: row, messages: [{ id: 'm1', author: 'you', text: 'A thought' }, { id: 'm2', author: 'sprout', text: 'The reply' }], has_more: false, turn: null })
   let finishTail, held = false
   const steps = [{ type: 'text', text: 'The whole reply' }], field = { value: '' }
   const threads = createThreads({ api: async (method, route) => {

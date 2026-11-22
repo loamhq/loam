@@ -53,7 +53,7 @@ test('the words: a display title, one line, at most one action, in that order', 
   assert.equal(kids(bare).length, 2, 'no body and no action draws neither')
   assert.equal(kids(bare)[1].nodeName.toLowerCase(), 'h3')
   assert.match(cls(bare), /empty-state-small/)
-  assert.equal(find(emptyState({ object: 'page', title: 'T', body: 'B', bodyClass: 'tt-board-caption', titleId: 'x' }), 'tt-board-caption') !== null, true)
+  assert.equal(find(emptyState({ object: 'page', title: 'T', body: 'B', bodyClass: 'sample-caption', titleId: 'x' }), 'sample-caption') !== null, true)
 })
 
 test('the drawing is theme-true: its stylesheet paints only with tokens, and only the sprout moves', async () => {

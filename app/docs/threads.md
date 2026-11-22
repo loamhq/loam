@@ -1,6 +1,6 @@
-# Threads and boards
+# Threads
 
-Chats is a conversation shared by personas, with a markdown board inside its card.
+Chats is a conversation shared by personas.
 Threads are the sole chat view as of 2026-11-11. Earlier session conversations
 are archived threads; legacy addresses resolve through the import mapping.
 See [retirement and route inventory](classic-retirement.md). References below
@@ -72,8 +72,7 @@ step folds, opening/empty states, floating dock and settings/model controls.
 See [one product](one-product.md) and the [component inventory](design-system/shared-chat-components.md). `public/app.js` supplies the existing
 composer and its lifecycle through a small adapter; no second composer is
 maintained. `public/threads.js` owns the screen;
-`public/thread-record.js` validates response bodies, reduces events and makes
-byte-preserving board edits. `public/permission-cards.js` supplies the same
+`public/thread-record.js` validates response bodies, reduces events. `public/permission-cards.js` supplies the same
 approval and question cards to threads and classic chats.
 
 Pinned and Recent are matching headings above a continuous, unboxed list.
@@ -123,8 +122,7 @@ breathing room, a tint matching the reading surface and a faint persona-colour
 edge. The prose fade dissolves below the marker, so words beside the label
 cannot read as its continuation. No duplicate author, fixed overlay or
 scroll-driven positioning is used.
-The scroll area starts below the header and any docked player; the board and
-its seen strip keep their own overlay. Human messages and Classic chats have
+The scroll area starts below the header and any docked player.  Human messages and Classic chats have
 no sticky author. Reduced motion removes the backdrop transition.
 See [captures and checks](evidence/thread-authors/README.md) and the
 [floating-marker follow-up](evidence/thread-authors/floating-review.md).
@@ -175,8 +173,7 @@ Footer metadata never enters the prose sent to read aloud.
 
 The ready thread's composer dock shares layer 2 with the author row and paints
 above it by coming later in the DOM. Its mention popover remains at layer 10
-inside that context. Header/player (3), details head (4), board scrim (7) and
-board (8) retain their layers. Threads now keep the composer available while
+inside that context. Header/player (3) and details head (4) retain their layers. Threads keep the composer available while
 their first page arrives, with a quiet line in the message area instead of a
 cover. Classic's shared dock stays at 1.
 See the [composer overlap regression](evidence/thread-composer-stack/README.md).
@@ -235,10 +232,7 @@ missing `/steps` record affects that reply's details alone. See the
 For review without a runtime, use `npm start` and open `/?threads=fixture`, or
 **Settings → Preview threads** when support is unavailable. The preview uses
 synthetic personas and data in memory; no sample content reaches the broker.
-Exit returns to the thread list. Reload resets the preview. Unsent messages,
-quick-add text and raw board drafts survive navigation within this page only;
-closing the page warns about unsaved raw board edits. The app has no database
-or browser storage for thread records, boards or read marks.
+Exit returns to the thread list. Reload resets the preview. The broker owns thread records and read marks.
 
 ## Branching from a message
 
@@ -284,9 +278,9 @@ The following paths are relative to `/v1/threads` on the runtime and
 
 | Method and path | Request and response |
 | --- | --- |
-| `GET /` | `{threads, agents}`; summaries carry `id`, `title`, `default`, `members[{persona,engine,model,last_spoke_at,busy,running,background,background_tasks,working}]`, `background` (sum), `working` (members mid-turn), `last`, `unread`, `board_new`, `board` (path), `pinned`, `icon`, `archived`, `general`, `created` |
+| `GET /` | `{threads, agents}`; summaries carry `id`, `title`, `default`, `members[{persona,engine,model,last_spoke_at,busy,running,background,background_tasks,working}]`, `background` (sum), `working` (members mid-turn), `last`, `unread`, `pinned`, `icon`, `archived`, `general`, `created` |
 | `POST /` | `{persona?, text?, title?}` → 201 and a bare summary |
-| `GET /:id?limit=50` | `{thread, messages, has_more, turn, turns, board:{path,markdown,revision}}`; messages carry `id`, `author`, `at`, `kind`, `text`, `did[{label}]`, and optional `engine`, `model`, `attachments`, prefix `segments` |
+| `GET /:id?limit=50` | `{thread, messages, has_more, turn, turns}`; messages carry `id`, `author`, `at`, `kind`, `text`, `did[{label}]`, and optional `engine`, `model`, `attachments`, prefix `segments` |
 | `GET /:id?before=<message id>&limit=30` | Same envelope, earlier messages, with `has_more` controlling the next page |
 | `GET /:id/steps?message=<message id>` | `{thread, steps:[entry]}`; one reply's full ordered record, or 404 when none exists |
 | `GET /:id?steps=full` | Optional bulk reading, with `message.steps` arrays (null for messages without a full record); the page keeps its initial read light |
@@ -294,8 +288,7 @@ The following paths are relative to `/v1/threads` on the runtime and
 | `POST /:id/messages` | `{text, attachments?:[path], model?}` → `{accepted:true, message}`; the runtime parses mentions and schedules turns |
 | `DELETE /:id` | Delete the thread after confirmation |
 | `POST /:id/attachments` | Multipart `file` parts, forwarded unchanged → `{attachments:[{path,name,size,type}]}`; present since `7dcd478` |
-| `GET /:id/board` | `{path, markdown, revision, board_new}` |
-| `PUT /:id/board` | `{markdown, base_revision}` → `{path, markdown, revision, board_new}`, or HTTP 409 on a stale revision |
+| `GET /:id/files/:plugin`, `PUT /:id/files/:plugin` | An enabled extension’s Markdown file, path and revision. Pass `base_revision` on save. |
 | `GET /events?archived=1` | List SSE: `threads.snapshot`, `thread.changed`, `thread.removed` |
 | `GET /:id/events?after=<message id>[&steps=full]` | Live SSE; reconnect from the last completed message ID; the optional flag adds `message.steps` to completed replies |
 
@@ -392,7 +385,7 @@ replaces the words in place. A parked member with no content gets no reply
 slot, whether the record is streaming or already completed with tool labels.
 Files and actionable permission cards remain content. Parked members occupy no
 space in the message flow or above the composer. Background work is available
-only through the count beside Board in the header.
+only through the count in the header.
 Interleaved steps keep each live reply in place; completions settle in
 posting order.
 A completed reply stays in the record while another member streams. Repeated
@@ -431,7 +424,7 @@ including removals and cleared counts. The opening snapshot's member array
 does the same. Each member's integer `background` is outstanding work in this
 thread; `working` is whether the member is mid-turn. A parked member can be
 `busy:true, working:false, background:2`. It draws no waiting line, bordered pill
-or empty reply. The header’s small play/count beside Board sums the members’
+or empty reply. The header’s small play/count sums the members’
 `background` integers, including work behind members who are generating too.
 It has no continuous animation. The count fades over 240 ms when it reaches
 zero; reduced motion removes that transition.
@@ -452,7 +445,7 @@ History failures are shown and the link can be tried again. A missing reply is
 reported rather than silently landing on another message.
 The list stays live while open. A removed selected task returns to the list.
 At zero it says “Nothing running” for 1.4 seconds, then closes and returns
-focus to the header (Board if the count has gone). New work cancels closing.
+focus to the header (the title if the count has gone). New work cancels closing.
 Long lists scroll within a viewport-sized panel; the background is inert,
 Escape/outside tap dismiss, Tab stays inside, and the phone handle drags closed.
 
@@ -484,7 +477,7 @@ Only `GET /api/threads/:id` carries `thread.jobs` and `thread.jobs_error`.
 The opening read seeds them; while the thread is open, the page's five-second
 heartbeat reads `?limit=1&seen=0`. The relay preserves `seen=0`, so checking
 jobs cannot mark replies read. That reading updates jobs alone; it never
-replaces messages, member state, the board, or the reading position. List
+replaces messages, member state or the reading position. List
 snapshots and member events carry no jobs and cannot clear the last reading.
 There is no new preference or setting; the host's `thread.jobs` setting
 already exposes the same information to personas.
@@ -525,11 +518,10 @@ do not poll. Elapsed labels and the completion window use the page's clock;
 no new stream, job status route, or client-side job state is invented.
 See [checks and eight visual combinations](evidence/thread-jobs/README.md).
 
-`board.changed {board_new}` refreshes **only** `GET /:id/board`. It must not
-re-fetch the thread: a GET without `before` marks it read. Reconnects likewise
+A GET without `before` marks the thread read. Reconnect
 use only SSE, preserving unread replies while browsing older messages.
 Opening reads the newest page; reaching the live end sends `PATCH {seen:true}`.
-The runtime owns `unread` and `board_new`; no local read mark is persisted.
+The runtime owns `unread`; no local read mark is persisted.
 
 ## Opening a thread
 
@@ -597,14 +589,13 @@ A runtime follow-up should provide:
   optional ID and never derives it from message numbering.
 - A context window from the earlier of the last human message and the first
   unseen message, with one message of previous context, through the current
-  end. Return ordinary `messages`, `has_more`, `turn`, permissions and board,
+  end. Return ordinary `messages`, `has_more`, `turn`, and permissions,
   plus that boundary. This removes the backward reads for opening context.
 - A read around a named message for restoration after a reload, and a seen
   operation through a specific message ID rather than the whole current end.
 
 These are requests, not claims about routes available now. No new broker
-route, parameter or write behavior is required by this page change. The
-existing board's new-items strip remains independent of conversation unread.
+route, parameter or write behavior is required by this page change.
 See [opening evidence](evidence/thread-opening/README.md), which distinguishes
 synthetic timing and layout proof from the unavailable live timing check.
 
@@ -828,54 +819,13 @@ before reaching the network; stream controllers, retry timers, the page/login
 heartbeats and speech timers stop. One Sign in again link navigates to the
 current protected URL, letting the portal preserve the return destination.
 
-## Boards
-
-The header’s **Board** button opens the thread’s cards. Tap the words to edit
-a card. Enter or leaving the field saves it. Links, emphasis and wiki-links
-render in the card. Dates, authors and deadlines sit below the words. Each
-list has an **Add a note** control. Hold a card before dragging on touch, or
-drag with a mouse. The item menu can move a card to another list, change or
-clear its expiry, or delete it. List headings collapse. A heading followed by
-deeper headings reads as a group title when it has no cards of its own.
-**About this section** opens the section’s notes, which start collapsed.
-
-**Open in Files** opens the board as a Markdown file with the regular Files
-editor, with formatting and dictation. At widths where Loam offers side
-panels, the chat stays open beside the file. The file's side header can open
-it as the main panel. In the chat, Back reopens the board while the editor
-stays mounted beside it. On a phone, **Back to board** and browser Back return
-to the thread with its board open. Forward reopens the document.
-
-Files projects the Markdown through the board parser so item dates and
-trailing comments stay in the file and out of the editor. It reconstructs the
-Markdown using the item's original metadata and line ending before saving.
-The built-in editor uses Files' conditional save and keeps a conflicting draft.
-The Comments editor sends the raw opening revision and text to its existing
-three-way merge, which preserves independent changes and surfaces overlaps as
-suggestions.
-
-### Agent access to the same file
-
-Agents can edit the Markdown directly. For HTTP edits, open the thread or
-GET `/v1/threads/:id/board`. Both readings return newline-preserving
-`markdown` and a `revision` derived from the exact UTF-8 bytes. PUT the
-edited `markdown` and that `base_revision` to the board route. Success returns
-the saved bytes as Markdown and their new revision. HTTP 409 means another
-writer changed the file. Read it again and apply the intended change to that
-reading. The settings tool’s `thread.board` value carries both fields.
-
-The page retains a refused edit in the tab across reloads. It displays the
-newer file and offers to reapply the edit. When the edited passage itself
-changed, it can keep both versions for review. A broker that predates the
-revision field can still display the board until it restarts.
-
 ## Verification and deployment
 
 [One-product evidence](evidence/one-product/README.md) contains current paired
 thread/classic captures, shared-component checks, functional regressions and
 the real two-agent reply/steps/deletion check.
 
-`npm test` covers board byte preservation, UTC/General dates, actual draft and
+`npm test` covers actual draft and
 step semantics, completed-message replay, classic permission normalization and
 every allowlisted relay method, bearer authentication, errors and SSE. It
 also parses recorded responses from the **baseline runtime routes**, generated
@@ -891,7 +841,7 @@ python3 tools/record-thread-contract.py <runtime-repository> test/fixtures/threa
 The real Chromium driver uses a synthetic runtime through the real server,
 plus the explicit client preview. It verifies fallback and automatic recovery,
 `after` reconnection, live steps, scroll-back without marking unread replies,
-board-only reads, shared cards, failed sends/saves, and history position.
+shared cards, failed sends/saves, and history position.
 Install Playwright outside the repo, then run:
 
 ```sh
@@ -901,7 +851,7 @@ node test/threads-browser.mjs
 ```
 
 [Polished screenshots and checks](evidence/threads-runtime-polish/README.md)
-include the previous states at 390/1440 in light/dark and a board before/after.
+include the previous states at 390/1440 in light/dark.
 These are isolated fixture captures, not live deployment evidence. The newer
 [thread polish checks and 390/1440 captures](evidence/thread-polish/README.md)
 cover the shared composer, details, optimistic creation and auth expiry.
@@ -952,7 +902,7 @@ replace the conversation and lose its native reading/selection state. The shared
 menu shell and provider/model choices retain their existing behavior.
 
 [Frame instrumentation and before/after evidence](evidence/thread-update-paint/README.md)
-cover send, incoming/status events, catalog refresh, pin and board edits at
+cover send, incoming/status events, catalog refresh, pin changes at
 390/1440, light/dark. Initial loading, read errors and retry remain visible.
 
 ## Composer edge and audio scrolling (2026-11-14)

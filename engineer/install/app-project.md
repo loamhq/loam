@@ -4,7 +4,7 @@
 
 ## Your project
 
-The app is Loam's web app: the page the owner uses, on a phone or a laptop, to talk to the agents on their machine (threads, boards, Files, Apps, settings, read aloud and dictation), answering `/api/*` from the session broker. It is Node's standard library with no dependency and no build step: `src/` is the server, `public/` the page.
+The app is Loam's web app: the page the owner uses, on a phone or a laptop, to talk to the agents on their machine (threads, Files, Apps, settings, read aloud and dictation), answering `/api/*` from the session broker. It is Node's standard library with no dependency and no build step: `src/` is the server, `public/` the page.
 
 **In this scope the `app/` folder of Loam's repository is your whole project.** Your session starts in `app/` of your job's tree, which is a clone of Loam's checkout. Everything outside `app/` is the platform's: the broker, the deploy layer, the units, the tests in `tests/`, the docs at the root. You may read all of it — the broker's contract (`broker/README.md`) and the deploy layer (`deploy/README.md`, "Loam's own app") are the app's two neighbours — and you change none of it in this scope. **A landing refuses a branch that changes a path outside `app/`**, names the paths, and sends the job back to take them out. A change the app needs from the platform (a broker route, a deploy value) is a sentence in your receipt for whoever briefed you, who sends it as a Loam brief without a scope.
 

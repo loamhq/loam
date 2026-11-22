@@ -277,7 +277,7 @@ test('what a row is: its view from its type, its capabilities only as the host g
   assert.equal(viewOf(row('vault', 'x.svg')), 'text', 'an SVG is shown as its source, never drawn on this origin')
   assert.equal(viewOf(row('vault', 'r.pdf')), 'pdf')
   assert.equal(viewOf(row('vault', 'c.json')), 'text')
-  assert.equal(viewOf({ ...row('vault', 'board.base'), capabilities: { read: true, download: true, write: true, create: false } }), 'text', 'writable is text')
+  assert.equal(viewOf({ ...row('vault', 'notes.base'), capabilities: { read: true, download: true, write: true, create: false } }), 'text', 'writable is text')
   assert.deepEqual(capsOf({ capabilities: { read: true, write: 'yes' } }), { read: true, download: false, write: false, create: false, rename: false })
   assert.deepEqual(capsOf({}), { read: false, download: false, write: false, create: false, rename: false })
   assert.equal(tileOf('a.md').label, 'MD')

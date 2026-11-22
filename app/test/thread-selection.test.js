@@ -13,7 +13,7 @@ function setup(t) {
   t.after(() => threads.pause())
   return threads
 }
-const select = (threads, id) => { threads.st.open = { thread: threads.st.threads.find((t) => t.id === id), messages: [], permissions: new Map(), typing: new Set(), turns: [], board: { markdown: '' } } }
+const select = (threads, id) => { threads.st.open = { thread: threads.st.threads.find((t) => t.id === id), messages: [], permissions: new Map(), typing: new Set(), turns: [] } }
 
 test('pinned and recent are matching unboxed sections; only the open desktop thread is current', (t) => {
   const threads = setup(t)

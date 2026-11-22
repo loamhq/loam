@@ -111,7 +111,7 @@ moss. Cuts vary in bark, wood, ring spacing, heart and cracks. Granite landmarks
 have dawn/day/dusk skies; the light reading paper is granite and pale sky.
 Autumn keeps its approved style, with different leaf species/tones for the
 previously similar slots. Foundry's approved tags remain, with outer panes,
-boards, grouped cards and menus brought into its 8/10/14px corner scale.
+grouped cards and menus brought into its 8/10/14px corner scale.
 [Review passes and checks](evidence/distinct-faces/README.md).
 
 ## Broker integration required before persistence can be called complete

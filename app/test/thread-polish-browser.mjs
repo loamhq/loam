@@ -29,7 +29,7 @@ const routes = {
 function emit(id, event) { for (const res of streams.get(id) ?? []) res.write(`data: ${JSON.stringify(event)}\n\n`) }
 function addRoutes(id) {
   const base = `/v1/threads/${id}`
-  for (const [method, suffix] of [['GET', ''], ['PATCH', ''], ['DELETE', ''], ['POST', '/messages'], ['GET', '/board'], ['PUT', '/board']]) {
+  for (const [method, suffix] of [['GET', ''], ['PATCH', ''], ['DELETE', ''], ['POST', '/messages']]) {
     routes[`${method} ${base}${suffix}`] = async (req, res, url, raw) => {
       if (expire) return json(res, { error: 'Sign in again' }, 401)
       const answer = await f.api(method, `/threads/${id}${suffix}${url.search}`, raw ? JSON.parse(raw) : undefined)
@@ -41,7 +41,7 @@ function addRoutes(id) {
   routes[`POST ${base}/attachments`] = (req, res, url, raw) => {
     assert.match(req.headers['content-type'], /multipart\/form-data/)
     assert.match(raw, /name="file"/)
-    json(res, { attachments: [{ path: '98_ATTACHMENTS/test/Board-notes.md', name: 'Board-notes.md', size: 12, type: 'text/markdown' }] }, 201)
+    json(res, { attachments: [{ path: '98_ATTACHMENTS/test/Team-notes.md', name: 'Team-notes.md', size: 12, type: 'text/markdown' }] }, 201)
   }
   routes[`GET ${base}/events`] = (req, res) => {
     if (expire) return json(res, { error: 'Sign in again' }, 401)
@@ -53,8 +53,6 @@ function addRoutes(id) {
   }
 }
 for (const t of (await f.api('GET', '/threads')).threads) addRoutes(t.id)
-const generalBoard = await f.api('GET', '/threads/general/board')
-await f.api('PUT', '/threads/general/board', { markdown: generalBoard.markdown.replace('# Inbox\n\n', '# Inbox\n\n> A place for things worth keeping\n> beyond this conversation.\n\n') })
 const broker = await fakeBroker(routes), app = await appAgainst(broker)
 const browser = await chromium.launch({ executablePath: process.env.LOAM_CHROME, headless: true,
   args: ['--no-sandbox', '--disable-gpu', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] })
@@ -89,10 +87,6 @@ try {
     await page.locator('.tt-message.mine').filter({ hasText: 'A thought before the thread is created.' }).waitFor()
     assert.equal(await page.locator('.tt-typing').count(), 0, 'a nobody thread starts no turn')
     await shot('quiet-thread')
-    await page.locator('.tt-board-button').click()
-    await page.getByText('A short list for this thread. You and the agents can edit it.', { exact: true }).waitFor()
-    await shot('empty-board')
-    await page.getByRole('button', { name: 'Close board', exact: true }).filter({ hasNot: page.locator('.tt-board-scrim') }).click()
     await page.getByTitle('Thread details', { exact: true }).click()
     await page.getByTitle('Rename thread', { exact: true }).click()
     await page.getByRole('textbox', { name: 'Thread title', exact: true }).fill('Room for a good idea')
@@ -139,13 +133,13 @@ try {
     await page.getByTitle('Attach a file', { exact: true }).click()
     const chosen = page.waitForEvent('filechooser')
     await page.getByRole('button', { name: /Upload a file/ }).click()
-    await (await chosen).setFiles({ name: 'Board notes.md', mimeType: 'text/markdown', buffer: Buffer.from('A short note') })
-    await page.locator('.chip-name').filter({ hasText: 'Board-notes.md' }).waitFor()
+    await (await chosen).setFiles({ name: 'Team notes.md', mimeType: 'text/markdown', buffer: Buffer.from('A short note') })
+    await page.locator('.chip-name').filter({ hasText: 'Team-notes.md' }).waitFor()
     await shot('composer')
     await page.locator('.roundsend').click()
     await page.waitForFunction(() => !document.querySelector('.attachstrip') && !document.querySelector('#draft')?.textContent)
     const attachmentMessage = JSON.parse(broker.seen.filter((r) => r.path === `/v1/threads/${id}/messages`).at(-1).body)
-    assert.deepEqual(attachmentMessage.attachments, ['98_ATTACHMENTS/test/Board-notes.md'])
+    assert.deepEqual(attachmentMessage.attachments, ['98_ATTACHMENTS/test/Team-notes.md'])
     await page.waitForTimeout(2500)
     emit(id, { type: 'turn.started', persona: 'sprout' })
     emit(id, { type: 'message.delta', persona: 'sprout', draft: 'First I will read the note.' })
@@ -183,12 +177,8 @@ try {
     await page.getByTitle('Thread details', { exact: true }).click()
     assert.equal(await page.getByRole('textbox', { name: 'Thread title' }).count(), 0)
     assert.equal(await page.getByRole('button', { name: 'Delete thread', exact: true }).count(), 0)
-    await page.getByRole('button', { name: 'Open board', exact: true }).click()
-    assert.equal(await page.locator('.tt-board-prose blockquote br').count(), 0, 'the header quote reflows')
-    assert.match(await page.locator('.tt-board-prose blockquote').innerText(), /worth keeping beyond this conversation/)
-    await shot('full-board')
     assert.deepEqual(errors, [])
-    results.push({ width, theme, optimisticCreation: true, noDefault: true, mentions: true, dictate: 'fake microphone + fake transcription', upload: true, memberAndMessageModels: true, orderedStreaming: true, details: true, emptyAndFullBoards: true, cleanup: true, errors })
+    results.push({ width, theme, optimisticCreation: true, noDefault: true, mentions: true, dictate: 'fake microphone + fake transcription', upload: true, memberAndMessageModels: true, orderedStreaming: true, details: true, cleanup: true, errors })
     console.log(`Checked polished threads at ${width}px ${theme}`)
     await context.close()
   }

@@ -137,10 +137,8 @@ email = "loam@{name}.test"
                 t["last_attempt_at"] = then
         self.state_file.write_text(json.dumps(s))
 
-    def board(self) -> str:
-        """Return the system persona's recorded notification without reading a board post."""
-        p = self.vault / "Inbox" / "boards" / "general.md"
-        assert not p.exists() or "backup of your" not in p.read_text(), "nothing on the board"
+    def notification(self) -> str:
+        """Return the notification supplied to the selected agent."""
         told = sorted((self.home / "attention").glob("2*.json"))
         return "\n".join(f"{r['fact']} · {r.get('evidence')}" for r in
                          (json.loads(f.read_text()) for f in told))
@@ -441,13 +439,13 @@ class Plugin(unittest.TestCase):
         (self.i.vault / "mine.md").write_text("m\n")
         out = self.i.backup("push", "--now", "vault")
         self.assertEqual(out[0]["kind"], "diverged")
-        self.assertNotIn("backup of your vault", self.i.board(), "one failure is not told")
+        self.assertNotIn("backup of your vault", self.i.notification(), "one failure is not told")
         out = self.i.backup("push", "--now", "vault")
         self.assertEqual(out[0]["attempts"], 2)
         self.assertEqual(git(self.rv, "rev-parse", "main"), theirs, "never forced")
-        board = self.i.board()
-        self.assertIn("backup of your vault has been failing since", board)
-        self.assertIn("Settings › Plugins › Git backup", board)
+        notice = self.i.notification()
+        self.assertIn("backup of your vault has been failing since", notice)
+        self.assertIn("Settings › Plugins › Git backup", notice)
         status = self.i.backup("status")
         self.assertEqual(status["trees"][0]["level"], "fail")
         self.assertEqual(status["summary"]["level"], "fail")
@@ -458,7 +456,7 @@ class Plugin(unittest.TestCase):
                             "GIT_COMMITTER_NAME": "s", "GIT_COMMITTER_EMAIL": "s@s"})
         out = self.i.backup("push", "--now", "vault")
         self.assertTrue(out[0]["ok"], out)
-        self.assertIn("backup of your vault works again", self.i.board())
+        self.assertIn("backup of your vault works again", self.i.notification())
 
     def test_a_public_repository_is_refused_and_nothing_is_sent(self):
         public = bare(self.base, "public")
@@ -476,7 +474,7 @@ class Plugin(unittest.TestCase):
         out = self.i.backup("push", "--now", "vault", env={"LOAM_GIT_BACKUP_ANON": flip})
         self.assertEqual(out[0]["kind"], "public")
         self.assertEqual(git(self.rv, "rev-parse", "main"), before)
-        self.assertIn("This repository is public", self.i.board(), "told at once")
+        self.assertIn("This repository is public", self.i.notification(), "told at once")
 
     def test_a_file_too_large_does_not_stop_the_rest(self):
         self.connect_both()

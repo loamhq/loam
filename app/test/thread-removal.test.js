@@ -6,7 +6,7 @@ import { installDom } from './fakedom.js'
 
 const row = { id: 'one', title: 'A thought', members: [{ persona: 'sprout' }], unread: 3 }
 const record = () => ({ thread: structuredClone(row), messages: [{ id: 'm1', author: 'sprout', text: 'Still here.' }],
-  has_more: false, turn: null, board: { path: 'board.md', markdown: '' } })
+  has_more: false, turn: null })
 const listing = (rows = [row]) => ({ threads: structuredClone(rows), agents: [{ id: 'sprout' }] })
 const missing = () => Object.assign(new Error('Thread not found'), { status: 404 })
 

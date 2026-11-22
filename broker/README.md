@@ -3050,8 +3050,8 @@ only their metadata comments. Its journal and the thread state's
 - **The name is sanitised into a name.** Directory parts go (both separators —
   a Windows browser sends backslashes), anything that is not a letter, digit,
   dot, dash or underscore becomes a dash, and leading dots go, so an upload
-  can write neither a dotfile nor `..`. `Board notes (final).md` is stored as
-  `Board-notes--final-.md`; the `name` in the answer is the stored name, and
+  can write neither a dotfile nor `..`. `Team notes (final).md` is stored as
+  `Team-notes--final-.md`; the `name` in the answer is the stored name, and
   the page shows that rather than what the person's disk called it.
 - **A second file of the same name lands beside the first**, as
   `shot-1.png`, never over it.
@@ -3411,8 +3411,7 @@ Exactly one of `name` and `to`. `200` answers the row at its new place, plus
 - **Pinned names** are `403 {"error": "vault/<path> keeps its name: <why>",
   "authority": "user", "pinned": true}`: every top-level vault folder (the
   vault's structure), and the vault paths the runtime reads or writes by name
-  (`RENAME_PINNED` in `lib/loam_files.py`: `00_INBOX/boards/*`,
-  `00_INBOX/from-agents/comms.md` and `loam-wake-failures.md`,
+  (active contributed thread files and `RENAME_PINNED` in `lib/loam_files.py`, including the failure ledger,
   `00_INBOX/archive`, `40_PROJECTS/*/receipts`, the Loam engineer notes
   `bin/provision` copies, `40_PROJECTS/Loam/infrastructure/schedule.md`,
   `architecture`, `decisions`, `reports`, `99_SYSTEM/Dictation terms.md`,
@@ -5246,21 +5245,21 @@ hours on; an idle one ended and resumed by id).
 
 | route | what |
 |---|---|
-| `GET /v1/threads[?archived=1]` | `{threads: [{id, title, default, icon, members[{persona, engine, model, last_spoke_at, running, busy, background, background_tasks, working}], background, working, last{author,text,at}, unread, board_new, board, pinned, archived, general, created}], agents}`; `background` and `working` per member and on the row since 2026-11-10 (see "Who is working, and on what" below); General pinned first, made on first read. `default` is null for a thread nobody answers untagged; `model` a member's own choice, null for the persona's default; `last_spoke_at` the member's last message or wake bulletin (null if never); `running` (and its other name `busy`) true for each member whose turn is in flight (several at once since 2026-11-10). Archived threads only with `?archived=1`, beside the rest (2026-11-09) |
+| `GET /v1/threads[?archived=1]` | `{threads: [{id, title, default, icon, members[{persona, engine, model, last_spoke_at, running, busy, background, background_tasks, working}], background, working, last{author,text,at}, unread, pinned, archived, general, created}], agents}`; `background` and `working` per member and on the row since 2026-11-10 (see "Who is working, and on what" below); General pinned first, made on first read. `default` is null for a thread nobody answers untagged; `model` a member's own choice, null for the persona's default; `last_spoke_at` the member's last message or wake bulletin (null if never); `running` (and its other name `busy`) true for each member whose turn is in flight (several at once since 2026-11-10). Archived threads only with `?archived=1`, beside the rest (2026-11-09) |
 | `GET /v1/threads/events` | SSE, the list live: `threads.snapshot{threads, agents}`, then `thread.changed{thread, summary}` whenever a row moves (the engine's own events, and a stat of every record every 2 s for `bin/thread` posts and Obsidian edits) and `thread.removed{thread}` (2026-11-09) |
 | `POST /v1/threads {persona?, text?, title?}` | 201 and the row; titled by the first message unless named. With no `persona` the thread has no default and no members (2026-11-09) |
-| `DELETE /v1/threads/:id` | removes the record and its board from the vault and the thread's runtime state → `{deleted, thread, removed[paths]}`. The owner's explicit action only (the app confirms); `409` mid-turn; General `400` |
+| `DELETE /v1/threads/:id` | removes the record and its active contributed files from the vault and the thread's runtime state → `{deleted, thread, removed[paths]}`. The owner's explicit action only (the app confirms); `409` mid-turn; General `400` |
 | `POST /v1/threads/:id/attachments` | multipart `file` parts → `201 {attachments[{path, name, size, type}]}`; starts nothing |
-| `GET /v1/threads/:id?limit=&before=<msg id>` | `{thread, messages[{id, author, at, kind, text, did[{label}], segments?, attachments?, model?, engine?, late?, reply_to?}], has_more, turn, turns, marks[{persona, text, at}], pending_permissions, board{path, markdown}}`, newest page; `marks` (2026-11-19) are the turn marks below, never in `messages`; `turns` every turn in flight, earliest first, `turn` the earliest (2026-11-10); a read without `before` marks the thread read, unless `?seen=0` (2026-11-10: a read that is not the owner looking -- a page's background refresh -- writes nothing). `before=<msg id>` is a position: the messages earlier **in the record** than that one, in record order (2026-11-10; a recovered late reply sits where it was recovered, so ids are not in record order); an id the record lacks falls back to the number cut. `thread` is the row, members with `background` and `working` (2026-11-10); `model` on a persona message is the id the engine ran it on (see "Model and provider on every reply") |
+| `GET /v1/threads/:id?limit=&before=<msg id>` | `{thread, messages[{id, author, at, kind, text, did[{label}], segments?, attachments?, model?, engine?, late?, reply_to?}], has_more, turn, turns, marks[{persona, text, at}], pending_permissions}`, newest page; `marks` (2026-11-19) are the turn marks below, never in `messages`; `turns` every turn in flight, earliest first, `turn` the earliest (2026-11-10); a read without `before` marks the thread read, unless `?seen=0` (2026-11-10: a read that is not the owner looking -- a page's background refresh -- writes nothing). `before=<msg id>` is a position: the messages earlier **in the record** than that one, in record order (2026-11-10; a recovered late reply sits where it was recovered, so ids are not in record order); an id the record lacks falls back to the number cut. `thread` is the row, members with `background` and `working` (2026-11-10); `model` on a persona message is the id the engine ran it on (see "Model and provider on every reply") |
 | `PATCH /v1/threads/:id {title?, icon?, pinned?, archived?, default?: persona\|null, add?, remove?, engine{persona: engine}?, model{persona: model\|null}?, seen?}` | the row. A changed default is said in the thread as a system line ("the owner made Iris the default", or that nobody is). A `model` is checked against the member's engine (Claude Code's aliases and ids, Codex's `model/list`, Antigravity's `agy models`); an engine switch clears it. Archive moves nothing on disk. General can't be renamed, archived or unpinned (`400`) |
 | `POST /v1/threads/:id/messages {text, attachments?: [path], model?, reply_to?}` | mentions join and get turns, else the default, else nobody; `@all`/`@everyone` gives every member a turn (2026-11-10, below). `attachments` are paths the upload route stored; they go on the message and to the turns it starts. `model` is those turns' model over each member's own, checked against their engines. Nothing moves the default but a PATCH `reply_to` (2026-11-11) is the id of an earlier message in this thread that this one answers: `400` if it is not an id like `m12`, `404` if this thread has no such message, and nothing is written or started either way (see "Replying to a message" below) |
 | `PUT /v1/threads/:id/messages` | Same body plus a stable `submission_id`. A thread read or creation advertising `ordered_submissions` supports this route. A retry returns the original accepted message. Reusing its key with different content returns 409. The broker records the audience before filing the message and can finish scheduling it after restart. |
-| `PUT /v1/threads/:id/board {markdown}` (and `GET`) | the board, saved whole |
+| `GET /v1/threads/:id/files/:plugin`, `PUT` with `{markdown, base_revision}` | Active contributed Markdown file. A conflicting save returns 409. |
 | `GET /v1/threads/:id?steps=full` | the same page, each message with `steps`: its full record's steps (below), `null` for a message with none (a person's, a system line, a reply from before the record). Off by default, so the default read stays light (2026-11-10) |
 | `GET /v1/threads/:id/steps[?message=<msg id>]` | `{thread, steps: [entry]}`: the full record, one entry per reply, for the whole thread or one message (`404` for a message with none) (2026-11-10) |
 | `GET /v1/threads/writer` | the record writer's counts since the broker started: `{since, replies, late_recovered, late_prompt, fanout, parallel, delivered_while_waiting, reply_to, carried, rotated, steps_written, steps_failed, last_failure}` (2026-11-10; `rotated` 2026-11-11: turns that started a fresh session because the old one passed the context threshold). `parallel`: turns started while another member's ran; `late_prompt`: replies the after-result watch posted as they finished; `fanout`: turns `@all` made beyond its message's own mentions |
 | `GET /v1/threads/imported[?session=<id>]` | classic chats imported as threads (2026-11-11, below): `{imported: {session id: thread id}}`, or for one session `{session, thread}` and `404` for one never imported. What a link or bookmark to a classic chat is sent through. Each imported thread's row also carries `imported_from` (the session id) and `source` (its transcript, vault-relative); both null on every other thread |
-| `GET /v1/threads/:id/events?after=<msg id>[&steps=full]` | SSE: `thread.snapshot{turn, turns, marks, pending, members}`, `members{members, background, working}` (2026-11-10), `turn.started{persona, engine}`, `message.delta{persona, text, draft}`, `turn.step{persona, label, steps, after_result?}`, `message.done{message}` (with `message.steps` on `?steps=full`), `member.joined{persona, by}`, `board.changed{board_new}`, `thread.changed{summary}`, `turn.waiting{persona, text}`, `turn.mark{persona, text, at}` (2026-11-19), `turn.finished{persona}`, and `broker.permission_request`/`broker.permission_resolved` with `persona` and `session_id`, answered on `POST /v1/sessions/<session_id>/permissions/<request_id>` as today |
+| `GET /v1/threads/:id/events?after=<msg id>[&steps=full]` | SSE: `thread.snapshot{turn, turns, marks, pending, members}`, `members{members, background, working}` (2026-11-10), `turn.started{persona, engine}`, `message.delta{persona, text, draft}`, `turn.step{persona, label, steps, after_result?}`, `message.done{message}` (with `message.steps` on `?steps=full`), `member.joined{persona, by}`, `thread.changed{summary}`, `turn.waiting{persona, text}`, `turn.mark{persona, text, at}` (2026-11-19), `turn.finished{persona}`, and `broker.permission_request`/`broker.permission_resolved` with `persona` and `session_id`, answered on `POST /v1/sessions/<session_id>/permissions/<request_id>` as today |
 
 The stream opens with `thread.snapshot`: `turns` is every turn in flight,
 earliest first, and `turn` the earliest (`{persona, engine}`, or null), and
@@ -5523,7 +5522,7 @@ records `<thread> <member>: private summary saved through <message> (<provider>)
 or a deferral. To watch, run
 `journalctl --user -fu loam-session-broker.service --grep='private summary'`.
 No summary runs are queued for pre-existing sessions until another turn.
-The thread, board, unread marker and app event streams receive no housekeeping
+The thread, unread marker and app event streams receive no housekeeping
 output.
 
 **Sessions rotate instead of growing.** A member's session for a thread is
@@ -5694,11 +5693,7 @@ reply's do, under the same cap, counting the agents' posts since the owner
 last wrote; before, a post gave nobody a turn. They rename one with
 `bin/thread rename <id> <title>` (the tool's `rename` action, 2026-11-10),
 which is the details page's PATCH path, `loam_threads.update(title=)`: the
-record's `title:` and file name and the board's file and `board:` key move
-together (a board name another thread holds gets ` (2)`), General refuses,
-no line is left in the thread, and an open app sees it on the list stream's
-2-second stat. `bin/sweep-boards`
-(`loam-board-expiry.timer`, hourly) removes items whose `until` has passed.
+record’s title and file name move together with any active contributed files. General keeps its name. The list stream reports the new title.
 
 ### Classic chats imported as threads (2026-11-11)
 
@@ -5773,7 +5768,7 @@ An agent can open the same composer with `bin/thread branch <thread>
 branches keep their saved `branched_window`, system links and opening drafts.
 
 `tests/test_thread_branch.py` covers both the record and delivery to a
-provider session. See the [browser contract](../app/docs/threads-and-boards.md#branching-from-a-message).
+provider session. See the [browser contract](../app/docs/threads.md#branching-from-a-message).
 
 ### A thread's engineer jobs (2026-11-13)
 

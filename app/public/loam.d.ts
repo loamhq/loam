@@ -12,6 +12,8 @@ export interface Registration {
   id: string
   order?: number
   slot?: string
+  view?: string
+  dirty?(context: Context): boolean
   component?: ComponentId | (string & {})
   when?: (context: Context) => boolean
   list?: (context: Context) => any

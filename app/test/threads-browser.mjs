@@ -41,7 +41,6 @@ routes['POST /v1/threads'] = async (req, res, url, body) => {
 let lastMessage = null
 let refuseSend = false
 let messageDelay = 0
-let refuseBoard = false
 let refuseRead = false
 let paginate = false
 let emptyListing = false
@@ -57,10 +56,9 @@ for (const id of ['approval', 'question']) routes[`POST /v1/sessions/fixture-ses
 }
 function addRoutes(id) {
   const base = `/v1/threads/${id}`
-  for (const [method, suffix] of [['GET', ''], ['PATCH', ''], ['POST', '/messages'], ['PUT', '/board'], ['GET', '/board']]) {
+  for (const [method, suffix] of [['GET', ''], ['PATCH', ''], ['POST', '/messages']]) {
     routes[`${method} ${base}${suffix}`] = async (req, res, url, raw) => {
       if (method === 'GET' && refuseRead) return json(res, { error: 'The vault could not be read.' }, 503)
-      if (suffix === '/board' && refuseBoard) return json(res, { error: 'The board changed. Review the latest version.' }, 409)
       if (suffix === '/messages' && refuseSend) return json(res, { error: 'The engine is taking a moment. Try again shortly.' }, 429)
       if (suffix === '/messages' && messageDelay) await new Promise((r) => setTimeout(r, messageDelay))
       const body = raw ? JSON.parse(raw) : undefined
@@ -112,31 +110,10 @@ try {
     assert.equal(await page.locator('.fold-head').first().getAttribute('aria-expanded'), 'true')
     await page.locator('.tt-mentions button').click()
     assert.equal(await page.locator('#draft').innerText(), 'A thought for @quill ')
-    await page.getByRole('button', { name: 'Board', exact: true }).click()
-    await shot('board-new')
-    await page.getByRole('button', { name: 'Mark seen', exact: true }).click()
-    await page.waitForFunction(() => !document.querySelector('.tt-board-item.is-new'))
-    assert.equal(await page.locator('.tt-board-item').count(), 4, 'seeing keeps items')
-    await page.getByRole('checkbox', { name: 'Complete Pick the week’s one important thing', exact: true }).check()
-    await page.getByRole('checkbox', { name: 'Complete Pick the week’s one important thing', exact: true }).waitFor({ state: 'visible' })
-    await page.getByRole('textbox', { name: 'Add to the board', exact: true }).fill('Leave a little room for a walk')
-    await page.getByRole('group', { name: 'Keep board item for' }).getByRole('button', { name: '1 week', exact: true }).click()
-    await page.getByRole('button', { name: '+ Add', exact: true }).click()
-    await page.locator('.tt-board-item').filter({ hasText: 'Leave a little room for a walk' }).waitFor()
-    await page.locator('.tt-board-head').getByRole('button', { name: 'Edit board', exact: true }).click()
-    await shot('board-edit')
-    assert.match(await page.getByRole('textbox', { name: 'Board markdown' }).inputValue(), /<!-- Sprout -->/)
-    assert.match(await page.getByRole('textbox', { name: 'Board markdown' }).inputValue(), /- \[x\] Pick the week/)
-    await page.locator('.tt-board-head').getByRole('button', { name: 'Cancel editing', exact: true }).click()
-    await page.getByRole('button', { name: 'Remove Leave a little room for a walk', exact: true }).click()
-    await page.locator('.tt-board-item').filter({ hasText: 'Leave a little room for a walk' }).waitFor({ state: 'detached' })
-    await page.getByRole('button', { name: 'Close board', exact: true }).click()
     if (width < 1100) await page.getByRole('button', { name: 'Back to threads' }).click()
     await page.locator('.tt-row').filter({ hasText: 'General' }).click()
     await page.locator('.tt-speaker .tag').first().waitFor()
-    await page.getByRole('button', { name: 'Board', exact: true }).click()
     await shot('general')
-    await page.getByRole('button', { name: 'Close board', exact: true }).click()
     if (width < 1100) {
       await page.getByRole('button', { name: 'Back to threads' }).click()
     }
@@ -194,38 +171,12 @@ try {
   console.log('Checked automatic recovery, live steps and engine changes')
   results.push({ relay: true, automaticDefault: true, streamedReply: true, mentionJoined: true, engineChanged: true, refusedDraftRetained: true })
   refuseSend = false
-  await page.locator('.tt-board-button').click()
-  await page.locator('.tt-board-head').getByRole('button', { name: 'Edit board', exact: true }).click()
-  const boardText = await page.getByRole('textbox', { name: 'Board markdown' }).inputValue()
-  await page.getByRole('textbox', { name: 'Board markdown' }).fill(boardText + '\nA draft worth keeping.\n')
-  await f.api('PUT', '/threads/a-quieter-week/board', { markdown: boardText + '\nAn external update.\n' })
-  await page.getByRole('button', { name: 'Copy draft', exact: true }).waitFor()
-  assert.equal(await page.getByRole('button', { name: 'Save board', exact: true }).isDisabled(), true)
-  assert.match(await page.getByRole('textbox', { name: 'Board markdown' }).inputValue(), /A draft worth keeping/)
-  await page.locator('.tt-board-head').getByRole('button', { name: 'Cancel editing', exact: true }).click()
-  await page.locator('.tt-board-prose').filter({ hasText: 'An external update.' }).waitFor()
-  await page.locator('.tt-board-head').getByRole('button', { name: 'Edit board', exact: true }).click()
-  await page.getByRole('textbox', { name: 'Board markdown' }).fill(boardText + '\nAn external update.\nA draft worth keeping.\n')
-  refuseBoard = true
-  await page.getByRole('button', { name: 'Save board', exact: true }).click()
-  await page.getByRole('alert').filter({ hasText: 'The board changed' }).waitFor()
-  assert.match(await page.getByRole('textbox', { name: 'Board markdown' }).inputValue(), /A draft worth keeping/)
-  assert.equal(await page.getByRole('button', { name: 'Save board', exact: true }).isDisabled(), true)
-  refuseBoard = false
-  await page.locator('.tt-board-head').getByRole('button', { name: 'Cancel editing', exact: true }).click()
-  await page.locator('.tt-board-head').getByRole('button', { name: 'Edit board', exact: true }).click()
-  await page.getByRole('textbox', { name: 'Board markdown' }).fill(boardText + '\nA draft worth keeping.\n')
-  await page.getByRole('button', { name: 'Save board', exact: true }).click()
-  await page.getByRole('textbox', { name: 'Board markdown' }).waitFor({ state: 'detached' })
-  await page.getByRole('button', { name: 'Close board', exact: true }).click()
   await page.getByRole('button', { name: 'Back to threads' }).click()
   refuseRead = true
   await page.locator('.tt-row').filter({ hasText: 'A little room for the week' }).click()
   await page.getByRole('alert').filter({ hasText: 'The vault could not be read' }).waitFor()
-  await page.locator('.tt-board-button').click()
-  assert.equal(await page.getByRole('button', { name: 'Edit board', exact: true }).count(), 0, 'an unread board cannot be overwritten with an empty one')
   refuseRead = false
-  results.push({ boardRefusalKeepsDraft: true, liveBoardConflictPreservesDraft: true, unreadBoardCannotBeOverwritten: true, slowSendReadonly: true })
+  results.push({ slowSendReadonly: true })
   await context.close()
 
   for (const width of [390, 1440]) {
@@ -316,15 +267,7 @@ try {
   const replay = broker.seen.slice(reconnectStart)
   assert.ok(replay.some((r) => r.path.endsWith('/events') && r.search === `?after=${cursor}`))
   assert.equal(replay.filter((r) => r.path === '/v1/threads/a-quieter-week' && (r.method === 'GET' || r.method === 'PATCH')).length, 0, 'scroll-back reconnect cannot mark the thread read')
-  const beforeBoard = broker.seen.length
-  const oldBoard = await f.api('GET', '/threads/a-quieter-week/board')
-  await f.api('PUT', '/threads/a-quieter-week/board', { markdown: oldBoard.markdown + '\nA board-only live update.\n' })
-  await morePage.getByRole('button', { name: 'Board', exact: true }).click()
-  await morePage.getByText('A board-only live update.', { exact: true }).waitFor()
-  assert.ok(broker.seen.slice(beforeBoard).some((r) => r.path.endsWith('/board') && r.method === 'GET'))
-  assert.equal(broker.seen.slice(beforeBoard).some((r) => r.path === '/v1/threads/a-quieter-week' && r.method === 'GET'), false)
-  results.push({ reconnectAfterMessageId: true, replayDeduplicated: true, scrollBackNeverMarkedRead: true, boardReadUsesBoardEndpoint: true, liveToolStep: true, immediateSend: true })
-  await morePage.getByRole('button', { name: 'Close board', exact: true }).click()
+  results.push({ reconnectAfterMessageId: true, replayDeduplicated: true, scrollBackNeverMarkedRead: true, liveToolStep: true, immediateSend: true })
   const longTitle = 'A very long thread title with plenty of room to think together '.repeat(6).trim()
   await morePage.getByTitle('Thread details', { exact: true }).click()
   await morePage.getByTitle('Rename thread', { exact: true }).click()

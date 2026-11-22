@@ -514,7 +514,7 @@ on a loam-ui landing and a live one still does.
 **What the two copies share, and what each has of its own.** Read off
 loam-ui at `c5fbcc0` before the record was written:
 
-- **Shared, because it is the broker's:** threads, boards, schedules,
+- **Shared, because it is the broker's:** threads, schedules,
   Activity, providers, integrations, files, and the appearance settings
   (`GET/PATCH /v1/settings/appearance`, kept in `state/broker/settings.json`).
   The app is a relay: every stream it serves is opened per browser request

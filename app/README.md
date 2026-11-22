@@ -2,7 +2,7 @@
 
 A private web front door to coding agents on your own machine. Chats are
 threads: shared conversations with mentions, one provider/model per member,
-a changeable default agent and a markdown board. The working product name
+a changeable default agent. The working product name
 may change.
 
 Threads are the only chat view. The former session-based page, Settings →
@@ -39,14 +39,14 @@ with a quiet Close control. See its [states and checks](docs/evidence/sticky-aud
 Use **Branch into a new thread** beneath a completed message to take a topic
 elsewhere. Choose an agent and write your opening in the empty composer.
 The attached quote jumps to its source, where a small link opens the new
-thread. See the [branch contract](docs/threads-and-boards.md#branching-from-a-message).
+thread. See the [branch contract](docs/threads.md#branching-from-a-message).
 
 The thread header's **Tasks** panel combines persona background work and
 engineer jobs. Jobs keep their place after the persona session ends; recent
 outcomes stay for ten minutes and open their receipt in Files. See
-[the thread jobs contract](docs/threads-and-boards.md#engineer-jobs-in-tasks-2026-11-13).
+[the thread jobs contract](docs/threads.md#engineer-jobs-in-tasks-2026-11-13).
 
-- [Threads, boards, models, replies and opening behavior](docs/threads-and-boards.md)
+- [Threads, models, replies and opening behavior](docs/threads.md)
 - [Live sessions](docs/running.md), [Activity](docs/activity.md), [schedules](docs/schedules.md)
 - [Appearance](docs/appearance.md), [themes and tokens](docs/design-system.md), [shared menus](docs/menu-surfaces.md)
   — Light, Dark, Sun and System; Sun follows the saved home's sunrise/sunset offline.
@@ -278,7 +278,7 @@ shared rendering code. `imported-threads.js` is the legacy-address boundary.
 `running.js` owns session residency and ending; it still uses session routes.
 `src/server.js` serves the page and allowlists authenticated broker relays.
 
-Conversation records, boards, pins, titles, archives and read marks belong
+Conversation records, pins, titles, archives and read marks belong
 to the broker. The page holds transient thread drafts and reading positions;
 device preferences live in browser storage. Durable app data, including audio,
 lives under `/storage`; any future structured durable state uses SQLite there.
@@ -299,8 +299,6 @@ describes the runtime contract and staging checks. Owner identity comes from
 | `APPS_DOMAIN` | `example.com` | base domain whose HTTPS subdomains Apps may embed; no scheme, wildcard, port or path. Also used in the page CSP. |
 | `APP_TIME_ZONE` | `America/Los_Angeles` | installation IANA zone for displayed dates/times, daily/inbox note filenames and the initial Sun fallback. Browser locale/hour cycle and a saved Sun location remain personal choices. |
 | `VAULT_INBOX_FOLDER` | `00_INBOX` | default inbox folder; an explicit saved Files choice wins. |
-| `VAULT_BOARDS_FOLDER` | `00_INBOX/boards` | boards folder used by the design preview. Real thread board paths come from the broker. |
-| `VAULT_GENERAL_BOARD` | `00_INBOX/from-agents/comms.md` | general inbox board path whose quick notes use the runtime’s dated UTC format. |
 | `VAULT_ATTACHMENTS_FOLDER` | `98_ATTACHMENTS` | vault upload subtree used to resolve older absolute attachment paths; relative paths from the broker stay intact. |
 | `APP_MEDIA_DIR` | `/storage/app-media` | regenerable preview/icon cache and temporary capture profiles. A Loam install sets `/var/lib/loam-app/<app>/app-media`, the unit's state directory. |
 | `APP_PREVIEW_CHROME` | `chromium` | capture executable. A Loam install sets Debian's smaller `chromium-headless-shell`. No browser login/profile is loaded. |

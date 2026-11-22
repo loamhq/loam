@@ -733,7 +733,7 @@ plugin(YOURS, "lamp", files={"page/main.js": "export function activate() {}\n",
                              "assets/icon.svg": "<svg/>", "server/secret.py": "x",
                              "theme.css": "", "notes.txt": "private"})
 (YOURS / "lamp" / "page" / "out.js").symlink_to(TMP / "vault" / "00_INBOX" /
-                                                "from-agents" / "comms.md")
+                                                "from-agents" / "Owner notes.md")
 (YOURS / "lamp" / "assets" / "back.js").symlink_to(YOURS / "lamp" / "server" /
                                                    "secret.py")
 for rel, ctype in ((["page", "main.js"], "text/javascript; charset=utf-8"),

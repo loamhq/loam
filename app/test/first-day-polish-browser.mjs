@@ -69,14 +69,14 @@ async function day(vault) {
   r['GET /v1/threads'] = (req, res) => json(res, { threads: rows, agents: [iris] })
   r['GET /v1/threads/events'] = stream({ type: 'threads.snapshot', threads: rows, agents: [iris] })
   for (const { row, messages } of [...Object.values(threads), { row: fernFirst, messages: [{ id: 'm1', author: 'loam', kind: 'system', at: at(47), text: "Fern was made by Iris on Sam's yes (m6 in t-9e04d7b1). This is their first thread." }] }]) {
-    r[`GET /v1/threads/${row.id}`] = (req, res) => json(res, { thread: row, messages, has_more: false, turn: null, turns: [], board: { markdown: '', path: '' } })
+    r[`GET /v1/threads/${row.id}`] = (req, res) => json(res, { thread: row, messages, has_more: false, turn: null, turns: [] })
     r[`GET /v1/threads/${row.id}/events`] = stream({ type: 'thread.snapshot', turns: [], members: row.members, pending: [] })
     r[`PATCH /v1/threads/${row.id}`] = (req, res) => json(res, row)
   }
   r['GET /v1/agents/drafts'] = (req, res, url) => json(res, { drafts: url.searchParams.get('thread') === threads.meal.row.id ? [juniper] : [] })
   r['POST /v1/threads'] = (req, res, url, raw) => {
     const body = JSON.parse(raw || '{}'), row = thread('t-0a9f3c57', 'New thread', { default: body.persona ?? null, members: body.persona ? [{ ...member, persona: body.persona }] : [] })
-    r[`GET /v1/threads/${row.id}`] = (q, s) => json(s, { thread: row, messages: [], has_more: false, turn: null, turns: [], board: { markdown: '', path: '' } })
+    r[`GET /v1/threads/${row.id}`] = (q, s) => json(s, { thread: row, messages: [], has_more: false, turn: null, turns: [] })
     r[`GET /v1/threads/${row.id}/events`] = stream({ type: 'thread.snapshot', turns: [], members: row.members, pending: [] })
     json(res, row, 201)
   }

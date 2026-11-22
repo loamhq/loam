@@ -223,7 +223,7 @@ def refusals_reach_the_failure_log(rv, tmp: Path, check) -> None:
     stages = [json.loads(l)["stage"] for l in rv.LOG.read_text().splitlines()]
     check(stages == ["preflight"] * 2 + ["lock_timeout"] * 2,
           "each refusal is also in the reviewer's own log")
-    comms = rv.VAULT / "00_INBOX" / "from-agents" / "comms.md"
+    comms = rv.VAULT / "00_INBOX" / "from-agents" / "Owner notes.md"
     check(not comms.exists(), "and none of them posts a comms line")
 
 

@@ -104,8 +104,6 @@ async def main():
     await call('detail', 'GET', [tid], params={'limit': '1'})
     await call('history', 'GET', [tid], params={'before': 'm2', 'limit': '1'})
     await call('patch', 'PATCH', [tid], {'engines': {'sprout': 'codex'}, 'seen': True})
-    await call('board_put', 'PUT', [tid, 'board'], {'markdown': '# A little room\n\n## Next\n\n- [ ] A small step <!-- Sprout · new -->\n'})
-    await call('board_get', 'GET', [tid, 'board'])
     w = Writer()
     try: await s.thread_stream(tid, 'm0', w)
     except StopStream: pass

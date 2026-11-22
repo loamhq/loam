@@ -284,8 +284,8 @@ async def main() -> None:
     # -- 2, 3. the sanitising, the path, the bytes --------------------------
 
     ctype, body_bytes = multipart([
-        ("file", r"..\..\etc\Board notes (final).md", "text/markdown",
-         b"# Board notes\n\nThe wall held.\n"),
+        ("file", r"..\..\etc\Team notes (final).md", "text/markdown",
+         b"# Team notes\n\nThe wall held.\n"),
         ("file", "shot.png", "", PNG),
     ])
     status, body = await route(server, "POST",
@@ -295,10 +295,10 @@ async def main() -> None:
     stored = body["attachments"]
     check("...one entry per file", len(stored), 2)
     check("a name is a name and not a path", stored[0]["name"],
-          "Board-notes--final-.md")
+          "Team-notes--final-.md")
     check("...stored under the app and the day", stored[0]["path"],
-          str(day_dir / "Board-notes--final-.md"))
-    check("...with its size", stored[0]["size"], 30)
+          str(day_dir / "Team-notes--final-.md"))
+    check("...with its size", stored[0]["size"], 29)
     check("...and the type read off the extension, not the browser's guess",
           stored[0]["type"], "text/markdown")
     check("a part with no content-type of its own is still typed",
@@ -329,7 +329,7 @@ async def main() -> None:
            if line.startswith("- ")],
           [f"- {stored[1]['path']} (image/png, 69 B)"
            " -- the image itself is attached below",
-           f"- {stored[0]['path']} (text/markdown, 30 B)"])
+           f"- {stored[0]['path']} (text/markdown, 29 B)"])
     check("...then the image itself, as a base64 block",
           [b["type"] for b in sent[1:]], ["image"])
     check("...in the shape the CLI's input takes",
@@ -344,7 +344,7 @@ async def main() -> None:
              if e["type"] == "broker.user_message"][-1]
     check("broker.user_message carries the attachments",
           [a["name"] for a in event["attachments"]],
-          ["shot.png", "Board-notes--final-.md"])
+          ["shot.png", "Team-notes--final-.md"])
     check("...and the text a person actually typed", event["text"],
           "attachment check")
 

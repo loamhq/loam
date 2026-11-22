@@ -32,7 +32,7 @@ One registry, `lib/loam_settings.py`, and one way through it:
   do not, because they know what they clicked); a schedule change is logged as
   the persona's on the lane it ran in, held by `loam_schedule.validate()` to
   its own records and a reason; a session's end, an end-idle, a
-  board write and a delete are logged with the name in the broker's journal.
+  thread rename and a delete are logged with the name in the broker's journal.
   It is attribution, not authority: the token is what lets a caller in, and
   every holder of the token is a process on this box.
 - **Unattended lanes** (a wake or a cron; `LOAM_WAKE` set to anything but a
@@ -79,9 +79,8 @@ own `thread.*` rows cover the same things.
 | `thread.pinned` | Pinned | PATCH /api/threads/{id} | persona | no |
 | `thread.archived` | Archived | PATCH /api/threads/{id} | persona | no |
 | `thread.seen` | Marked read (the page: opening it) | GET /api/threads/{id} | persona | no |
-| `thread.board` | The board's Markdown and base_revision from its last read | PUT /api/threads/{id}/board | persona | yes, as a file |
 | `thread.create` | Start a thread | POST /api/threads | persona | no |
-| `thread.delete` | Delete a thread and its board | DELETE /api/threads/{id} | persona, conversation only | no |
+| `thread.delete` | Delete a thread and its active contributed files | DELETE /api/threads/{id} | persona, conversation only | no |
 | `session.end` | Running now: End | DELETE /api/sessions/{id} | persona, conversation only | no |
 | `sessions.end_idle` | Running now: End idle | POST /api/sessions/end-idle | persona, conversation only | no |
 | `schedule.enabled` | On or paused | PATCH /api/schedules/{agent}/{name} | persona, own, with a reason | yes, editing its own record file |

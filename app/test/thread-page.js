@@ -6,11 +6,10 @@ export function threadPage(routes, { agents = [{ id: 'scout', name: 'Scout', emo
   const line = (e) => `data: ${JSON.stringify(e)}\n\n`
   function add({ id, title = 'New thread', persona = agents[0].id, text = '', created = '2026-10-01T10:00:00Z' }) {
     const thread = { id, title, default: persona, members: [{ persona, engine: 'claude-code', model: null }], pinned: false, archived: false, unread: 0, created, last: text ? { author: persona, text, at: created } : null }
-    const record = { thread, has_more: false, turn: null, messages: text ? [{ id: 'm1', author: persona, kind: 'message', text, at: created }] : [], board: { path: `boards/${id}.md`, markdown: '' } }
+    const record = { thread, has_more: false, turn: null, messages: text ? [{ id: 'm1', author: persona, kind: 'message', text, at: created }] : [] }
     records.set(id, record)
     routes[`GET /v1/threads/${id}`] = (req, res) => json(res, record)
     routes[`GET /v1/threads/${id}/events`] = (req, res) => { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write(': open ping=15000\n\n'); res.write(line({ type: 'thread.snapshot', turn: null, pending: [] })) }
-    routes[`GET /v1/threads/${id}/board`] = (req, res) => json(res, record.board)
     routes[`POST /v1/threads/${id}/messages`] = (req, res, url, raw) => {
       const body = JSON.parse(raw); sent.push(body)
       const message = { id: `m${record.messages.length + 1}`, author: 'you', kind: 'message', text: body.text, at: new Date().toISOString() }

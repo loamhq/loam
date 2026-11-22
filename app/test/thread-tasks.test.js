@@ -17,7 +17,7 @@ function setup(t, extra = {}) {
     { id: 'empty', author: 'sprout', text: '', did: [{ label: 'Waiting on background work' }] },
     { id: 'draft:sprout', author: 'sprout', text: '', streaming: true },
     { id: 'reply', author: 'sprout', text: 'The completed reply.' },
-  ], typing: new Set(['sprout', 'quill']), permissions: new Map(), steps: new Map(), turns: [], board: { markdown: '', path: '' } }
+  ], typing: new Set(['sprout', 'quill']), permissions: new Map(), steps: new Map(), turns: [] }
   t.after(() => threads.pause())
   return { threads, view: () => threads.view(false) }
 }

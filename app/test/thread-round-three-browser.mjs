@@ -21,7 +21,7 @@ const routes = {
   'POST /v1/threads': async(req,res,url,raw) => {const row=await f.api('POST','/threads',JSON.parse(raw));created.add(row.id);addRoutes(row.id);json(res,row,201)},
 }
 function addRoutes(id) {
-  for(const [method,suffix] of [['GET',''],['PATCH',''],['DELETE',''],['POST','/messages'],['GET','/board']]) routes[`${method} /v1/threads/${id}${suffix}`]=async(req,res,url,raw)=>{
+  for(const [method,suffix] of [['GET',''],['PATCH',''],['DELETE',''],['POST','/messages']]) routes[`${method} /v1/threads/${id}${suffix}`]=async(req,res,url,raw)=>{
     const answer=await f.api(method,`/threads/${id}${suffix}${url.search}`,raw?JSON.parse(raw):undefined)
     if(method==='DELETE')created.delete(id)
     json(res,answer)

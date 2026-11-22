@@ -38,7 +38,7 @@ function setup(t, { ignore = false } = {}) {
     api: async (method, path, body) => { calls.push({ method, path, body }); if (!ignore) Object.assign(record, body); return structuredClone(record) },
     compose: { field: () => field, render: () => h('div'), dictating: () => dictating, files: () => [], dragProps: () => ({}) } })
   threads.st.threads = [record]
-  threads.st.open = { thread: structuredClone(record), messages: [], permissions: new Map(), typing: new Set(), turns: [], board: { markdown: '' } }
+  threads.st.open = { thread: structuredClone(record), messages: [], permissions: new Map(), typing: new Set(), turns: [] }
   const view = () => threads.view(true)
   t.after(() => threads.pause())
   return { threads, record, calls, view, field, dictate: (next) => { dictating = next } }

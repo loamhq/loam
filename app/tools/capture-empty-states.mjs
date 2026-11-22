@@ -2,13 +2,13 @@
 // at 390 and 1440, light and dark, in Latte and in Autumn, against the
 // fixture app (test/market-fixture.mjs: invented records, no person's data):
 // the empty Market, the build-it state under results, a Market search with
-// no match, no threads, a thread search with no match, an empty board, and
+// no match, no threads, a thread search with no match, and
 // Files with nothing open and no apps; and a specimen sheet of every object
 // at every size (EMPTY_THEMES=all: in every shipped theme).
 //
 //   EMPTY_EVIDENCE=<folder> LOAM_PLAYWRIGHT=<playwright/index.mjs> LOAM_CHROME=<chromium> node tools/capture-empty-states.mjs
 //
-// EMPTY_ONLY=market-empty,board-empty narrows it to some surfaces. Fails on
+// EMPTY_ONLY=market-empty,apps-empty narrows it to some surfaces. Fails on
 // a page error, sideways overflow, or an empty state missing its drawing.
 import assert from 'node:assert/strict'
 import { readFile, readdir, mkdir } from 'node:fs/promises'
@@ -47,8 +47,6 @@ const SURFACES = {
     await page.getByRole('searchbox', { name: 'Find a thread' }).fill('zebra')
     await page.locator('.empty-state-search').waitFor()
   } },
-  'board-empty': { setup: async app => { const t = await app.f.api('POST', '/threads', {}); app.addThread(t.id); return t.id },
-    go: async (page, app, id) => { await page.goto(`${app.url}/threads/${id}`); await page.locator('.tt-board-button').click(); await page.locator('.tt-board .empty-state-small').waitFor() } },
   'files-idle': { wide: true, go: async page => { await page.evaluate(() => __cap.page.goFiles('vault', '')); await page.locator('.pane .empty-state-folder').waitFor() } },
   'apps-empty': { setup: app => { app.routes['GET /v1/apps'] = (req, res) => json(res, { apps: [], sources: ['yours'] }) },
     go: async page => { await page.evaluate(() => __cap.page.goApps()); await page.locator('.empty-state-window').waitFor() } },

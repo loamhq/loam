@@ -89,7 +89,7 @@ test('rows keep their main icon and name the default accessibly without a traili
 test('the header still opens named background tasks while the selected list row has no count', (t) => {
   const threads = setup(t), record = row({ members: [member({ background: 2, background_tasks: [{ id: 'a', description: 'Review the notes' }] })], background: 2 })
   threads.st.threads = [record]
-  threads.st.open = { thread: record, messages: [], permissions: new Map(), typing: new Set(), turns: [], board: { markdown: '' } }
+  threads.st.open = { thread: record, messages: [], permissions: new Map(), typing: new Set(), turns: [] }
   let tree = threads.view(true)
   assert.equal(text(find(find(tree, 'tt-head'), 'tt-task-count')), '2')
   assert.equal(all(find(tree, 'tt-row'), 'srow-bg').length, 0)

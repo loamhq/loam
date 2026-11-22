@@ -26,7 +26,7 @@ const stream = body => (_, res) => { res.writeHead(200, { 'content-type': 'text/
 function routes(mode, state) {
   const listing = () => ({ threads: state.deleted ? [] : [hello], agents: [iris] })
   const message = { id: 'm1', author: 'iris', kind: 'message', preset: true, text: 'Hello. I’m Iris, your first agent. What should I call you?\n\nHere are my [soul file](/files/spaces/iris/soul.md), [config file](/files/spaces/iris/config.md), and [memory map](/files/spaces/iris/map.md).' }
-  const record = { thread: hello, messages: [message], has_more: false, turn: null, board: { markdown: '', path: '' } }
+  const record = { thread: hello, messages: [message], has_more: false, turn: null }
   const appearance = { theme: 'latte', mode, size: 100 }
   const documentAt = url => url.searchParams.get('path') || ''
   return {

@@ -1,5 +1,5 @@
 // Local synthetic host, real page and browser. A separate image per phone pane
-// preserves the actual UI; the board and chat share the segmented control.
+// preserves the actual UI; chat uses the shared segmented control.
 import assert from 'node:assert/strict'
 import { readFile, mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -66,9 +66,6 @@ try {
       await page.locator('.tt-message').first().waitFor(); await settle()
       assert.ok(await page.locator('#draft').isVisible())
       await shot('thread')
-      await page.getByRole('button', { name: 'Board', exact: true }).click(); await page.locator('.tt-board-item').first().waitFor()
-      await shot('board')
-      await page.getByRole('button', { name: 'Edit board', exact: true }).click(); await page.getByRole('button', { name: 'Done', exact: true }).waitFor()
       await shot('done')
       await page.getByRole('button', { name: 'Done', exact: true }).click()
       await page.evaluate(() => __five.goSettings('appearance'))
@@ -127,7 +124,7 @@ try {
       }
       assert.deepEqual(errors, [])
       results.push({ look, width, mode, first, covers, fonts, fontRequests: requested, surfaceChecks, errors })
-      console.log(`PASS ${look} ${width} ${mode}: first paint, thread, board, Done, cover and active-only font`)
+      console.log(`PASS ${look} ${width} ${mode}: first paint, thread, Done, cover and active-only font`)
     } finally { await context.close() }
   }
   await writeFile(path.join(out, 'checks.json'), JSON.stringify({ browser: browser.version(), plugins: plugins.plugins.map(({ id, broken, warnings }) => ({ id, broken, warnings })), results }, null, 2) + '\n')

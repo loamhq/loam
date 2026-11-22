@@ -238,8 +238,6 @@ try {
       await page.waitForFunction(() => !__panels.sidePanel.threads.st.open.patching)
       await page.keyboard.press('Escape'); await side.locator('.tt-configuration').waitFor({ state: 'detached' })
       await side.getByRole('button', { name: 'Thread actions', exact: true }).click()
-      await side.locator('.tt-header-menu').getByRole('button', { name: 'Board', exact: true }).click()
-      await side.locator('.tt-board').waitFor(); await side.getByRole('button', { name: 'Close board', exact: true }).click()
       await side.locator('.tt-head .agentbtn').click(); await side.locator('.tt-details').waitFor()
       const closeBox = await side.getByRole('button', { name: 'Close side panel', exact: true }).boundingBox(), sideBox = await side.boundingBox()
       assert.ok(closeBox.x >= sideBox.x && closeBox.x + closeBox.width <= sideBox.x + sideBox.width, 'side details keep Close within the pane')
@@ -415,7 +413,7 @@ try {
       await side.getByRole('button', { name: 'Close side panel', exact: true }).click()
       await side.waitFor({ state: 'detached' })
       assert.equal(await page.locator('.desk').evaluate(node => node.classList.contains('collapsed')), false)
-      reports.push({ width, theme, mode, checks: ['Side gesture and app row icon', 'Files row side icon, plain main click and menu swap', 'Independent stream routing', 'Independent composer routing', 'Independent plugin-owned dictation and scoped Escape', 'Side mentions, dictation, models, Board and attachment', 'Shared audio playback and side file reading', 'Swap transfers both drafts and attachments', 'Side thread read mark', 'Narrow and widen retains side', 'No Alt-side behaviour below 1180', 'Sidebar tuck and explicit show', 'Plain rows drive main', 'Back and Forward change only main', 'No duplicate item and Promote', 'Reload restores thread, app and split in either slot', 'File edit and save; side links and fragments stay in side', 'Live HTML fills pane and runs scripts', 'Iframe script state survives main navigation and opening/closing side', 'Pointer and keyboard resizing, reset', 'Live app scripts', 'UI scale applied to threshold', 'Sidebar restores on close; reduced and ordinary motion'] })
+      reports.push({ width, theme, mode, checks: ['Side gesture and app row icon', 'Files row side icon, plain main click and menu swap', 'Independent stream routing', 'Independent composer routing', 'Independent plugin-owned dictation and scoped Escape', 'Side mentions, dictation, models and attachments', 'Shared audio playback and side file reading', 'Swap transfers both drafts and attachments', 'Side thread read mark', 'Narrow and widen retains side', 'No Alt-side behaviour below 1180', 'Sidebar tuck and explicit show', 'Plain rows drive main', 'Back and Forward change only main', 'No duplicate item and Promote', 'Reload restores thread, app and split in either slot', 'File edit and save; side links and fragments stay in side', 'Live HTML fills pane and runs scripts', 'Iframe script state survives main navigation and opening/closing side', 'Pointer and keyboard resizing, reset', 'Live app scripts', 'UI scale applied to threshold', 'Sidebar restores on close; reduced and ordinary motion'] })
     } finally { await context.close() }
   }
   assert.deepEqual(errors, [])

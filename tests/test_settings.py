@@ -984,8 +984,8 @@ async def main():
               and out3.get("value") == "light", (out, out2, out3))
 
         status, body = await http(port, "PATCH", "/v1/settings/appearance",
-                                  {"phone": {"board_view": "doc"}})
-        check("appearance refuses the retired board view", status == 400, body)
+                                  {"phone": {"retired_view": "doc"}})
+        check("appearance refuses the retired view", status == 400, body)
         out = await cli(port, "describe", "appearance.desktop.theme")
         row = out.get("setting") or {}
         check("describe appearance.desktop.theme: the installed ids, live",
@@ -993,8 +993,8 @@ async def main():
               and "latte" in row.get("values", ""), out)
         out = await cli(port, "describe")
         keys = [r["key"] for r in out.get("settings") or []]
-        check("describe omits the retired board view",
-              all(not key.endswith(".board_view") for key in keys), keys)
+        check("describe omits the retired view",
+              all(not key.endswith(".retired_view") for key in keys), keys)
         check("describe lists both theme keys",
               "appearance.phone.theme" in keys and "appearance.desktop.theme" in keys,
               keys)

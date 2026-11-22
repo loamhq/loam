@@ -54,11 +54,8 @@ try{
    await page.locator('.tt-message').first().waitFor();await capture('thread')
    const panes=await page.locator('.pane').evaluateAll(nodes=>nodes.map(n=>getComputedStyle(n).borderRadius))
    if(look==='foundry'&&width===1440)assert.ok(panes.length&&panes.every(r=>r==='14px'),panes.join(','))
-   await page.getByRole('button',{name:'Board',exact:true}).click();await page.locator('.tt-board-item').first().waitFor();await capture('board')
-   if(look==='foundry')assert.equal(await page.locator('.tt-board').evaluate(n=>getComputedStyle(n).borderRadius),'14px')
-   if(look==='foundry')assert.equal(await page.locator('.tt-board-item').first().evaluate(n=>getComputedStyle(n).borderRadius),'8px')
    assert.deepEqual(errors,[]);reports.push({look,width,mode,faces,panes,errors})
-   console.log(`PASS ${look} ${width} ${mode}: seven unique fixed slots, grid/thread/board, contrast and pane corners`)
+   console.log(`PASS ${look} ${width} ${mode}: seven unique fixed slots, grid/thread, contrast and pane corners`)
   }finally{await context.close()}
  }
  await writeFile(path.join(out,'checks.json'),JSON.stringify({browser:browser.version(),reports},null,2)+'\n')

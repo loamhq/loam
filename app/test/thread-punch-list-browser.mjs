@@ -12,7 +12,6 @@ if (!out) throw new Error('Set THREAD_PUNCH_EVIDENCE to a retained evidence dire
 const baseline = 'af6be9f', phase = process.env.THREAD_PUNCH_PHASE || 'current'
 assert.ok(['main', 'current'].includes(phase))
 await mkdir(out, { recursive: true })
-const sourceBoard = '# Inbox\r\n\r\n> Keep the useful details outside the conversation\r\n> we were in.\r\n\r\n## Keeping close\r\n\r\n- [ ] A timeless task <!-- Quill -->\r\n- An ordinary note\r\n- [ ] A fresh timeless task <!-- Sprout · new -->\r\n- [ ] A timed task <!-- Quill · until 2026-12-01 -->\r\n- [ ] A fresh timed task <!-- Sprout · new · until 2026-12-02 -->\r\n'
 const results = []
 const browser = await chromium.launch({ executablePath: process.env.LOAM_CHROME, headless: true, args: ['--no-sandbox', '--disable-gpu'] })
 try {
@@ -21,7 +20,6 @@ try {
     const json = (res, value) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(value)) }
     app.f.agents.push(...['brook', 'fern', 'arbor'].map((id) => ({ id, name: id[0].toUpperCase() + id.slice(1), emoji: null })))
     await app.f.api('PATCH', '/threads/general', { add: ['brook', 'fern'] })
-    await app.f.api('PUT', '/threads/general/board', { markdown: sourceBoard })
     const empty = await app.f.api('POST', '/threads', {})
     app.routes[`GET /v1/threads/${empty.id}`] = async (req, res) => json(res, await app.f.api('GET', `/threads/${empty.id}`))
     app.routes[`PATCH /v1/threads/${empty.id}`] = async (req, res, url, raw) => json(res, await app.f.api('PATCH', `/threads/${empty.id}`, JSON.parse(raw)))
@@ -90,47 +88,10 @@ try {
       await page.getByRole('button', { name: 'Remove Arbor', exact: true }).click()
       await page.getByRole('button', { name: 'Add Arbor', exact: true }).waitFor()
       await page.getByRole('button', { name: 'Chat', exact: true }).click()
-      await page.locator('.tt-board-button').click()
-      const quote = page.locator('.tt-board blockquote')
-      await quote.waitFor()
-      assert.equal(await quote.locator('br').count(), 0)
-      assert.equal((await quote.innerText()).trim(), 'Keep the useful details outside the conversation we were in.')
-      const items = page.locator('.tt-board-item')
-      assert.equal(await items.count(), 5)
-      assert.equal(await page.locator('.tt-until').count(), 2)
-      for (const text of ['A timeless task', 'An ordinary note', 'A fresh timeless task']) {
-        const item = items.filter({ has: page.locator('.tt-item-copy', { hasText: text }) })
-        assert.equal(await item.locator('.tt-until').count(), 0)
-        assert.doesNotMatch(await item.innerText(), /\bstays\b/i)
-      }
-      await shot('general-board')
-      // Read-only display transformations must not rewrite the raw source.
-      await page.getByRole('button', { name: 'Edit board', exact: true }).click()
-      assert.equal(await page.locator('.tt-board-editor').inputValue(), sourceBoard.replace(/\r\n/g, '\n'))
-      assert.equal((await app.f.api('GET', '/threads/general/board')).markdown, sourceBoard)
-      assert.equal(app.broker.seen.filter((r) => r.method === 'PUT' && r.path.endsWith('/board')).length, 0)
-      await page.goto(`${app.url}/threads/${empty.id}`)
-      await page.locator('.tt-board-button').click()
-      const caption = page.locator('.tt-board-caption')
-      await caption.waitFor()
-      assert.equal(await caption.innerText(), phase === 'main' ? 'Keep shared notes, tasks and reminders here.' : 'A short list for this thread. You and the agents can edit it.')
-      assert.equal(await page.locator('.tt-board-item').count(), 0)
-      await shot('empty-board')
-      if (phase === 'current') {
-        assert.equal(await caption.evaluate((n) => getComputedStyle(n).color), await caption.evaluate((n) => {
-          const probe = document.createElement('span'); probe.style.color = 'var(--paper-ink-2)'; n.append(probe)
-          const color = getComputedStyle(probe).color; probe.remove(); return color
-        }), 'the explanation is the empty state’s body, in the second ink')
-        await app.f.api('PUT', `/threads/${empty.id}/board`, { markdown: '# Board\n\n' })
-        await page.reload()
-        await page.locator('.tt-board-button').click()
-        await page.locator('.tt-board-caption').waitFor()
-        assert.equal(await page.locator('.tt-board-caption').innerText(), 'A short list for this thread. You and the agents can edit it.', 'a heading-only board is empty too')
-      }
       assert.deepEqual(errors, [])
       results.push({ width, theme, phase, members: 7, geometry, noEngineStrip: true, endedStreamRecovered: true, silentStreamRecovered: true,
-        quoteReflowed: true, originalBoardPreserved: true, lifetimes: 2, emptyCaption: await caption.innerText(), captures, errors })
-      console.log(`PASS ${phase} ${width} ${theme}: six items, ended/stalled SSE, seven members, unchanged board source`)
+        captures, errors })
+      console.log('PASS', phase, width, theme, 'thread membership and stream recovery')
     } finally { await context.close(); await app.close() }
   }
   await writeFile(path.join(out, `${phase}-browser.json`), JSON.stringify({ baseline, browser: browser.version(), fixturesOnly: true, results }, null, 2) + '\n')

@@ -15,7 +15,7 @@ Five groups, against the shipped code:
                  no entry at all.
   repeat         a denied vault Write on three consecutive nights is one
                  fact for the system persona (lib/loam_attention.py), and
-                 nothing on the board; on two it is nothing.
+                 no public post; on two it is nothing.
   table          bin/usage-by-lane on a fixture of three lanes: one with
                  usage, one with none (older runs), one mixed.
 
@@ -189,8 +189,8 @@ def run_wake(root: Path, envelope: dict, started: str,
     row = json.loads(log.read_text().splitlines()[-1])
     box = vault / "00_INBOX" / "from-agents"
     text = [(box / n).read_text() if (box / n).exists() else ""
-            for n in ("loam-wake-failures.md", "comms.md")]
-    # `comms`: the board, which must stay empty, and then each fact the
+            for n in ("loam-wake-failures.md", "Owner notes.md")]
+    # `comms`: owner notes, which must stay empty, and then each fact the
     # system persona was told, as `FACT **agent** text` lines.
     attention = Path(os.environ["LOAM_ATTENTION_DIR"])
     told = ""
@@ -243,7 +243,7 @@ def test_denial_one(root: Path) -> None:
           in log, log)
     check("denial (one): the arguments stay out of the log",
           "secret-argument" not in log)
-    check("denial (one): nobody is told, nothing on the board", f"**{AGENT}**" not in comms)
+    check("denial (one): nobody is told, no public post", f"**{AGENT}**" not in comms)
 
 
 def test_denial_none(root: Path) -> None:
@@ -273,7 +273,7 @@ def test_repeat_three_nights(root: Path) -> None:
     facts = [l for l in comms.splitlines() if l.startswith("FACT ")]
     check("repeat (3 nights): one fact for the system persona",
           len(facts) == 1 and "three nights running" in facts[0], comms)
-    check("repeat (3 nights): nothing on the board",
+    check("repeat (3 nights): no public post",
           all(l.startswith("FACT ") for l in comms.splitlines() if l.strip()), comms)
 
 

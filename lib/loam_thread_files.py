@@ -6,8 +6,10 @@ thread transcripts and survive a switch off. All callers share the thread writer
 
 from __future__ import annotations
 
+import json
 import os
 import stat
+from functools import lru_cache
 from pathlib import Path
 
 import loam_config as lc
@@ -23,17 +25,35 @@ def configure(plugins):
     types = {p["id"]: spec for p in plugins
              for spec in p["contributes"].get("thread.file", [])}
     with threads.locked(threads.STATE):
+        if not _binding_file().exists() and (threads.STATE / BINDINGS).is_file():
+            _save_bindings(_bindings())
         if types or (threads.STATE / REGISTRY).exists():
             threads.save_state(REGISTRY, types)
 
 
+def _binding_file():
+    # The Yours tree travels with a restored vault. Keep ownership outside notes
+    # and outside individual extension versions, which the installer replaces.
+    import loam_plugins
+    return loam_plugins.yours_root() / "_data" / "thread-files.json"
+
+
+def _source():
+    path = _binding_file()
+    return path if path.exists() else threads.STATE / BINDINGS
+
+
 def _bindings():
-    # A malformed ownership record must never authorize a move, adoption or deletion.
-    import json
+    # Propagate malformed ownership records. An empty fallback could authorize
+    # moving or deleting the wrong note.
     try:
-        return json.loads((threads.STATE / BINDINGS).read_text("utf-8"))
+        return json.loads(_source().read_text("utf-8"))
     except FileNotFoundError:
         return {}
+
+
+def _save_bindings(rows):
+    threads._write_atomic(_binding_file(), json.dumps(rows, ensure_ascii=False) + "\n")
 
 
 def _path(rel):
@@ -88,7 +108,7 @@ def adopt(pid, entries, *, spec=None):
             claimed[rel] = (pid, tid)
         for tid, title in pending:
             group[tid] = {"path": _available(pid, title, spec, bindings), "title": title}
-        threads.save_state(BINDINGS, bindings)
+        _save_bindings(bindings)
 
 
 def _spec(pid):
@@ -105,13 +125,13 @@ def _binding(pid, meta, spec):
     tid, title = meta["id"], meta["title"]
     if tid not in group:
         group[tid] = {"path": _available(pid, title, spec, bindings), "title": title}
-        threads.save_state(BINDINGS, bindings)
+        _save_bindings(bindings)
     row = group[tid]
     if row["title"] != title or "moving_to" in row:
         if "moving_to" not in row:
             row["moving_to"] = _available(pid, title, spec, bindings)
             row["new_title"] = title
-            threads.save_state(BINDINGS, bindings)
+            _save_bindings(bindings)
         old, new = _path(row["path"]), _path(row["moving_to"])
         # link+unlink refuses an occupied destination. A retry after linking can
         # identify the same inode and finish without overwriting someone else's note.
@@ -126,7 +146,7 @@ def _binding(pid, meta, spec):
                     raise threads.ThreadError(409, "The new thread file name is occupied")
             old.unlink()
         row.update(path=row.pop("moving_to"), title=row.pop("new_title"))
-        threads.save_state(BINDINGS, bindings)
+        _save_bindings(bindings)
         if row["title"] != title:
             return _binding(pid, meta, spec)
     return row["path"]
@@ -166,33 +186,43 @@ def removed(thread_id):
     """Called under the thread lock for a confirmed delete. An inactive plugin's
     files remain ordinary notes. A missing file is an idempotent deletion."""
     specs = threads.load_state(REGISTRY)
-    if not specs:
-        return []
     bindings = _bindings()
     gone = []
-    for pid in specs:
-        group = bindings.get(pid, {})
-        if thread_id in group:
-            row = group[thread_id]
+    for pid in list(bindings):
+        row = bindings[pid].get(thread_id)
+        if not row:
+            continue
+        if pid in specs:
             if "moving_to" in row:
                 _binding(pid, {"id": thread_id, "title": row["new_title"]}, specs[pid])
                 bindings = _bindings()
-                group = bindings[pid]
-            path = _path(group[thread_id]["path"])
+            rel = bindings[pid][thread_id]["path"]
+            path = _path(rel)
             if path.is_file():
                 path.unlink()
-                gone.append(group[thread_id]["path"])
-            del group[thread_id]
-    threads.save_state(BINDINGS, bindings)
+                gone.append(rel)
+        del bindings[pid][thread_id]
+        _save_bindings(bindings)
     return gone
 
 
+@lru_cache(maxsize=1)
+def _owned_paths(source, stamp, active):
+    rows = json.loads(source.read_text("utf-8"))
+    return frozenset(row[key] for pid in active for row in rows.get(pid, {}).values()
+                     for key in ("path", "moving_to") if key in row)
+
+
 def owned_paths():
-    active = threads.load_state(REGISTRY)
-    if not active:
-        return set()
-    return {row["path"] for pid, rows in _bindings().items() if pid in active
-            for row in rows.values()}
+    active = tuple(threads.load_state(REGISTRY))
+    if active:
+        source = _source()
+        try:
+            info = source.stat()
+            return _owned_paths(source, (info.st_ino, info.st_mtime_ns), active)
+        except FileNotFoundError:
+            pass
+    return frozenset()
 
 
 def existing_documents(pid):
