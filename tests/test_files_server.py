@@ -84,6 +84,28 @@ try:
     fs.list_(str(LABS), pattern="**/*")
     fs.grep(".", str(LABS))
     check("nothing is written", sorted(str(p) for p in TMP.rglob("*")) == before)
+    memory, outbox = TMP / "memory", TMP / "outbox"
+    for folder in (memory, outbox):
+        folder.mkdir()
+    os.environ.update(LOAM_REVIEWER_MEMORY=str(memory), LOAM_REVIEWER_OUTBOX=str(outbox))
+    check("read: an allowed file is returned and a transcript is refused",
+          "Conventions" in fs.read(str(LABS / "ada" / "config.md"))["text"]
+          and not fs.read(str(CONV / "t.md"))["ok"]
+          and not fs.read(str(LABS / "ada" / "link-conv" / "t.md"))["ok"])
+    note = outbox / "ada" / "note.md"
+    check("write: memory and one persona outbox accept Markdown",
+          fs.write(str(memory / "ada.md"), "memory")["ok"]
+          and fs.write(str(note), "a note")["ok"] and note.read_text() == "a note")
+    (outbox / "escape").symlink_to(OUT)
+    target = OUT / "x.md"
+    (memory / "linked.md").symlink_to(target)
+    check("write: outside paths and symlinked parent directories are refused",
+          not fs.write(str(target), "outside")["ok"]
+          and not fs.write(str(outbox / "escape" / "x.md"), "outside")["ok"])
+    check("write: replacing a symlink never changes its target",
+          fs.write(str(memory / "linked.md"), "inside")["ok"]
+          and target.read_text() == "stale outside\n"
+          and not (memory / "linked.md").is_symlink())
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 

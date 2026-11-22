@@ -25,6 +25,12 @@ Settings popup at both sizes. A file opened from a Settings profile returns to
 the underlying panel on Back. Use the Agents chevron within Settings to return
 to the Agents list.
 
+The reviewer plugin’s Runs on row opens Nightly reviewer settings, and Back
+returns to the plugin. In the reviewer’s Provider list, Automatic shows the
+provider that would run next. An explicit choice stays selected if it
+disconnects. The page explains the fallback and shows the model the
+reviewer will use until that provider reconnects.
+
 Tap the face for image upload or removal. Uploaded faces come
 from the host card, have digest-addressed URLs, and take priority over every
 theme's art. Removing the image restores the selected theme face. Tap the

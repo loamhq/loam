@@ -23,6 +23,10 @@ async function contextFor(width, mode) {
   return context
 }
 const faceStyle = page => page.locator('.theme-agent-preview .blob').first().evaluate(n => { const s = getComputedStyle(n); return { color: s.color, background: s.backgroundColor, shape: s.borderRadius } })
+async function openAppearance(page) {
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await page.locator('.sheet.settings').getByRole('button', { name: /^Appearance/ }).click()
+}
 try {
   for (const width of [390, 1440]) for (const mode of ['light', 'dark']) for (const colours of ['palette', 'latte-tones']) for (const shape of ['distinct', 'circle', 'rounded-square']) {
     const kind = width === 390 ? 'phone' : 'desktop'
@@ -43,9 +47,7 @@ try {
       assert.deepEqual(await page.evaluate(() => __firstOptions), { colours, shape, mode })
       const label = `${width}-${mode}-${colours}-${shape}`
       await page.screenshot({ animations: 'disabled', path: path.join(out, `chats-${label}.png`) })
-      // Click the real Settings button to anchor the existing surface system.
-      await page.getByRole('button', { name: 'Settings', exact: true }).click()
-      if (width === 390) await page.getByRole('button', { name: /Appearance/ }).click()
+      await openAppearance(page)
       await page.getByRole('group', { name: 'Agent colours', exact: true }).waitFor()
       const face = await faceStyle(page)
       if (shape === 'circle') assert.equal(face.shape, '50%')
@@ -114,8 +116,7 @@ try {
         await page.goto(app.url); await page.locator('.tt-row').first().waitFor()
         assert.equal(await page.evaluate(() => document.documentElement.getAttribute('data-option-texture')), 'grain')
         assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--radius-md').trim()), '17px')
-        await page.getByRole('button', { name: 'Settings', exact: true }).click()
-        if (width === 390) await page.getByRole('button', { name: /Appearance/ }).click()
+        await openAppearance(page)
         await page.getByRole('group', { name: 'Texture', exact: true }).waitFor()
         await page.screenshot({ animations: 'disabled', path: path.join(out, `plugin-appearance-${width}-${mode}.png`) })
         await page.getByRole('group', { name: 'Texture', exact: true }).getByRole('button', { name: 'Smooth', exact: true }).click()
@@ -140,8 +141,7 @@ try {
     const page = await context.newPage()
     await page.goto(app.url); await page.locator('.tt-row').first().waitFor()
     assert.equal(await page.evaluate(() => document.documentElement.getAttribute('data-option-agent-colours')), 'palette')
-    await page.getByRole('button', { name: 'Settings', exact: true }).click()
-    await page.getByRole('button', { name: /Appearance/ }).click()
+    await openAppearance(page)
     await page.getByRole('group', { name: 'Agent colours', exact: true }).getByRole('button', { name: 'Latte tones', exact: true }).click()
     await page.waitForFunction(() => __optionsTest.theme.status.error?.includes('not saved'))
     assert.equal((await faceStyle(page)).background, 'rgb(244, 236, 224)')

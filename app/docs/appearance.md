@@ -1,7 +1,7 @@
 # Appearance
 
-Settings opens on Appearance on desktop; Appearance is the first entry on the
-phone. Theme preview cards show each installed theme’s paper, ink, controls and
+Open Settings › Appearance to choose a theme. Theme preview cards show each
+installed theme’s paper, ink, controls and
 display face. Latte & Newspaper (the default, id `latte`) and Plain (the
 neutral core fallback) are built in; Deep Forest, Autumn, Yosemite, Mist Trail
 and Foundry are first-party themes from the Market (since 0.2.5, 2026-11-18),

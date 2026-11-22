@@ -4609,7 +4609,8 @@ any thread when it changes, and the journal has the line.
  "default_schedule": "daily at 04:20 PT",
  "next_fire": "2026-11-14T12:20:00Z", "last_fire": "2026-11-13T12:20:04Z",
  "running_since": null,
- "provider": "claude-code", "providers": ["claude-code", "antigravity"],
+ "provider": "claude-code", "providers": ["claude-code", "codex", "antigravity"],
+ "automatic": {"provider": "codex", "reason": "different", "fallback": false},
  "model": null, "effort": null,
  "effective": {"provider": "claude-code", "model": "fable", "effort": null},
  "instructions": {"root": "system", "path": "Reviewer/CLAUDE.md"},
@@ -4618,14 +4619,17 @@ any thread when it changes, and the journal has the line.
 
 PATCH takes any of `schedule` (the schedules' grammar, `daily at 04:20 PT`,
 `Mondays and Thursdays at 05:00 PT`, `weekdays at …`; null for 04:20),
-`provider` (`claude-code` or, since 2026-11-15, `antigravity`; null for
-`claude-code`), `model` (one its provider lists; null for `fable` on Claude
-Code, `gemini-4-hydrogen-high` on Antigravity), `effort` (Claude Code's; on
-Antigravity the level is part of the model id, so `effort` is a 400). A
-change of provider drops the other provider's model and effort unless the
-same PATCH names them. `providers` lists `["claude-code", "antigravity"]`;
-`provider` is the stored choice, `effective` what the next run uses. How a
-run on Antigravity is held to the same reach is `bin/review`'s docstring.
+`provider` (one of `providers`, or null for Automatic), `model` (a model
+its provider lists, or null for the default), and `effort` (Claude Code or
+Codex, or null for the default). Antigravity's model ID includes its thinking
+level. Changing provider clears the previous model and effort unless the
+same PATCH supplies them. `provider` is the stored choice and `effective`
+is what the next run uses. Automatic chooses the connected provider with
+the fewest active agents whose default thread provider is that provider.
+Ties follow the order of `providers`. The `automatic` object gives the
+choice, its reason (`only_connected`, `different`, `fewest`, or null), and
+whether a disconnected stored choice is falling back until it reconnects.
+See `bin/review` for the launcher's access limits on each provider.
 Answers 200 with the GET. 400, writing nothing, for a schedule that does not
 parse, another provider, or a value not taken. The schedule is applied at once as a systemd drop-in beside the
 tracked timer and a reload (the timer moves, nothing fires).

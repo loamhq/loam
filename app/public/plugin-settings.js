@@ -5,6 +5,8 @@ import { createThemeShowcase } from './theme-showcase.js'
 import { themePreview } from './theme-preview.js'
 import { themeImageURL, themeImagePosition } from './theme-image.js'
 import { listingAddress, personalUpdate, skippedUpdate } from './market-card.js'
+import { settingsRow } from './chat-ui.js'
+import { modelLabel } from './providers.js'
 const label = id => ({ 'core.message': 'the message bubble', 'core.thread-list': 'the thread list', 'core.composer': 'the composer', 'core.files.viewer': 'the Files viewer', 'core.files.editor': 'the Files editor', 'core.rail': 'the navigation rail', 'core.activity': 'Activity', 'core.apps': 'Apps', 'core.settings': 'Settings' }[id] ?? id)
 const ORIGINS = { loam: 'Built into Loam', market: 'From the Market', yours: 'Made by you', link: 'From a link' }
 const UNREVIEWED = 'Unreviewed by Loam'
@@ -63,7 +65,7 @@ const external = source => { try { const u = new URL(source?.url); return u.prot
 export function createPluginSettings({ loader, theme, host, changed = () => {} }) {
   const st = { keys: null, how: {}, selected: null, detail: null, detailError: '', opening: false, remove: false, error: '', done: '', guide: false, focusDetail: false, restarting: null, serviceError: null, logs: new Set(), advanced: null }
   let images = null, focusImagesSwitch = false
-  let hostSettings = null, secretSettings = null
+  let hostSettings = null, secretSettings = null, reviewer = null, reviewerRequest = null
   const showcase = createThemeShowcase({ schedule: () => changed(), mode: () => theme.current === 'dark' ? 'dark' : 'light' })
   const failedShots = new Set()
   const failedIcons = new Set()
@@ -161,8 +163,13 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
   async function open(row) {
     hostSettings = null; secretSettings = null; reviewAnswer = null
     images = null
+    reviewer = null; reviewerRequest = null
     st.selected = row; st.detail = null; st.detailError = ''; st.opening = true; st.guide = false; st.remove = false; st.error = ''; st.focusDetail = true; changed()
     opened()
+    if (row.id === 'reviewer' && row.effective && host.openReviewerSettings) {
+      const request = reviewerRequest = host.api('GET', '/system/reviewer')
+      request.then(out => { if (reviewerRequest === request) { reviewer = out; changed() } }).catch(() => {})
+    }
     // Whether its keys are saved, for whether it is set up (below).
     if (row.keys?.length) host.api('GET', '/keys').then(out => { st.keys = out?.providers ?? null; changed() }).catch(() => {})
     try {
@@ -443,6 +450,8 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
       h('summary', { class: 'plugin-how-summary' }, h('span', { text: 'How it works' }), icon.chevronDown(14)),
       shots, plain ? h('div', { class: 'md plugin-about' }, ...[host.markdown?.(plain, { soft: true }) ?? h('p', { text: plain })].flat()) : null) : null
     const back = { class: 'backbtn plugin-back', 'aria-label': 'Back to Plugins' }
+    const runsOn = reviewer?.effective
+    const reviewerProvider = host.state?.providers?.find(p => p.id === runsOn?.provider)
     return [host.appModalHistory ? host.settingsBack('Plugins', 'plugins', back) : h('button', { ...back, onclick: clear }, icon.chevronLeft(18), 'Plugins'),
       h('header', { class: 'plugin-hero' }, pluginIcon(row),
         h('div', { class: 'plugin-hero-words' }, host.settingsHead(row.name || row.id),
@@ -468,6 +477,10 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
           catch (e) { st.error = e.message }
           changed()
         } }, h('label', { for: 'daily-note-folder', text: 'Daily notes folder' }), h('input', { id: 'daily-note-folder', class: 'field-input', value: hostSettings.values.folder, disabled: !row.on }), h('p', { class: 'note', text: 'Daily notes use YYYY-MM-DD.md in this vault folder.' }), h('button', { class: 'pillbtn', type: 'submit', disabled: !row.on, text: 'Save folder' })) : null, notice(st.done, false)) : null,
+      row.id === 'reviewer' && row.effective && host.openReviewerSettings ? h('div', { class: 'rows' },
+        settingsRow({ title: 'Runs on', sub: runsOn?.provider
+          ? [reviewerProvider?.name || runsOn.provider, modelLabel(reviewerProvider, runsOn.model).name || 'Default model'].join(' · ')
+          : runsOn ? 'No provider connected' : 'Nightly reviewer settings', onclick: host.openReviewerSettings })) : null,
       ...(row.on ? (host.registry?.entries('settings.section') ?? []).filter(entry => entry.plugin === row.id || (entry.group === 'plugin' && entry.owner === row.id))
         .map(entry => h('section', { class: 'plugin-preferences', key: `${entry.owner}:${entry.id}`, 'aria-label': entry.title }, host.registry.invoke(entry, 'render', { plugin: true, back: false }))) : []),
       // A plugin whose own section draws its settings (`entries: 'own'`, Git

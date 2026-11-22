@@ -111,7 +111,9 @@ const githubAccounts = createGithubAccounts({ state: () => host.state.github, ap
 const gitIdentity = createGitIdentity({ api: (...args) => host.api(...args), changed: () => host.schedule() })
 function settingsBody(sheet, back) {
   const page = settingsHome(sheet.page, sheet.provider)
-  if (page === 'agents' && sheet.detail) return [settingsBack('Agents', 'agents'), ...(sheet.detail.kind === 'agent'
+  if (page === 'agents' && sheet.detail) return [sheet.fromReviewerPlugin
+    ? settingsBack('The reviewer', 'plugins', { 'aria-label': 'Back to The reviewer' }, 'reviewer')
+    : settingsBack('Agents', 'agents'), ...(sheet.detail.kind === 'agent'
     ? host.settingsProfileUI.body(sheet.detail.id) : host.settingsProfileUI.settingsDetail())]
   if (page === 'provider') return settingsProvider(sheet.provider)
   if (page === 'integration') return settingsIntegration(sheet.provider, sheet.account)
@@ -247,14 +249,14 @@ function syncSettingsPlugin(provider) {
     if (sheet?.kind !== 'settings' || sheet.page !== 'plugins' || sheet.provider !== provider) return
     const rows = host.pluginLoader?.st.rows ?? []
     const row = rows.find(r => r.id === provider && (r.effective || r.broken)) ?? rows.find(r => r.id === provider)
-    if (row && host.pluginSettingsUI?.st.selected?.key !== row.key) host.pluginSettingsUI?.open(row)
+    if (row && (provider === 'reviewer' || host.pluginSettingsUI?.st.selected?.key !== row.key)) host.pluginSettingsUI?.open(row)
   }
   if (host.pluginLoader?.st.rows.some(r => r.id === provider)) openPlugin()
   else host.pluginLoader?.refresh()?.then(openPlugin).catch(() => {})
 }
 
-function settingsBack(label, page, props) {
-  return h('button', { class: 'backbtn', ...props, onclick: () => goSettings(page) }, icon.chevronLeft(18), label)
+function settingsBack(label, page, props, provider = null) {
+  return h('button', { class: 'backbtn', ...props, onclick: () => goSettings(page, provider) }, icon.chevronLeft(18), label)
 }
 
 function backInSettings() {
@@ -395,7 +397,8 @@ function settingsFiles({ back = true } = {}) {
 // The personas the host has, and how many chats this screen knows of each.
 // Tapping one opens its profile, which is where its chats are.
 function goSettingsDetail(kind, id, options) {
-  host.state.sheet = { kind: 'settings', page: 'agents', detail: { kind, id } }
+  host.state.sheet = { kind: 'settings', page: 'agents', detail: { kind, id },
+    ...(options?.fromReviewerPlugin ? { fromReviewerPlugin: true } : {}) }
   host.settingsProfiles.load(kind, id, options)
   if (kind === 'agent' || kind === 'engineer' && id !== 'default') {
     host.engineerActivity.st.agent = kind === 'agent' ? id : ''
@@ -427,7 +430,10 @@ function settingsAgents({ back = true } = {}) {
   if (!st.engineers && !st.reviewer && !st.directoryLoading && !st.directoryError) host.settingsProfiles.directory()
   const group = (title, rows) => h('section', { class: 'profile-group', 'aria-label': title }, h('h3', { class: 'kicker', text: title }), h('div', { class: 'rows' }, rows))
   const detail = goSettingsDetail
-  const provider = row => host.state.providers.find(p => p.id === row.effective.provider)?.name || row.effective.provider
+  const providerValue = row => {
+    const id = row.effective?.provider
+    return id ? h('span', { class: 'setrow-value', text: host.state.providers.find(p => p.id === id)?.name || id }) : null
+  }
   if (host.state.sheet?.archivedAgents) return [settingsBack('Agents', 'agents'), settingsHead('Archived'),
     st.directoryError ? h('p', { role: 'alert', class: 'schedule-error', text: st.directoryError }) : null,
     st.archived === null ? h('p', { role: 'status', text: 'Loading archived agents…' }) : st.archived.length ? group('Archived agents', st.archived.map(agent => h('div', { class: 'setrow', key: agent.id },
@@ -435,10 +441,10 @@ function settingsAgents({ back = true } = {}) {
       h('button', { class: 'pillbtn', disabled: st.directoryBusy, text: 'Restore', 'aria-label': `Restore ${agent.name}`, onclick: () => host.settingsProfiles.restore(agent.id) })))) : emptyState({ object: 'archive', title: 'No archived agents', body: 'Agents you archive wait here, ready to restore.' })]
   const systemRows = [
     ...(st.engineers ? [
-      ...[...st.engineers.engineers].sort((a, b) => Number(b.platform) - Number(a.platform) || a.project.localeCompare(b.project)).map(row => settingsRow({ title: row.project, sub: row.platform ? 'Builds and repairs Loam itself' : `Changes code for ${row.project}`, lead: tile(icon.code(18)), right: h('span', { class: 'setrow-value', text: provider(row) }), onclick: () => detail('engineer', row.project) })),
-      settingsRow({ title: 'Every other project', sub: 'Engineer settings for the things you build', lead: tile(icon.code(18)), right: h('span', { class: 'setrow-value', text: provider(st.engineers.default) }), onclick: () => detail('engineer', 'default') }),
+      ...[...st.engineers.engineers].sort((a, b) => Number(b.platform) - Number(a.platform) || a.project.localeCompare(b.project)).map(row => settingsRow({ title: row.project, sub: row.platform ? 'Builds and repairs Loam itself' : `Changes code for ${row.project}`, lead: tile(icon.code(18)), right: providerValue(row), onclick: () => detail('engineer', row.project) })),
+      settingsRow({ title: 'Every other project', sub: 'Engineer settings for the things you build', lead: tile(icon.code(18)), right: providerValue(st.engineers.default), onclick: () => detail('engineer', 'default') }),
     ] : []),
-    ...(st.reviewer ? [settingsRow({ title: st.reviewer.name, sub: st.reviewer.on === false ? 'Reviews are off' : 'Reads one agent’s work and leaves a note', lead: tile(icon.clock(18)), onclick: () => detail('reviewer', 'reviewer') })] : []),
+    ...(st.reviewer ? [settingsRow({ title: st.reviewer.name, sub: st.reviewer.on === false ? 'Reviews are off' : 'Reads one agent’s work and leaves a note', lead: tile(icon.clock(18)), right: providerValue(st.reviewer), onclick: () => detail('reviewer', 'reviewer') })] : []),
   ]
   return [back ? settingsBack('Settings', 'root') : null, settingsHead('Agents'),
     h('div', { class: 'agent-directory-actions' }, h('button', { class: 'pillbtn primary', disabled: st.directoryBusy, 'aria-label': 'New agent', onclick: async () => {
@@ -915,6 +921,7 @@ return Object.defineProperties({}, {
     settingsFiles: { enumerable: true, get: () => settingsFiles },
     settingsAgents: { enumerable: true, get: () => settingsAgents },
     goSettingsDetail: { enumerable: true, get: () => goSettingsDetail },
+    openReviewerSettings: { enumerable: true, get: () => () => goSettingsDetail('reviewer', 'reviewer', { fromReviewerPlugin: true }) },
     syncSettingsPlugin: { enumerable: true, get: () => syncSettingsPlugin },
     settingsProviders: { enumerable: true, get: () => settingsProviders },
     settingsApiKey: { enumerable: true, get: () => settingsApiKey },

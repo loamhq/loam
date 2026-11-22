@@ -259,13 +259,15 @@ class Run:
 
 
 def run(command: list[str], cwd: str, timeout: int | None, job_dir: Path,
-        stderr: Path, on_thread=None, on_stop=None) -> tuple[int, Run, bool]:
+        stderr: Path, on_thread=None, on_stop=None, *,
+        max_turns: int | None = None, record_stream: bool = True) -> tuple[int, Run, bool]:
     """Run ``codex exec``: (returncode, Run, timed_out). The stream goes to
     ``codex.jsonl`` line by line, which is what the heartbeat reads; the
     process is ended by group, because ``codex`` is a node wrapper whose
     native child SIGKILL cannot reach (engineer/memory, 2026-10-01)."""
-    stream = job_dir / STREAM
+    stream = job_dir / STREAM if record_stream else os.devnull
     state = Run()
+    cap = eng.MAX_TURNS if max_turns is None else max_turns
     with open(stderr, "w", encoding="utf-8") as err, \
             open(stream, "a", encoding="utf-8") as out:
         proc = subprocess.Popen(command, cwd=cwd, stdin=subprocess.DEVNULL,
@@ -295,8 +297,7 @@ def run(command: list[str], cwd: str, timeout: int | None, job_dir: Path,
             state.read(line)
             if state.thread_id and not had and on_thread:
                 on_thread(state.thread_id)
-            if (eng.MAX_TURNS and state.round_trips >= eng.MAX_TURNS
-                    and not state.capped):
+            if cap and state.round_trips >= cap and not state.capped:
                 state.capped = True
                 end(proc)
         returncode = proc.wait()
