@@ -3,6 +3,7 @@
 Find each release's notes in `docs/releases/<version>.md`. Loam gives the
 notes to the person's agent, who decides what is worth sharing with them.
 
+- [0.2.27](docs/releases/0.2.27.md), 2026-11-21: clearer browser dictation fallback wording.
 - [0.2.26](docs/releases/0.2.26.md), 2026-11-21: a shorter API keys list on new installs and a clearer browser dictation offer.
 - [0.2.25](docs/releases/0.2.25.md), 2026-11-21: chat videos up to 512 MB with upload progress and cancellation.
 - [0.2.24](docs/releases/0.2.24.md), 2026-11-21: choose who answers a saved note, attach short videos, and pin from Chats.
