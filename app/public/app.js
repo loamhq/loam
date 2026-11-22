@@ -68,7 +68,7 @@ import { providerMark } from './marks.js'
 import { createProviderSignIn } from './provider-sign-in.js'
 import { githubView, githubNotice, returnFrom, manifestForm, orgView, orgApps, offersOrgs, orgLogin, installOrg } from './integrations.js'
 import { composerKeys } from './keys.js'
-import { createAttachments, addFile, removeAttachment, clearAttachments, restoreAttachments, markProgress, markStored, markFailed, stored, heldFiles, uploading, tooBig, bytes, carriesFiles, filesFrom } from './attach.js'
+import { createAttachments, addFile, removeAttachment, clearAttachments, restoreAttachments, markProgress, markStored, markFailed, stored, heldFiles, uploading, isVideoName, tooBig, bytes, carriesFiles, filesFrom } from './attach.js'
 
 import { markdown, strip } from './markdown.js'
 import { copyText } from './clipboard.js'
@@ -103,6 +103,7 @@ const state = {
   // belong to the chat that is open and go with it when it closes.
   attach: createAttachments(),
   maxAttachmentBytes: null,
+  maxVideoBytes: null,
   dragging: false,
   brokerState: '',
   agentAvailability: null,
@@ -340,7 +341,7 @@ const shell = Object.defineProperties({}, {
   picked: { get: () => picked },
   intake: { get: () => intake },
   dragProps: { get: () => dragProps },
-  uploadFile: { get: () => uploadFile },
+  intakeFor: { get: () => intakeFor },
   put: { get: () => put },
   render: { get: () => render },
   landOnFragment: { get: () => landOnFragment },
@@ -596,16 +597,17 @@ async function loadProviders() {
 }
 
 // The one number the page has to know before it does something the host would
-// refuse: the biggest file a chat carries, which the host answers on its own
-// limits route and this app relays. It is asked for rather than assumed, and
-// until it answers nothing is refused in the browser — the broker refuses the
-// bytes itself, in its own sentence, so an unanswered `/api/limits` costs a
-// person a wasted upload and never a file that should have gone and did not.
-async function loadLimits() {
-  const limits = await api('GET', '/limits').catch(() => null)
-  const cap = limits?.attachment_max_bytes
-  state.maxAttachmentBytes = Number.isFinite(cap) ? cap : null
-  page.files.setUploadLimits(limits)
+// refuse. The web relay passes through the broker's limits. Video waits for
+// the answer before sending its bytes.
+let limitsRequest
+function loadLimits() {
+  return limitsRequest ??= api('GET', '/limits').catch(() => null).then(limits => {
+    const cap = limits?.attachment_max_bytes, videoCap = limits?.video_attachment_max_bytes
+    state.maxAttachmentBytes = Number.isFinite(cap) ? cap : null
+    state.maxVideoBytes = Number.isFinite(videoCap) ? videoCap : null
+    page.files.setUploadLimits(limits)
+    schedule()
+  }).finally(() => { limitsRequest = null })
 }
 
 
@@ -686,14 +688,15 @@ function picked(input) {
 // It answers the uploads it started, so a caller that has to wait for them —
 // there is exactly one, and it is that first message — can.
 function intake(entries) {
-  if (!page.activeThread() || page.activeThread().creating) return []
-  const going = []
-  for (const { file, name } of entries) {
-    const complaint = tooBig(file, state.maxAttachmentBytes)
-    const item = addFile(state.attach, file, { error: complaint, name })
-    if (!complaint) going.push(uploadFile(item, file))
-  }
-  schedule(); return going
+  return intakeFor(page, entries)
+}
+
+function intakeFor(owner, entries) {
+  const thread = owner.activeThread()
+  if (!thread || thread.creating) return []
+  const going = entries.map(({ file, name }) => uploadFile(owner, thread, file, name))
+  schedule()
+  return going
 }
 
 // ------------------------------------------------------------ drag and drop
@@ -739,27 +742,39 @@ function dragProps() {
 }
 
 
-async function uploadFile(item, file) {
-  const session = page.activeThread()
-  if (!session || session.creating) return
-  const attachmentsPath = `/api/threads/${encodeURIComponent(session.thread.id)}/attachments`
-  const attachmentState = state.attach
-  const form = new FormData()
-  form.append('file', file, item.name)
+async function uploadFile(owner, thread, file, name) {
+  const attachmentState = owner.state.attach
+  const item = addFile(attachmentState, file, { name })
+  const controller = item.controller = new AbortController()
+  const { signal } = controller
+  const video = isVideoName(item.name)
+  const attachmentsPath = `/api/threads/${encodeURIComponent(thread.thread.id)}/attachments`
   try {
-    const answer = page.activeThread() && threads.st.fixture ? await threads.uploadPreview(file, item.name) : await put(attachmentsPath, form, (loaded, total) => {
-      markProgress(attachmentState, item, loaded, total)
-      schedule()
-    })
-    markStored(attachmentState, item, answer)
+    if (video && !state.maxVideoBytes && !owner.threads.st.fixture) await loadLimits()
+    if (signal.aborted) return
+    const complaint = tooBig(file, state.maxAttachmentBytes, state.maxVideoBytes, item.name)
+    if (complaint) throw new Error(complaint)
+    if (video && !state.maxAttachmentBytes && !owner.threads.st.fixture) {
+      throw new Error('Couldn’t check the video size limit. Try attaching it again in a moment.')
+    }
+    const progress = (loaded, total) => { markProgress(attachmentState, item, loaded, total); schedule() }
+    let answer
+    if (owner.threads.st.fixture) answer = await owner.threads.uploadPreview(file, item.name)
+    else if (video && state.maxVideoBytes) {
+      answer = await put(`${attachmentsPath}?${new URLSearchParams({ name: item.name })}`, file, progress, { method: 'PUT', signal })
+    } else {
+      const form = new FormData()
+      form.append('file', file, item.name)
+      answer = await put(attachmentsPath, form, progress, { signal })
+    }
+    if (!signal.aborted) markStored(attachmentState, item, answer)
   } catch (err) {
-    // The host's own words for a refusal — the cap, a session it does not have.
-    markFailed(attachmentState, item, page.activeThread() && [404, 405].includes(err.status) ? 'Attachments aren’t available on this runtime yet.' : err.message)
+    if (!signal.aborted) markFailed(attachmentState, item, [404, 405].includes(err.status) ? 'Attachments aren’t available on this runtime yet.' : err.message)
+  } finally {
+    item.controller = null
+    if (!signal.aborted && owner.activeThread() === thread) owner.saveDraft()
+    schedule()
   }
-  // A file the host has written down is part of the draft from here on, so it
-  // is parked with the words beside it.
-  saveDraft()
-  schedule()
 }
 
 // The bytes on the wire, with progress where the browser can report it.
@@ -769,10 +784,10 @@ async function uploadFile(item, file) {
 // `XMLHttpRequest`, and it falls back to `fetch` where there is none. A browser
 // without it gets a pending chip instead of a moving one, which is honest: the
 // page says a file is going up and does not invent how far.
-function put(url, body, onProgress) {
+function put(url, body, onProgress, { signal, method = 'POST' } = {}) {
   const XHR = globalThis.XMLHttpRequest
   if (!XHR) {
-    return fetch(url, { method: 'POST', body }).then(async (res) => {
+    return fetch(url, { method, body, signal }).then(async (res) => {
       const parsed = await res.json().catch(() => null)
       if (!res.ok) throw Object.assign(new Error(sentenceOf(parsed) ?? `the upload was refused (${res.status})`), { status: res.status })
       return parsed
@@ -780,7 +795,10 @@ function put(url, body, onProgress) {
   }
   return new Promise((resolve, reject) => {
     const xhr = new XHR()
-    xhr.open('POST', url)
+    xhr.open(method, url)
+    const abort = () => xhr.abort()
+    signal?.addEventListener('abort', abort, { once: true })
+    xhr.addEventListener('loadend', () => signal?.removeEventListener('abort', abort), { once: true })
     xhr.upload?.addEventListener('progress', (event) => {
       if (event.lengthComputable) onProgress(event.loaded, event.total)
     })
@@ -798,8 +816,8 @@ function put(url, body, onProgress) {
       }
       resolve(parsed)
     })
-    xhr.addEventListener('error', () => reject(new Error('the upload did not reach this app')))
-    xhr.addEventListener('abort', () => reject(new Error('the upload was stopped')))
+    xhr.addEventListener('error', () => reject(new Error('The upload lost its connection. Try attaching the file again.')))
+    xhr.addEventListener('abort', () => reject(new Error('The upload was stopped.')))
     xhr.send(body)
   })
 }

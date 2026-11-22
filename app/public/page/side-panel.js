@@ -4,7 +4,7 @@ import { mount as mountTranscript } from './transcript.js'
 import { mount as mountSheets } from './sheets.js'
 import { mount as mountConversation } from './conversation.js'
 import { createApps, canFrame, buildAppThread } from '../apps.js'
-import { createAttachments, addFile, tooBig, markProgress, markStored, markFailed, carriesFiles, filesFrom } from '../attach.js'
+import { createAttachments, carriesFiles, filesFrom } from '../attach.js'
 import { createProfiles, mountProfile } from '../agent-profile.js'
 import { createSchedules } from '../schedules.js'
 import { createActivity } from '../activity.js'
@@ -57,24 +57,7 @@ export function mountSidePanel(base, activityOptions) {
   own.goApps = () => base.panels.close()
   own.chooseFiles = input => { host.closeMenus(); input.value = ''; input.click() }
   own.picked = input => { const entries = [...(input.files ?? [])].map(file => ({ file, name: file.name })); input.value = ''; return own.intake(entries) }
-  own.intake = entries => {
-    const thread = own.activeThread()
-    if (!thread || thread.creating) return []
-    const attachmentState = state.attach
-    const going = entries.map(async ({ file, name }) => {
-      const complaint = tooBig(file, state.maxAttachmentBytes), item = addFile(attachmentState, file, { error: complaint, name })
-      if (complaint) return
-      const form = new FormData(); form.append('file', file, item.name)
-      try {
-        const answer = own.threads.st.fixture ? await own.threads.uploadPreview(file, item.name)
-          : await base.put(`/api/threads/${encodeURIComponent(thread.thread.id)}/attachments`, form, (loaded, total) => { markProgress(attachmentState, item, loaded, total); base.schedule() })
-        markStored(attachmentState, item, answer)
-      } catch (error) { markFailed(attachmentState, item, error.message) }
-      if (own.activeThread() === thread) own.saveDraft()
-      base.schedule()
-    })
-    base.schedule(); return going
-  }
+  own.intake = entries => base.intakeFor(host, entries)
   own.dragProps = () => ({
     ondragover: event => { if (!carriesFiles(event.dataTransfer)) return; event.preventDefault(); state.dragging = true; base.schedule() },
     ondragleave: event => { if (!event.currentTarget.contains(event.relatedTarget)) { state.dragging = false; base.schedule() } },

@@ -41,6 +41,7 @@ TEXT_READ_MAX = 2 * 1024 * 1024
 # can double a text, so 1 MiB is what a save can be sure to carry.
 TEXT_WRITE_MAX = 1024 * 1024
 DOWNLOAD_MAX = 50 * 1024 * 1024
+ATTACHMENT_PARTS = Path(lc.vault_folder("attachments")).parts
 CHUNK = 64 * 1024
 
 USER_LINK = lc.OWNER_LINK
@@ -661,13 +662,17 @@ def download(root: str, raw_path: str | None) -> tuple[int, int, dict]:
     """A descriptor to stream, its size, and the headers it goes with. The
     caller closes the descriptor."""
     fd, st, parts = open_file(root, raw_path)
-    if st.st_size > DOWNLOAD_MAX:
+    name = parts[-1]
+    attachment_type = cfg.attachment_type(name) or ""
+    attachment_video = (root == "vault" and attachment_type.startswith("video/")
+                        and tuple(parts[:len(ATTACHMENT_PARTS)]) == ATTACHMENT_PARTS)
+    mtype = attachment_type if attachment_video else media_type(name)
+    limit = cfg.VIDEO_ATTACHMENT_MAX_BYTES if attachment_video else DOWNLOAD_MAX
+    if st.st_size > limit:
         os.close(fd)
         raise FilesError(413, f"{root}/{'/'.join(parts)} is {st.st_size} "
-                              f"bytes; Files downloads up to {DOWNLOAD_MAX}.",
-                         size=st.st_size, max=DOWNLOAD_MAX)
-    name = parts[-1]
-    mtype = media_type(name)
+                              f"bytes; Files downloads up to {limit}.",
+                         size=st.st_size, max=limit)
     headers = {
         "Content-Type": mtype + ("; charset=utf-8" if mtype.startswith("text/")
                                  else ""),

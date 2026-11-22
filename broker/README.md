@@ -133,7 +133,7 @@ on everything but `/up`.
 |---|---|
 | `GET /up` | `{"ok": true}`. No token. |
 | `GET /v1/agent-availability` | Installation-wide `agents_can_run`, `why` (plain sentences in display order), and an optional owner `action`. Before the first tick on a newly seeded install, availability is unknown (null) for up to one period. The bearer-protected read checks the freshness of `check.json`, then reads the current active roster, its providers' login state and recent wake outcomes. |
-| `GET /v1/limits` | the numbers a client must know before it does something this interface would refuse: `attachment_max_bytes`, `inline_image_max_bytes`, `attachment_types` — "Attachments" below |
+| `GET /v1/limits` | `attachment_max_bytes`, `video_attachment_max_bytes`, `inline_image_max_bytes`, `attachment_types` and the Files upload limits. See “Attachments” below. |
 | `GET /v1/agents` | the personas, derived from disk, each with its name and uploaded face |
 | `GET /v1/providers[?agent=<name>]` | the four providers, which are connected, the quota, when the login expires (`login`), and what each offers a chat: its `models` and its `efforts`. `?agent=` only decides whose default is ticked. |
 | `POST /v1/providers/claude-code/login` | begins a fresh Claude Code sign-in → **`201`** with `{state: "pending", url, code: null, instructions, login}`. Idempotent: a second POST while one is pending answers `200` with the same URL. "Making the login again" below. |
@@ -3008,10 +3008,11 @@ page draws those images under its words. `lib/loam_threads.py`
 **Upload, then send.** Two requests, never one:
 
 ```
-POST /v1/sessions/<id>/attachments        multipart/form-data, `file` parts
+POST /v1/threads/<id>/attachments         multipart/form-data, `file` parts
+PUT  /v1/threads/<id>/attachments?name=clip.mov  raw video bytes with Content-Length
   → 201 {"attachments": [{"path": "/home/loam/vault/98_ATTACHMENTS/loam-ui/2026-09-21/notes.md",
                           "name": "notes.md", "size": 30, "type": "text/markdown"}]}
-POST /v1/sessions/<id>/messages           {"text": "...", "attachments": ["<that path>"]}
+POST /v1/threads/<id>/messages            {"text": "...", "attachments": ["<that path>"]}
 ```
 
 **The multipart field name is `file`**, which is what `loam-ui`'s composer
@@ -3019,8 +3020,14 @@ sends (`public/app.js`, `form.append('file', file, name)`); `files` and
 `files[]` are read too, and a part with no `filename` is ignored. More than one
 `file` part in a body is allowed and answered in order, so `attachments` is
 always a list even for one file. `201`, because a file now exists that did not.
-The upload is answered for a session whose process has ended — a record is
-enough — so a file can be attached and the session resumed afterwards.
+An existing thread is enough to upload. Attaching a file does not start a turn.
+
+The app sends MP4, MOV and WebM as a raw `PUT` when the broker advertises
+`video_attachment_max_bytes`. Both hops stream the bytes. The broker writes
+in bounded chunks and publishes the stored name only after the complete
+body arrives. Cancellation or a lost connection discards the partial upload.
+The web relay allows two hours to receive the request. The broker allows
+up to two minutes between chunks while a transfer is underway.
 
 **Where the bytes go: the vault, not the workspace.**
 `98_ATTACHMENTS/<app>/YYYY-MM-DD/<sanitised-name>`, where `<app>` is
@@ -3058,13 +3065,11 @@ only their metadata comments. Its journal and the thread state's
   css, sql, diff, py, js, ts, sh, c, cpp, rs, go, rb, java, kt, swift, php
   and their kin), and zip, for an export from another AI service, stored as
   sent and never unpacked by the interface (2026-11-17).
-- **Two caps, because they are two limits.** `attachment_max_bytes` is
-  10 MB — this box's, a body held in memory and then written down — and a
-  request over it is **`413`** in a sentence with the number in it, refused
-  before the bytes are kept (the body is read and thrown away rather than the
-  socket cut: a client whose connection was cut mid-upload never reads the
-  reason). `inline_image_max_bytes` is 5 MB, which is the API's own per-image
-  ceiling; see below.
+- **Attachment limits.** `attachment_max_bytes` is 10 MiB for multipart
+  uploads. `video_attachment_max_bytes` is 512 MiB for a raw video body.
+  The video route returns **`413`** from the declared length. The app
+  checks its copy of these numbers before uploading. `inline_image_max_bytes`
+  is 5 MiB, the per-image ceiling for inline model input.
 - **The multipart envelope is parsed by hand, on bytes.** Both obvious answers
   are wrong: `cgi.FieldStorage` is gone from the standard library after 3.12,
   and `email.message_from_bytes` moves a part's payload through a `str`, which
@@ -3100,6 +3105,13 @@ reading it, so an image is base64'd into the turn as an image content block —
 the shape verified against the CLI 2.1.270's own input handling. An image over
 `inline_image_max_bytes` is still stored and still named, with "too big to show
 inline" beside it rather than being dropped in silence.
+
+The Antigravity adapter points `read_file` to the original video through
+16 MiB. For larger videos it uses the installed FFmpeg to prepare a smaller
+MP4 for the turn, including the whole timeline and the first audio track.
+The original is still the thread's playback file and the path in the vault.
+The viewing copy is removed when the provider process ends. Claude Code and
+Codex receive the original path.
 
 **`broker.user_message` carries `attachments`** — the same objects the upload
 answered — so a client replaying a conversation it did not watch live shows
@@ -3209,7 +3221,7 @@ percent-encoded on its own, the same shape the resolver reads back.
 | `GET /v1/files/list?root=&path=&cursor=&limit=` | `{"folder": <row>, "entries": [<row>…], "total", "cursor", "next_cursor", "truncated"}`. Folders first, then files, by name case-insensitively. `limit` defaults to 200 and is capped at 1000; `next_cursor` is a string to send back as `cursor`, or `null` on the last page. `truncated` is true only for a folder of over 50,000 names. A file named here is `400`. |
 | `GET /v1/files/stat?root=&path=` | the row, file or folder |
 | `GET /v1/files/read?root=&path=` | the row plus `"text"` and `"revision"` (`"sha256:<hex>"` of the exact bytes). UTF-8 text up to **2 MiB**: over it `413 {"error", "size", "max"}`; not UTF-8 or containing NUL `415 {"error", "media_type"}` -- download it instead. A folder is `400`. |
-| `GET /v1/files/download?root=&path=` | the bytes, up to **50 MiB** (`413` over it), streamed, with `Content-Type` from the extension, `Content-Disposition: attachment; filename*=UTF-8''<name>`, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox; default-src 'none'`, `Last-Modified`, `Cache-Control: no-store`. Vault HTML is untrusted: preview it only in an isolated, sandboxed origin. |
+| `GET /v1/files/download?root=&path=` | streamed bytes up to **50 MiB** (**512 MiB** for MP4, MOV and WebM under the vault's attachment folder), with `413` over the applicable cap. Videos support byte ranges for playback. Responses set `Content-Type` from the extension, `Content-Disposition: attachment; filename*=UTF-8''<name>`, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox; default-src 'none'`, `Last-Modified` and `Cache-Control: no-store`. Vault HTML is untrusted: preview it only in an isolated, sandboxed origin. |
 | `GET /v1/files/resolve?ref=&from_root=&from_path=` | what a link points at -- below |
 
 Every JSON answer is `Cache-Control: no-store`. Errors are

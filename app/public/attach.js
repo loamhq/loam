@@ -72,11 +72,13 @@ export function restoreAttachments(state, files) {
 }
 
 export function removeAttachment(state, id) {
+  state.items.find(item => item.id === id)?.controller?.abort()
   state.items = state.items.filter((item) => item.id !== id)
   return state
 }
 
 export function clearAttachments(state) {
+  for (const item of state.items) item.controller?.abort()
   state.items = []
   return state
 }
@@ -153,11 +155,18 @@ export function heldFiles(state) {
 // cap is the host's number, relayed through this app's `/api/limits` from the
 // broker's own; a phone on a slow connection should be told in the composer and
 // not after a minute of uploading.
-export function tooBig(file, cap) {
+export function isVideoName(name) {
+  return /\.(mp4|mov|webm)$/i.test(name)
+}
+
+export function tooBig(file, cap, videoCap, name = file?.name) {
+  const video = isVideoName(name) && Number.isFinite(videoCap)
+  if (video) cap = videoCap
   if (!Number.isFinite(cap) || cap <= 0) return null
   const size = Number.isFinite(file?.size) ? file.size : null
   if (size === null || size <= cap) return null
-  return `That file is ${bytes(size)}, and a chat carries ${bytes(cap)} at most.`
+  return video ? `This video is too large. Videos can be up to ${bytes(cap)} each.`
+    : `That file is ${bytes(size)}, and a chat carries ${bytes(cap)} at most.`
 }
 
 // The `attachments` the host states — on an upload's answer and on
@@ -232,7 +241,7 @@ export function filesFrom(transfer) {
 // is this app's, and a paste carrying both does both.
 export function mediaFrom(transfer, { now = Date.now() } = {}) {
   return filesIn(transfer)
-    .filter(file => isImage(file?.type) || file?.type?.startsWith('video/') || /\.(mp4|mov|webm)$/i.test(file?.name))
+    .filter(file => isImage(file?.type) || file?.type?.startsWith('video/') || isVideoName(file?.name))
     .map((file) => ({ file, name: file.name || pastedName(file.type, now) }))
 }
 

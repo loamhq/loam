@@ -2,7 +2,7 @@ import { listeningRecipients } from "../thread-identity.js"
 import { isMac } from "../keys.js"
 import { richField } from "../compose.js"
 import { h, icon, kept } from "../ui.js"
-import { removeAttachment, bytes, uploading, stored, heldFiles } from "../attach.js"
+import { removeAttachment, bytes, uploading, stored, heldFiles, isVideoName } from "../attach.js"
 import { loginView } from "../providers.js"
 import { menuSurface } from "../menu-surface.js"
 
@@ -239,23 +239,26 @@ function attachStrip() {
   const items = host.state.attach.items
   if (items.length === 0) return null
   return h('div', { class: 'attachstrip' },
-    ...items.map((item) =>
-      h(
+    ...items.map((item) => {
+      const active = !item.path && !item.error && !item.held
+      const action = active ? `Cancel upload of ${item.name}` : `Take ${item.name} off this message`
+      return h(
         'div',
-        { class: `attachment-chip${item.type?.startsWith('video/') ? ' video-chip' : ''}${item.error ? ' bad' : ''}${item.path ? '' : ' going'}`, key: item.id },
+        { class: `attachment-chip${isVideoName(item.name) ? ' video-chip' : ''}${item.error ? ' bad' : ''}${active ? ' going' : ''}`, key: item.id },
         item.kind === 'image' ? icon.image(13) : icon.file(13),
         h(
           'span',
           { class: 'attachment-chip-who' },
           h('span', { class: 'attachment-chip-name', text: item.name }),
-          h('span', { class: 'attachment-chip-sub', text: chipSub(item) }),
+          h('span', { class: 'attachment-chip-sub', role: item.error ? 'status' : null, text: chipSub(item) }),
         ),
         h(
           'button',
           {
             class: 'attachment-chip-x',
             type: 'button',
-            title: `Take ${item.name} off this message`,
+            title: action,
+            'aria-label': action,
             onclick: () => {
               removeAttachment(host.state.attach, item.id)
               host.saveDraft()
@@ -264,8 +267,8 @@ function attachStrip() {
           },
           icon.close(10),
         ),
-      ),
-    ),
+      )
+    }),
   )
 }
 
@@ -274,7 +277,7 @@ function attachStrip() {
 // Under the name: why it will not go, how far it has got, or how big it is.
 function chipSub(item) {
   if (item.error) return item.error
-  if (item.path && (item.type?.startsWith('video/') || /\.(mp4|mov|webm)$/i.test(item.name))) {
+  if (item.path && isVideoName(item.name)) {
     const thread = activeThread()?.thread
     const agents = host.threads.catalog()
     const engine = id => thread.members.find(m => m.persona === id)?.engine ?? agents.find(a => a.id === id)?.engine
@@ -285,8 +288,9 @@ function chipSub(item) {
       ? 'Ready to watch with Antigravity' : 'Antigravity can watch. Other agents receive the file.'
   }
   if (item.path) return bytes(item.size)
-  if (item.progress > 0) return `${Math.round(item.progress * 100)}% sent`
-  return 'sending…'
+  if (item.progress >= 1) return 'Saving…'
+  if (item.progress >= .01) return `${Math.floor(item.progress * 100)}% uploaded`
+  return 'Uploading…'
 }
 
 
@@ -632,6 +636,7 @@ function closeMenus() {
 // the target's.
 function composerMenu() {
   const cap = host.state.maxAttachmentBytes
+  const videoCap = host.state.maxVideoBytes
   return {
     title: 'Add to this message',
     groups: [
@@ -664,7 +669,8 @@ function composerMenu() {
     ],
     // The host's number, said before anything is chosen. It is the broker's cap
     // and this app keeps no copy of it — see `/api/limits`.
-    note: cap ? `Up to ${bytes(cap)} per file.` : null,
+    note: videoCap ? `Videos up to ${bytes(videoCap)} each. Other files up to ${bytes(cap)} each.`
+      : cap ? `Up to ${bytes(cap)} per file.` : null,
   }
 }
 

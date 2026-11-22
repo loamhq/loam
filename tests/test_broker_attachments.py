@@ -2,6 +2,7 @@
 """Exercise multipart uploads, stored filenames and presentation of attachments to a session."""
 
 import asyncio
+import hashlib
 import importlib.machinery
 import importlib.util
 import json
@@ -141,6 +142,81 @@ async def request(server, method, target, body=b"", content_type="",
     return writer.body()
 
 
+async def stream_video(server, upload, day_dir) -> None:
+    listener = await asyncio.start_server(server.handle, "127.0.0.1", 0)
+    port = listener.sockets[0].getsockname()[1]
+
+    async def start(name, length, token=server.broker.token):
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        writer.write((f"PUT {upload}?name={name} HTTP/1.1\r\n"
+                      f"Authorization: Bearer {token}\r\n"
+                      f"Content-Length: {length}\r\n\r\n").encode())
+        return reader, writer
+
+    async def finish(reader, writer):
+        data = await asyncio.wait_for(reader.read(), timeout=5)
+        writer.close()
+        await writer.wait_closed()
+        head, _, body = data.partition(b"\r\n\r\n")
+        return int(head.split()[1]), json.loads(body)
+
+    async with listener:
+        # Headers alone are enough. Waiting for the entire request would hang.
+        status, denied = await finish(*await start("huge.mov", cfg.VIDEO_ATTACHMENT_MAX_BYTES + 1))
+        check("raw videos over the cap are refused from the headers", status, 413)
+        check("the video refusal states its own cap", "512.0 MB" in denied["error"], True)
+        status, _ = await finish(*await start("clip.mov", 1000, "wrong"))
+        check("raw uploads require the token before reading bytes", status, 401)
+        status, _ = await finish(*await start("report.pdf", 1000))
+        check("the raw route only accepts the supported video formats", status, 415)
+
+        chunk = bytes(range(256)) * 1024
+        pieces = 45
+        reader, writer = await start("Travel+clip.MOV", len(chunk) * pieces)
+        expected = hashlib.sha256()
+        for number in range(pieces):
+            block = chunk if number % 2 else chunk[::-1]
+            expected.update(block)
+            writer.write(block)
+            await writer.drain()
+        status, result = await finish(reader, writer)
+        check("a video larger than the legacy cap lands", status, 201)
+        item, = result["attachments"]
+        check("video names and metadata use the existing contract", (item["name"], item["type"], item["size"]),
+              ("Travel-clip.MOV", "video/quicktime", len(chunk) * pieces))
+        with Path(item["path"]).open("rb") as saved:
+            check("the streamed file preserves every byte", hashlib.file_digest(saved, "sha256").hexdigest(), expected.hexdigest())
+
+        reader, writer = await start("cancelled.webm", len(chunk) * 3)
+        writer.write(chunk)
+        await writer.drain()
+        writer.write_eof()
+        status, result = await finish(reader, writer)
+        check("a partial video returns an explanation", (status, "before" in result["error"]), (400, True))
+        check("an interrupted transfer leaves no final or staging file",
+              list(day_dir.glob("*cancelled*")) + list(day_dir.glob(".video-*.tmp")), [])
+
+    files = broker_mod.files_api
+    movie = day_dir / "playback.mp4"
+    with movie.open("wb") as f:
+        f.truncate(files.DOWNLOAD_MAX + 1)
+    fd, size, headers = files.download("vault", str(movie.relative_to(cfg.VAULT)))
+    os.close(fd)
+    check("an attached video above the Files cap can be played back",
+          (size, headers["Content-Type"]), (files.DOWNLOAD_MAX + 1, "video/mp4"))
+
+    ordinary = cfg.VAULT / "ordinary.mp4"
+    with ordinary.open("wb") as f:
+        f.truncate(files.DOWNLOAD_MAX + 1)
+    try:
+        fd, _, _ = files.download("vault", ordinary.name)
+    except files.FilesError as exc:
+        check("videos outside the attachment folder keep the Files cap", exc.status, 413)
+    else:
+        os.close(fd)
+        check("videos outside the attachment folder keep the Files cap", 200, 413)
+
+
 async def main() -> None:
     broker = broker_mod.Broker()
     server = broker_mod.Server(broker)
@@ -155,6 +231,8 @@ async def main() -> None:
     status, body = await request(server, "GET", "/v1/limits")
     check("GET /v1/limits states the cap", (status, body["attachment_max_bytes"]),
           (200, cfg.ATTACHMENT_MAX_BYTES))
+    check("GET /v1/limits advertises the separate video cap",
+          body["video_attachment_max_bytes"], cfg.VIDEO_ATTACHMENT_MAX_BYTES)
     check("...and the image the API will take inline",
           body["inline_image_max_bytes"], cfg.INLINE_IMAGE_MAX_BYTES)
 
@@ -200,6 +278,8 @@ async def main() -> None:
         status, out = await route(server, "POST", upload, raw=body_bytes, content_type=ctype)
         check("video type comes from the stored extension: " + ext,
               (status, out["attachments"][0]["type"]), (201, mime))
+
+    await stream_video(server, upload, day_dir)
 
     # -- 2, 3. the sanitising, the path, the bytes --------------------------
 

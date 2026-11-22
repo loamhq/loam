@@ -52,10 +52,13 @@ Pick an agent beneath it to have that agent answer the saved message and
 future messages. Pin a thread from its row (hold on a phone) or its details.
 General always stays pinned. Hello can be unpinned.
 
-Attach MP4, MOV or WebM by choosing, dropping or pasting a file. The upload
-limit is 10 MiB per file. The video stays in Files and can play in the thread
-when the browser supports its codec. Antigravity can read the video. Claude
-Code and Codex receive its path.
+Attach MP4, MOV or WebM by choosing, dropping or pasting a file in a chat.
+Each video can be up to 512 MB. The composer shows upload progress and the
+attachment's × cancels the upload. A failed upload leaves the message draft
+in place. The original stays in Files and can play in the thread when the
+browser supports its codec. Antigravity uses a smaller viewing copy for
+large videos. Claude Code and Codex receive the original file path. Other
+chat attachments can be up to 10 MB each.
 
 When an agent adds a local image to a thread with `![caption](path)`,
 Loam saves a copy in the vault's attachments folder and shows it where the

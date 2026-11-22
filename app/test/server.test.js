@@ -4,10 +4,38 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { once } from 'node:events'
+import http from 'node:http'
 
 import { createApp } from '../src/server.js'
 import { readConfig } from '../src/config.js'
 import { TOKEN, fakeBroker, appAgainst, shut, closing, logInto } from './harness.js'
+
+test('a video starts reaching the broker before the browser finishes and cancellation closes the upstream', async t => {
+  const first = Promise.withResolvers(), cancelled = Promise.withResolvers()
+  const broker = http.createServer(req => {
+    req.on('data', chunk => first.resolve({ chunk, headers: req.headers, path: req.url }))
+    req.on('error', () => {})
+    req.on('aborted', () => cancelled.resolve())
+  })
+  broker.listen(0, '127.0.0.1')
+  await once(broker, 'listening')
+  const app = await appAgainst({ url: `http://127.0.0.1:${broker.address().port}` })
+  t.after(closing(app, { server: broker }))
+
+  const req = http.request(`${app.url}/api/threads/t-1/attachments?name=Trip+day.mov`, {
+    method: 'PUT', headers: { 'content-length': '12000000' },
+  })
+  req.on('error', () => {})
+  t.after(() => req.destroy())
+  req.write('some bytes')
+  const received = await first.promise
+  assert.equal(received.chunk.toString(), 'some bytes')
+  assert.equal(received.headers.authorization, `Bearer ${TOKEN}`)
+  assert.equal(received.headers['content-length'], '12000000')
+  assert.equal(received.path, '/v1/threads/t-1/attachments?name=Trip+day.mov')
+  req.destroy()
+  await cancelled.promise
+})
 
 test('GET /up answers 200 even with no broker configured at all', async (t) => {
   const config = readConfig({})

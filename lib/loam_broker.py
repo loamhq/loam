@@ -656,13 +656,11 @@ SCAN_INTERVAL_S = 60
 VAULT = lc.VAULT
 ATTACHMENT_ROOT = VAULT / lc.vault_folder("attachments")
 
-# The biggest file the interface accepts, and the biggest image it will put in
-# front of the model inline. They are two numbers because they are two limits:
-# the first is this box's (a browser upload held in memory, then written down),
-# the second is the API's own per-image ceiling. A bigger image is still stored
-# and still named by its path in the message -- the persona can Read it -- it
-# is simply not base64'd into the turn.
+# Multipart uploads are held in memory. The video route streams to disk and
+# has its own cap. The separate inline image limit governs what the broker
+# can send directly as an image instead of passing its stored path.
 ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
+VIDEO_ATTACHMENT_MAX_BYTES = 512 * 1024 * 1024
 INLINE_IMAGE_MAX_BYTES = 5 * 1024 * 1024
 
 # What the wire may carry, keyed by the extension, because the extension is the
