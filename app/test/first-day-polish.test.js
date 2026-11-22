@@ -35,7 +35,7 @@ test.after(() => { globalThis.fetch = realFetch })
 
 const compose = (placeholders = []) => ({ field: () => h('textarea'), render: (ctx) => { placeholders.push(ctx.placeholder); return h('div', { class: 'composer-fixture' }) }, leave() {}, files: () => [], busy: () => false, clear() {}, restore() {}, changed() {}, dragProps: () => ({}) })
 function threadsFor(t, { api, agents = [{ id: 'iris', name: 'Iris' }], providers = [], openSettings = null, placeholders } = {}) {
-  const threads = createThreads({ api, redraw() {}, agents: () => agents, providers: () => providers, openSettings, rail: () => null, nav: () => null, enter() {}, leave() {}, compose: compose(placeholders) })
+  const threads = createThreads({ api, redraw() {}, agents: () => agents, agentsReady: () => true, providers: () => providers, openSettings, rail: () => null, nav: () => null, enter() {}, leave() {}, compose: compose(placeholders) })
   t.after(() => threads.close({ navigate: false }))
   return threads
 }
@@ -60,9 +60,9 @@ test('the draft card says who the agent is in a plain line, never the soul’s w
   assert.doesNotMatch(text(card), /You are/)
 })
 test('1. the new agent is a card: face, name, two sentences, the whole soul and config rendered behind one fold, Create and Ask for changes', async () => {
-  const asked = [], opened = []
+  const asked = [], made = []
   let drafts = [juniper]
-  const c = createAgentDrafts({ redraw() {}, askChanges: (d) => asked.push(d.draft), openThread: (id) => opened.push(id),
+  const c = createAgentDrafts({ redraw() {}, askChanges: (d) => asked.push(d.draft), made: (agent) => made.push(agent.id),
     api: async (method) => method === 'GET' ? { drafts } : (drafts = [], { agent: { id: 'juniper', name: 'Juniper' }, first_thread: 't-1a2b3c4d' }) })
   await c.load('t-1')
   let card = find(c.view('t-1'), 'agent-draft-card')
@@ -95,12 +95,8 @@ test('1. the new agent is a card: face, name, two sentences, the whole soul and 
   assert.deepEqual([1, 2, 3, 4, 11, 12, 13, 21, 22].map(ordinalDraft), ['', '2nd draft', '3rd draft', '4th draft', '11th draft', '12th draft', '13th draft', '21st draft', '22nd draft'])
 
   await c.confirm(drafts[0])
-  const done = c.view('t-1')
-  assert.match(text(done), /Juniper is ready\./)
-  assert.doesNotMatch(text(done), /t-1a2b3c4d/)
-  all(done, 'pillbtn').find((b) => text(b) === 'Say hello to Juniper').fire('click')
-  assert.deepEqual(opened, ['t-1a2b3c4d'])
-  assert.equal(find(done, 'agent-draft-card'), null, 'a made draft leaves the thread')
+  assert.deepEqual(made, ['juniper'])
+  assert.equal(c.view('t-1'), null, 'confirmation removes the review from the bottom of the thread')
 })
 
 test('1. the card sits in the thread’s flow after the line that announced it, not above the conversation', async (t) => {
@@ -123,7 +119,7 @@ test('1. the card sits in the thread’s flow after the line that announced it, 
 })
 
 // ---------------------------------------------------------------- 2
-test('2. Loam’s lines read as words: no draft, thread or message ids, a revision as “2nd draft”, a thread linked by its name', async (t) => {
+test('2. Loam’s lines use plain language and a creation card resolves by agent ID', async (t) => {
   // As bin/session-broker writes them (agents_route).
   const lines = {
     starter: "New agent. Tell Iris who you'd like: Iris drafts their name, face, soul and config, shows you, changes it on your word, and makes them only when you say yes. (Iris: `settings describe agent.draft` says how; this thread is `t-6daf5a6f`.)",
@@ -134,28 +130,29 @@ test('2. Loam’s lines read as words: no draft, thread or message ids, a revisi
     yes: "Juniper was made by Iris on Sam's yes (m12 in t-6daf5a6f). This is their first thread.",
     made: 'Made Juniper (juniper): their first thread is t-c4a782f2',
   }
-  const said = (line, threadsList) => formatSystemLine(line, { threads: threadsList })
+  const said = formatSystemLine
   assert.deepEqual(said(lines.starter), [{ text: "New agent. Tell Iris who you'd like: Iris drafts their name, face, soul and config, shows you, changes it on your word, and makes them only when you say yes." }])
   assert.deepEqual(said(lines.drafted), [{ text: 'Iris drafted a new agent: Juniper' }])
   assert.deepEqual(said(lines.redrafted), [{ text: 'Iris drafted a new agent: Juniper (3rd draft)' }])
   assert.deepEqual(said(lines.revised), [{ text: 'Iris made a 2nd draft of Juniper' }])
   assert.deepEqual(said(lines.aside), [{ text: 'Iris set the new agent’s draft aside' }])
   assert.deepEqual(said(lines.yes), [{ text: "Juniper was made by Iris on Sam's yes. This is their first thread." }])
-  assert.deepEqual(said(lines.made), [{ text: 'Made Juniper. ' }, { link: { thread: 't-c4a782f2', title: 'Say hello in their first thread' } }])
-  assert.deepEqual(said(lines.made, [{ id: 't-c4a782f2', title: 'Juniper says hello' }]), [{ text: 'Made Juniper. ' }, { link: { thread: 't-c4a782f2', title: 'Their first thread: Juniper says hello' } }])
   assert.deepEqual(said('Iris brought in Juniper'), [{ text: 'Iris brought in Juniper' }], 'every other line is untouched')
 
-  // Through the thread: the words on the page, the first thread a link.
+  // Through the thread: the old creation announcement becomes an ID-only card.
   const messages = Object.values(lines).map((line, i) => ({ id: `m${i + 1}`, author: 'loam', kind: 'system', text: line, at: '2026-11-16T17:50:00Z' }))
   const threads = threadsFor(t, { api: async (method, path) => path.startsWith('/agents/drafts') ? { drafts: [] } : record(messages) })
   await threads.open('t-1', { routed: true })
   await tick()
   const stream = find(threads.pane()[0], 'tt-stream')
-  assert.equal(all(stream, 'tt-system').length, messages.length)
+  assert.equal(all(stream, 'tt-system').length, messages.length - 1)
   assert.doesNotMatch(text(stream), /\b[dt]-[0-9a-f]{8}\b|\bm12\b|revision \d|settings describe/)
-  const link = all(stream, 'tt-branch-link').find((a) => text(a) === 'Say hello in their first thread')
-  assert.ok(link, 'the first thread is a link by name')
-  assert.match(link.getAttribute('href'), /t-c4a782f2/)
+  const card = find(stream, 'tt-agent-created')
+  assert.match(text(card), /Agent createdNo longer here/)
+  assert.equal(tags(card, 'button').length, 0)
+  assert.deepEqual(threads.st.open.messages.at(-1), {
+    id: 'm7', author: 'loam', kind: 'system', at: '2026-11-16T17:50:00Z', agent_created: 'juniper',
+  })
 })
 
 // ---------------------------------------------------------------- 3

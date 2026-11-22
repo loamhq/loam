@@ -8,7 +8,7 @@ import { createMessageState } from '../chat-ui.js'
 export function mount(host, options = {}) {
   return createThreads({ registry: host.registry, api: host.api, redraw: host.schedule,
     linePending: () => host.pluginLoader?.pending('thread.list.line', { includeStyles: true }),
-    changedAgent: agent => host.changedAgent?.(agent), agents: () => host.state.agents.list, agentsReady: () => host.state.agentsReady, providers: () => host.state.providers,
+    changedAgent: agent => host.changedAgent?.(agent), agents: () => host.state.agents.list, agentsReady: () => host.state.agentsReady, loadAgents: () => host.loadAgents(), providers: () => host.state.providers,
     running: host.running, rail: host.rail, nav: host.nav, openProfile: host.goProfile, openSettings: (page, provider) => host.goSettings?.(page, provider),
     listIsMain: () => ['home', 'threads'].includes(host.state.screen),
     visitId: () => host.panelId === 'side' ? host.workspaceHistory.current('side')?.id : globalThis.history?.state?.panelVisit ?? 'initial',

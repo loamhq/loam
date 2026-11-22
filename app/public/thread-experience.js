@@ -213,25 +213,15 @@ export function failedTurnInfo(message, { agentName = (id) => id, engineOf = () 
   return { kind: 'failed', agent, engine, provider, raw, summary: `${agent}’s turn didn’t finish. Send your message again, or ask another agent.`, action: null }
 }
 
-// Loam's own lines name things by id for the agents that read them: a draft
-// ("draft d-5f7081e2, revision 1"), a thread ("their first thread is
-// t-c4a782f2", "this thread is `t-…`"), a message ("m12 in t-…"). A person
-// reads words: the ids go, a revision is "2nd draft" once there is more than
-// one, and a thread is a link by its name. Returns parts: `{ text }` or
-// `{ link: { thread, title } }`.
-export function formatSystemLine(text, { threads = [] } = {}) {
+// Loam's lines include draft, thread and message IDs for the agents reading
+// them. In chat, a draft revision is shown once there is more than one.
+export function formatSystemLine(text) {
   const clean = String(text ?? '')
     .replace(/\s*\([^()]*settings describe agent\.draft[^()]*\)/gi, '')
     .replace(/\s*\(m[\w-]+ in t-[0-9a-f]+\)/gi, '')
     .replace(/[;,]?\s*this thread is `?t-[0-9a-f]+`?\.?/gi, '')
     .trim()
 
-  const made = /^Made (.+?)(?: \([\w.-]+\))?: their first thread is (t-[0-9a-f]+)\.?$/i.exec(clean)
-  if (made) {
-    const [, who, thread] = made
-    const title = threads.find((t) => t.id === thread)?.title
-    return [{ text: `Made ${who}. ` }, { link: { thread, title: title && !/^new thread$/i.test(title) ? `Their first thread: ${title}` : 'Say hello in their first thread' } }]
-  }
   const drafted = /^(.+?) drafted a new agent: (.+?) \(draft d-[0-9a-f]+, revision (\d+)\)\.?$/i.exec(clean)
   if (drafted) {
     const [, by, who, rev] = drafted

@@ -20,8 +20,11 @@ and **Ask for changes** as the secondary action. It focuses the composer with a 
 While the person is writing, or on an older draft when there are two, Create
 steps down to the secondary tier (`button-tiers.css`). A revision number is
 never shown on a first draft; from the second it is a quiet "2nd draft". Once
-made, the card becomes "Juniper is ready." with **Say hello to Juniper**,
-which opens their first thread.
+made, the review closes and a compact **Agent created** card sits at the
+creation message's place in history. It shows the agent's current display
+name and face. **Start a chat** opens a new thread with that agent. If the
+agent leaves the active roster, the card says "No longer here" and the
+action goes away.
 
 ## Loam's lines read as words (`formatSystemLine`, `thread-experience.js`)
 
@@ -29,11 +32,13 @@ The broker writes its lines for the agents who read them, with ids in them:
 "Iris drafted a new agent: Juniper (draft d-…, revision 1)", "Made Juniper
 (juniper): their first thread is t-…", "(m12 in t-…)", "this thread is
 `t-…`", and the starter line's instruction to Iris. The page draws them
-without the ids: "Iris drafted a new agent: Juniper", "Iris made a 2nd draft
-of Juniper", "Made Juniper." and a link to their first thread by its name
-("Say hello in their first thread" while it has none of its own). The record
-keeps the full words; only the drawing changes. A broker that stops writing
-ids makes this a no-op.
+without the ids: "Iris drafted a new agent: Juniper" and "Iris made a 2nd
+draft of Juniper". The creation announcement becomes a card. The app's
+thread record keeps the agent ID as `agent_created` and uses the message's
+existing ID and timestamp for its place in history. The reader also accepts
+an ID-only system message from the broker. The page reads the current
+roster when a creation message arrives or is loaded from history, and on
+its five-second heartbeat while the thread is open.
 
 ## A failed turn is a system line (`failedTurnInfo`, `threads.js`)
 

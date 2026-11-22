@@ -15,6 +15,10 @@ have never met.
   measurement reads only the author's text. Quote controls hand off focus to
   the source message. Direct message URLs land with the same temporary wash
   and leave focus alone. See the [browser captures](../docs/evidence/thread-quote-polish/README.md).
+- **Agent creation cards** use the broker's creation message for their place
+  in thread history and the active roster for the display name and face.
+  The app projects older announcements onto the agent ID at the thread
+  reader. See the [browser captures](../docs/evidence/agent-creation/README.md).
 - **Panel and list navigation** is specified in the [workspace navigation guide](../docs/wide-panels.md#back-and-forward).
   The phone tab bar belongs to the visible list root, even when a panel stays mounted behind it.
   Keep navigation changes in the surface history. Reconstructing a whole workspace from a tab or the address bar can tear down another pane's live editor.
