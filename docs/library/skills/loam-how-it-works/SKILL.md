@@ -50,6 +50,12 @@ agent a turn. Starting from an agent gives the thread that agent. The plain
 with **Undo** beside the message. An unaddressed message stays as a note.
 Pick an agent beneath it to have that agent answer the saved message and
 future messages. Pin a thread from its row (hold on a phone) or its details.
+
+When a thread message waits for a connection, it stays in that browser
+with **Not sent yet** below it. The browser tries again after a failed send.
+Use **Retry** to try sooner. You can keep writing and sending other messages
+while it waits. A retry keeps the same message ID so a lost confirmation
+doesn't create a second copy.
 General always stays pinned. Hello can be unpinned.
 
 Attach MP4, MOV or WebM by choosing, dropping or pasting a file in a chat.

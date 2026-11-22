@@ -399,6 +399,20 @@ export function createApp({
         body = await readBody(req, MAX_BODY).catch((err) => err)
         if (body instanceof Error) return sendJson(res, body.tooLarge ? 413 : 400, { error: body.tooLarge ? 'This text is over what this request carries here.' : body.message })
       }
+      if (action === 'messages') {
+        const abort = new AbortController()
+        const disconnected = () => abort.abort()
+        res.once('close', disconnected)
+        if (res.destroyed) disconnected()
+        try {
+          return await relayJson(res, method, target, body, { signal: abort.signal })
+        } catch (error) {
+          if (!abort.signal.aborted) throw error
+          return
+        } finally {
+          res.off('close', disconnected)
+        }
+      }
       return await relayJson(res, method, target, body)
     }
 

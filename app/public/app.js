@@ -200,11 +200,12 @@ function draw() {
 
 // ------------------------------------------------------------------- the api
 
-async function api(method, path, body) {
+async function api(method, path, body, { signal } = {}) {
   const res = await fetch(`/api${path}`, {
     method,
     headers: body === undefined ? {} : { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
   })
   const text = await res.text()
   let parsed = null

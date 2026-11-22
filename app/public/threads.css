@@ -132,6 +132,9 @@
 .tt-footer-action { display:grid; place-items:center; flex:none; width:44px; height:44px; padding:0; cursor:pointer; border-radius:4px; }
 .tt-footer-action svg { stroke-width:2.2; }
 .tt-message-time { color:var(--paper-ink-3); font:400 11px/1.4 var(--font-body); white-space:nowrap; }
+.tt-send-status { display:flex; justify-content:flex-end; align-items:center; flex-wrap:wrap; gap:0 12px; color:var(--paper-ink-2); font-size:12px; text-align:right; }
+.tt-send-status > .quietlink { min-height:44px; min-width:44px; justify-content:center; cursor:pointer; }
+.tt-send-status > .quietlink:disabled { opacity:.55; cursor:default; }
 .tt-time-button { padding:4px 0; font:400 11px/1.4 var(--font-body); cursor:pointer; }
 .tt-time-button:focus-visible { outline:2px solid var(--signal-crema); outline-offset:2px; border-radius:4px; }
 .tt-time-button.err,.tt-time-button.err .tt-message-time { color:var(--danger); }

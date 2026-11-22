@@ -28,6 +28,11 @@ untracked (`.git/info/exclude`) and which never leaves the box with the code.
   `bin/check-drift` compares them; the generator is the truth.
 - **What ships and what is the person's** is `docs/update.md`: an update
   replaces the checkout and `<vault>/System/Loam/` and nothing else.
+- **Thread sends share a queue across tabs.** A browser tab can freeze
+  while waiting for a response. Claim work in an IndexedDB transaction
+  that commits before the request. Another tab can take over when the
+  claim expires. Keep the original submission ID so a retry can recover
+  the broker's acknowledgement.
 
 ## Proving things
 

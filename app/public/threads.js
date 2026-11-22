@@ -1,5 +1,5 @@
 import { firstThreadLesson } from './first-use.js'
-import { threadOutbox } from './thread-outbox.js'
+import { sendRequest, threadOutbox } from './thread-outbox.js'
 import { createAgentDrafts } from './agent-drafts.js'
 import { owner, isOwner } from './owner.js'
 import { createCoreRegistry } from './core-registrations.js'
@@ -682,12 +682,12 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     // Keep the draft until acceptance. A lost response never auto-resends a
     // message: Retry is an explicit act and the durable record is readable.
     try {
-      const answer = await transport('POST', `${path(o.thread.id)}/messages`, { text, ...reference, ...(attachments.length ? { attachments: attachments.map((f) => f.path) } : {}) })
+      const answer = await sendRequest(transport, 'POST', `${path(o.thread.id)}/messages`, { text, ...reference, ...(attachments.length ? { attachments: attachments.map((f) => f.path) } : {}) })
       accepted = true
       const message = readAcceptedMessage(answer)
       if (cleanTitle) {
-        if (st.open === o) await patch({ title: cleanTitle })
-        else await transport('PATCH', path(o.thread.id), { title: cleanTitle })
+        if (st.open === o) patch({ title: cleanTitle })
+        else transport('PATCH', path(o.thread.id), { title: cleanTitle }).catch(() => {})
       }
       if (st.drafts.get(o.thread.id)?.text.trim() === text) st.drafts.delete(o.thread.id)
       if (st.open !== o) return
@@ -695,7 +695,9 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       applyThreadEvent(o, { type: 'message.done', message })
       receivedNote(o, message)
       refreshList()
-    } catch (e) { o.error = accepted ? `Message sent. ${e.message} Refresh to read the latest reply.` : `${e.message} Your message is still here.` }
+    } catch (e) { o.error = accepted ? `Message sent. ${e.message} Refresh to read the latest reply.` : e.status
+      ? `${e.message} Your message is still here.`
+      : 'Couldn’t confirm the send. Your message is still here. Refresh the thread to check before sending again.' }
     finally { o.sending = false; o.pending = null; redraw() }
   }
   function mention() {
@@ -1166,10 +1168,20 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
   }
   function messageFooter(m, segments, mine) {
     if (m.queued) {
-      if (!m.queued.error) return h('span', { class: 'muted', role: 'status', text: 'Sending…' })
-      return h('div', { role: 'alert' }, m.queued.error, button('Edit message', async () => {
+      const item = m.queued
+      if (!item.error) {
+        const active = item.leaseUntil > Date.now()
+        const tried = item.attempts && (!active || item.attempts > 1)
+        return h('div', { class: 'tt-send-status' },
+          h('span', { role: 'status', text: 'Not sent yet' }),
+          tried ? button('Retry', () => outbox.retry(item.order).catch(() => {
+            if (st.open?.thread.id !== item.thread) return
+            st.open.error = 'Couldn’t retry this message. It is still saved in this browser.'
+            redraw()
+          }), { class: 'quietlink', disabled: active }) : null)
+      }
+      return h('div', { class: 'tt-send-status' }, h('span', { role: 'alert', text: `Not sent yet. ${item.error}` }), button('Edit message', async () => {
         if (draft.value.trim() || compose.files().length) return
-        const item = m.queued
         draft.value = item.body.text; compose.restore(item.attachments); st.open.replyTo = item.reply
         saveCompose()
         await outbox.remove(item.order)
@@ -1686,7 +1698,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
             o.has_more || o.moreBusy ? h('div', { class: 'tt-history', key: 'history' },
               o.moreBusy ? h('div', { class: 'earlier tt-history-loading', role: 'status', text: 'Loading earlier…' }) : button('Earlier messages', () => earlier(), { class: 'earlier' }),
               o.historyError ? h('div', { class: 'muted', role: 'status', text: o.historyError }) : null) : null,
-            !o.loading && !o.messages.length ? emptyConversation({
+            !o.loading && !messages.length ? emptyConversation({
               title: o.promptTitle || (o.thread.default ? `A new thread with ${name(o.thread.default)}` : 'A thread without an agent'),
               body: o.promptBody || (o.thread.default ? 'Start with a thought. Bring others in with @.' : 'Keep a note here, or tag an agent with @ to start a conversation.'),
               face: h('div', { class: 'tt-empty-icon' }, threadFace(o.thread, 68)),
