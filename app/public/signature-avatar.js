@@ -61,8 +61,9 @@ const landmarks = [
 ]
 const stamps = ['M38 58L50 35L62 58Z', 'M37 41H63M37 51H63M37 61H63', 'M50 34L66 50L50 66L34 50Z', 'M37 61V42Q50 28 63 42V61', 'M35 59L46 37L56 59L66 37', 'M34 50H66M50 34V66', 'M38 34V66H64', 'M34 57L50 36L66 57M41 63H59']
 
+const supplier = (count, draw) => Object.assign(draw, { count })
 export const faceSuppliers = {
-  'mist-trail': n => [
+  'mist-trail': supplier(stones.length, n => [
     path(stones[n], {fill:'var(--face-edge)',opacity:.16,transform:'translate(0 3)'}),
     path(stones[n], {fill:'var(--face-body)','data-silhouette':'stone'}),
     // Soft flat layers catch wet light without an outline or paint server.
@@ -70,29 +71,29 @@ export const faceSuppliers = {
     ...([2,7].includes(n) ? [mark([path(n===2?'M29 28Q43 44 76 47L79 56Q46 56 24 41Z':'M22 41Q40 62 85 58L85 67Q45 73 18 52Z',{fill:'var(--face-quartz)',opacity:.9})])] : []),
     ...([0,5,7].includes(n) ? [detail([path(['M11 63Q18 55 25 62L29 73L20 76Z','M14 66Q24 58 33 65L31 78L22 79Z','M22 69Q28 63 35 69L38 82L28 82Z'][[0,5,7].indexOf(n)],{fill:'var(--face-moss)'})])] : []),
     ...(n===1 ? [detail([node('circle',{cx:35,cy:43,r:1.3,fill:'var(--face-light)'}),node('circle',{cx:62,cy:68,r:1,fill:'var(--face-light)'})])] : []),
-  ],
-  foundry: n => [
+  ]),
+  foundry: supplier(stamps.length, n => [
     node('rect', { x: 12, y: 12, width: 76, height: 76, rx: n % 2 ? 10 : 6, fill: 'var(--face-edge)' }),
     node('rect', { x: 15, y: 15, width: 70, height: 70, rx: n % 2 ? 8 : 4, fill: 'var(--face-body)' }),
     line('M19 78V19H79', { stroke: 'var(--face-light)', opacity: .55, 'stroke-width': 1.5 }),
     ...[[22,22],[78,22],[22,78],[78,78]].map(([cx,cy]) => node('circle', { cx, cy, r: 2.4, fill: 'var(--face-light)' })),
     detail([line('M22 80H78M80 22V78', { opacity: .4, 'stroke-width': 1 })]),
     mark([line(stamps[n], { 'stroke-width': 4, stroke: 'var(--face-ink)' })]),
-  ],
-  'deep-forest': n => {
+  ]),
+  'deep-forest': supplier(cuts.length, n => {
     const c=cuts[n], scale=c.bark, shift=50*(1-scale)
     return [path(c.d,{fill:'var(--face-edge)'}),path(c.d,{fill:'var(--face-body)','data-silhouette':'wood',transform:`translate(${shift} ${shift}) scale(${scale})`}),
       ...c.rings.map((r,i)=>node('ellipse',{cx:c.x,cy:c.y,rx:c.rx*r,ry:c.ry*r,transform:`rotate(${[4,-9,12,-18,7,13,-5,22][n]} ${c.x} ${c.y})`,fill:'none',stroke:'var(--face-line)','stroke-width':i?1.8:2.2,class:'face-mark'})),
       ...([0,3,6].includes(n)?[mark([line([`M15 67L${c.x-8} ${c.y+2}`,`M83 41L${c.x+5} ${c.y-4}`,`M72 80L${c.x+2} ${c.y+8}`][[0,3,6].indexOf(n)],{'stroke-width':2.2})])]:[]),
       ...([1,4].includes(n)?[detail([path('M24 31Q12 46 18 64L25 63Q21 47 30 34Z',{fill:'var(--face-moss)'})])]:[]),
       mark([node('ellipse',{cx:c.x,cy:c.y,rx:2.8,ry:3.5,fill:'var(--face-line)'})])]
-  },
-  autumn: n => [
+  }),
+  autumn: supplier(leaves.length, n => [
     path(leaves[n], { fill: `var(--face-leaf-${n})`, stroke:'var(--face-edge)', 'stroke-width':1.2, 'stroke-linejoin':'round','data-silhouette':'leaf' }),
     mark([line('M49 87L51 26', { stroke:'var(--face-line)', 'stroke-width':2.2 })]),
     detail([line(n===7?'M50 43L36 33M50 57L29 46M51 43L64 33M50 57L71 46':'M50 42L39 34M50 54L30 45M50 67L34 65M51 41L61 31M50 54L69 45M50 67L68 61', { 'stroke-width':1.4, opacity:.7 })]),
-  ],
-  yosemite: n => [
+  ]),
+  yosemite: supplier(landmarks.length, n => [
     path('M9 69V26Q9 12 24 12H76Q91 12 91 27V69Q91 87 75 87H25Q9 87 9 69Z',{fill:'var(--face-sky)'}),
     ...([0,3,7].includes(n)?[node('circle',{cx:n===3?73:26,cy:29,r:n===7?4:6,fill:'var(--face-cloud)'})]:[]),
     ...([1,2,6].includes(n)?[detail([path('M15 30Q27 24 41 30Q49 25 61 29L61 32H15Z',{fill:'var(--face-cloud)'})])]:[]),
@@ -101,11 +102,11 @@ export const faceSuppliers = {
     ...(n===4?[mark([line('M46 34Q45 41 47 47L46 57Q44 65 44 72',{stroke:'var(--face-cloud)','stroke-width':4})])]:[]),
     ...(n===5?[mark([path('M30 40L20 55H25L16 66H23L13 77H28V85H33V77H46L37 66H43L34 55H40Z',{fill:'var(--face-moss)'})])]:[]),
     detail([line(n===1?'M33 36L27 68M41 32L36 70':n===3?'M34 42L30 67M55 33L57 64':'M36 48L31 67M43 40L39 65',{'stroke-width':1.3,opacity:.4})]),
-  ],
+  ]),
 }
 
-export function signatureArt(id) {
-  const n = variantFor(id)
+export function signatureArt(id, slot = null) {
+  const n = variantFor(id, { slot })
   return node('svg', { class:'signature-art', viewBox:'0 0 100 100', 'aria-hidden':'true', focusable:'false', 'data-variant':n },
-    Object.entries(faceSuppliers).map(([id, supply]) => node('g', { 'data-material':id }, supply(n))))
+    Object.entries(faceSuppliers).map(([material, supply]) => node('g', { 'data-material':material }, supply(variantFor(id, { count: supply.count ?? 8, slot })))))
 }

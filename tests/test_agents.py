@@ -346,8 +346,9 @@ async def main():
               and "wake_timezone" not in card("juniper"), card("juniper"))
         status, body = await http(port, "GET", "/v1/agents")
         check("it is in /v1/agents (Chats and every picker)",
-              {"id": "juniper", "name": "Juniper", "face": None}
-              in body["agents"], body)
+              any(a.get("id") == "juniper" and a.get("name") == "Juniper"
+                  and a.get("face") is None and isinstance(a.get("face_slot"), int)
+                  for a in body["agents"]), body)
         check("...and no row serves an emoji, an older agent.json's included",
               all("emoji" not in a for a in body["agents"])
               and card("ada").get("emoji") == "🧱", body)

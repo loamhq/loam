@@ -391,13 +391,14 @@ export function avatarLook(look) {
 export function blob(look, { size, font, className = '', key = null, inline = false, decorative = false } = {}) {
   const paint = avatarLook(look)
   const themed = look.agentId !== undefined && !look.imageSrc
+  const slot = Number.isInteger(look.faceSlot) && look.faceSlot >= 0 ? look.faceSlot : null
   return h(inline ? 'span' : 'div', {
     key,
     class: `blob ${className}`.trim(),
     'data-agent': look.agentId,
     'data-latte-initial': themed ? look.initial : null,
     'data-face-initial': themed ? look.initial : null,
-    'data-face-variant': themed ? variantFor(look.agentId) : null,
+    'data-face-variant': themed ? variantFor(look.agentId, { slot }) : null,
     'data-face-small': themed && size && size <= 26 ? '' : null,
     style: {
       width: size ? `${size}px` : '',
@@ -414,7 +415,7 @@ export function blob(look, { size, font, className = '', key = null, inline = fa
     contenteditable: decorative ? 'false' : null,
   }, look.imageSrc ? h('img', { class: 'avatar-image', src: look.imageSrc, alt: '', draggable: 'false' }) : [
     !decorative ? h('span', { class: 'blob-letter', text: look.initial }) : null,
-    themed ? agentFace(look.agentId) : null,
+    themed ? agentFace(look.agentId, slot) : null,
   ])
 }
 

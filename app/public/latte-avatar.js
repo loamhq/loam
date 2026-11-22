@@ -31,8 +31,8 @@ export const POURS = [
   ['round', [['circle', { cx: 50, cy: 50, r: 25 }]]],
 ]
 
-export function pourFor(id) {
-  return POURS[variantFor(id)]
+export function pourFor(id, slot = null) {
+  return POURS[variantFor(id, { count: POURS.length, slot })]
 }
 
 const NS = 'http://www.w3.org/2000/svg'
@@ -43,8 +43,8 @@ function node(tag, attributes, children = []) {
   return el
 }
 
-export function latteArt(id) {
-  const [pour, shapes] = pourFor(id)
+export function latteArt(id, slot = null) {
+  const [pour, shapes] = pourFor(id, slot)
   return node('svg', { class: 'latte-art', viewBox: '-4 -4 108 108', 'aria-hidden': 'true', focusable: 'false', 'data-pour': pour }, [
     node('g', { class: 'latte-mug', fill: 'var(--latte-art-bone)', stroke: 'var(--latte-art-edge)', 'stroke-width': .7 }, [
       node('rect', { x: 88, y: 43, width: 12, height: 14, rx: 5, transform: 'rotate(35 50 50)' }),

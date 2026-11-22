@@ -1137,22 +1137,27 @@ def roster(archived: bool = False) -> list[str]:
 
 
 def agent_card(name: str) -> dict:
-    """Return id, name and face only. Prefer the configured display name and use the
+    """Return id, name, face and face_slot. Prefer the configured display name and use the
     capitalized ID as fallback. A null face tells the client to use its theme.
     """
     import loam_agents  # noqa: PLC0415
     from loam_profile import display_name
+    loam_agents.ensure_face_slots(AI_LABS)
     config = loam_agents.card(name, AI_LABS)
+    slot = loam_agents.face_slot_of(name, config, AI_LABS)
     return {
         "id": name,
         "name": display_name(name, config),
         # An uploaded face (2026-11-14): over any theme's.
         "face": loam_agents.face_of(name, config),
+        **({"face_slot": slot} if slot is not None else {}),
     }
 
 
 def roster_cards() -> list[dict]:
     """Return the roster as the objects served by GET /v1/agents."""
+    import loam_agents  # noqa: PLC0415
+    loam_agents.ensure_face_slots(AI_LABS)
     return [agent_card(name) for name in roster()]
 
 
