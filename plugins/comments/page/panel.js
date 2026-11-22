@@ -129,12 +129,16 @@ export function createCommentsPanel({
       h('div', { class: 'dc-panel-title' },
         h('h2', { text: title }),
         open.length ? h('span', { class: 'dc-panel-count', text: String(open.length) }) : null),
-      closed.length ? h('button', {
-        type: 'button',
-        class: `dc-panel-tog${st.showResolved ? ' on' : ''}`,
-        onclick: () => { st.showResolved = !st.showResolved; draw() },
-        text: st.showResolved ? 'Open' : `Resolved (${closed.length})`,
-      }) : null)
+      h('div', { class: 'dc-panel-head-end' },
+        closed.length ? h('button', {
+          type: 'button',
+          class: `dc-panel-tog${st.showResolved ? ' on' : ''}`,
+          onclick: () => { st.showResolved = !st.showResolved; draw() },
+          text: st.showResolved ? 'Open' : `Resolved (${closed.length})`,
+        }) : null,
+        sheetScrim ? h('button', {
+          type: 'button', class: 'dc-ib', 'aria-label': 'Close comments', onclick: closeSheet,
+        }, icon('x', 18)) : null))
 
     // Body
     if (st.loading) {
@@ -414,12 +418,10 @@ export function createCommentsPanel({
     sheetBs = bottomSheet(sheetScrim, { close: closeSheet })
     const dlg = h('div', { class: 'dc-dlg dc-panel-dlg', role: 'dialog', 'aria-label': title },
       grab(h),
-      h('div', { class: 'dc-panel-shbar' },
-        h('span', { class: 'dc-panel-shlbl', text: title }),
-        h('button', { type: 'button', class: 'dc-ib', 'aria-label': 'Close comments', onclick: closeSheet }, icon('x', 18))),
       dom)
     sheetScrim.append(dlg)
     document.body.append(sheetScrim)
+    draw()
     requestAnimationFrame(() => sheetScrim?.classList.add('on'))
     document.addEventListener('keydown', onSheetKey)
   }
@@ -437,6 +439,7 @@ export function createCommentsPanel({
     setTimeout(() => {
       if (sheetHome && sheetHome.isConnected) sheetHome.append(dom)
       s.remove()
+      if (!st.destroyed) draw()
     }, 240)
   }
 

@@ -252,7 +252,7 @@ with no dead controls. Notes and share links follow files across renames,
 moves, deletes and restores. Agents use `share_*` / `shared_*` when Sharing is
 on and `file_*` / `doc_*` / `comments_appear` when Comments & suggestions is
 on. `plugin.comments.appear` controls whether agent names appear to outside
-visitors (`names` or `alias`), with per-file overrides.
+visitors (`names` or `one`), with per-file overrides.
 
 **Settings › Plugins** shows installed themes and extensions and where each
 copy came from. About opens the Market listing for a Market plugin and shows
