@@ -155,8 +155,16 @@ class BaseStore:
                 "size": fp.get("size") if fp and fp.get("size") is not None else prev.get("size"),
                 "deleted": False, "restore_id": None,
             }
+            changed = False
+            for other in [k for k, v in idx["files"].items()
+                          if k != fid and not v.get("deleted")
+                          and v.get("root") == root and v.get("path") == path]:
+                idx["files"].pop(other, None)
+                changed = True
             if idx["files"].get(fid) != entry:
                 idx["files"][fid] = entry
+                changed = True
+            if changed:
                 self._write_index(idx)
 
     def sync_events(self) -> list[tuple[str, str, str]]:
@@ -259,12 +267,23 @@ class BaseStore:
         self.sync_events()
         with self._idx_lock:
             idx = self._read_index()
-            # 1. Active direct path match
-            for fid, entry in idx["files"].items():
+            # 1. Active direct path match (prune stale entries whose sidecar vanished)
+            stale: list[str] = []
+            matched: str | None = None
+            for fid, entry in list(idx["files"].items()):
                 if not entry.get("deleted") and entry.get("root") == root and entry.get("path") == path:
-                    if fp:
-                        self.remember_file(fid, root, path, fp)
-                    return fid
+                    if self.read_sidecar(fid) is not None:
+                        matched = fid
+                        break
+                    stale.append(fid)
+            if stale:
+                for fid in stale:
+                    idx["files"].pop(fid, None)
+                self._write_index(idx)
+            if matched:
+                if fp:
+                    self.remember_file(matched, root, path, fp)
+                return matched
         if fp is None:
             try:
                 fp = self.fingerprint(root, path)

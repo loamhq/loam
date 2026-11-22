@@ -236,9 +236,14 @@ async function filePage() {
       meWrap))
 
   const viewerNode = renderFileContent(info)
+  const viewOnly = info.mode === 'view'
   const panelAside = boot.collab?.entry ? h('aside', { class: 'sh-panel-col' }) : null
+  if (viewOnly && panelAside) {
+    panelAside.hidden = true
+    if (commentsBtn) commentsBtn.hidden = true
+  }
 
-  const stage = h('div', { class: `sh-stage${panelAside ? ' with-panel' : ''} kind-${info.kind}` },
+  const stage = h('div', { class: `sh-stage${panelAside && !viewOnly ? ' with-panel' : ''} kind-${info.kind}` },
     h('main', { class: 'sh-viewer' }, viewerNode),
     panelAside)
 
@@ -253,8 +258,14 @@ async function filePage() {
           apiBase: `${P}/api/collab/`,
           headers: SHARE,
           onGone: gone,
-          onCount: (open) => {
+          onCount: (open, closed = 0) => {
             commentsCountEl.textContent = open > 0 ? `Comments · ${open}` : 'Comments'
+            if (viewOnly) {
+              const show = (open + closed) > 0
+              panelAside.hidden = !show
+              stage.classList.toggle('with-panel', show)
+              if (commentsBtn) commentsBtn.hidden = !show
+            }
           },
         })
       }
