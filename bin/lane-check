@@ -76,22 +76,9 @@ def model_problem(workspace: Path) -> tuple[str, dict] | None:
     scroll. The owner caught that line by chance, and three earlier switches
     on two lanes since 2026-09-03 nobody caught at all.
 
-    check-drift reports the same finding under Important, once, while it is
-    new; this writes it to the failure log and under Urgent, once per
-    session, where the owner already looks. The comparison itself is loam_session's, shared with
-    check-drift so the two cannot disagree.
-
-    **Once per session** (2026-09-28). comms dedupes on a line's text only
-    while that line is still in the file, so once a reader tidied it away
-    the next run wrote it back: the same four stale sessions reached Urgent
-    on 09-26, 09-27 and 09-28, and the failure log took them every night. A drifted session is a fact about the past by the
-    time a start reads it; saying it again the next night tells nobody
-    anything. So a lane's last report is kept in ``MODEL_MEMORY/<lane>.json``
-    as the session and its newest dated record, and a finding is raised only
-    for a DIFFERENT session whose newest record is LATER than that one. A
-    session that goes on drifting after it was reported is not reported
-    again; check-drift, run by hand, still shows it for as long as it is the
-    lane's latest.
+    The check shares its comparison with check-drift. Keep the last reported
+    session and record time for each lane so a stale session issues one
+    finding. The attention agent receives the finding with its evidence.
     """
     # The model is the persona's profile's (agent.json, Settings > Agents),
     # by the rule every launch path takes (loam_profile.claude_model,
@@ -125,27 +112,8 @@ def model_problem(workspace: Path) -> tuple[str, dict] | None:
         last = {}
     if seen.session == last.get("session") or seen.last <= last.get("last", ""):
         return None
-    # THE CAUSE GOES IN THE FIRST SENTENCE. `loam_inbox.snippet()` keeps the
-    # first sentence and drops the rest, and record_failure() below prefixes
-    # every problem with what ran the check (see `origin`) -- which names
-    # when it ran, not what went wrong. The first version of this finding
-    # put the cause in a second sentence, so the comms line read "Remote
-    # Control start: the last session on this lane ran on `claude-opus-4-8`,
-    # but this agent's config names `fable`." (2026-09-26, when this ran at
-    # each Remote Control start) and its first reader reasonably concluded
-    # that the start had passed the model. It had not:
-    # the switch happens mid-session on a refused turn, and no launch path on
-    # this box passes a model at all. A line that invites the wrong repair is
-    # worse than a quiet one, so the sentence that survives truncation has to
-    # be the whole story.
-    #
-    # The refusal head is used only when the refusal is what the last turn
-    # ran on. One persona's 09-03 session carried a refusal to `claude-opus-4-8` and
-    # ended on `claude-opus-5`, and the line put the refusal's name on the
-    # other model (2026-09-26 to 09-28).
-    #
-    # Both heads are kept under ~175 characters so they survive
-    # snippet()'s 200-char cap with the prefix in front of them.
+    # Identify a mid-session fallback only when it is still the model used
+    # by the latest turn. Keep the cause at the start of the finding.
     if seen.refusal and seen.refusal_to == seen.model:
         head = (
             f"a refusal mid-conversation moved an EARLIER session off "

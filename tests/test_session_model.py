@@ -106,18 +106,11 @@ try:
           loam_session.model_family("claude-opus-4-8")
           == loam_session.model_family("claude-opus-5"), True)
 
-    # The comms line lane-check writes for this finding, through the real
-    # `snippet()`. Regression: the first version put the cause in a SECOND
-    # sentence, snippet() keeps only the first, and the surviving line --
-    # behind record_failure()'s prefix (then "Remote Control start:") -- read
-    # as though a Remote Control start had passed the model. Its first reader
-    # concluded exactly that and briefed a fix for the wrong thing. What is
-    # asserted here is the property that failed: the sentence that SURVIVES
-    # truncation names the cause and clears the two innocent suspects.
+    # The finding delivered to the agent should identify the actual model
+    # refusal in its first sentence, including both models and its origin.
     import importlib.machinery
     import importlib.util
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
-    from loam_inbox import SNIPPET_CHARS, snippet  # noqa: PLC0415
 
     ldr = importlib.machinery.SourceFileLoader(
         "rcp", str(Path(__file__).resolve().parent.parent / "bin" / "lane-check"))
@@ -198,10 +191,8 @@ try:
         assistant("claude-opus-4-8", "2026-09-25T18:16:24Z"),
     ]) + "\n", encoding="utf-8")
     model_problem = (rcp.model_problem(lane) or ("",))[0]
-    line = snippet("Nightly lane check: " + model_problem)
+    line = model_problem.partition(". ")[0]
     check("a model finding is raised at all", bool(model_problem), True)
-    check("the comms line is not truncated", len(line) <= SNIPPET_CHARS
-          and not line.endswith("…"), True)
     check("the surviving sentence names the refusal",
           "refusal" in line, True)
     check("it clears the run that found it",

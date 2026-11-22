@@ -167,12 +167,8 @@ def main() -> int:
         "exec_main_status": status, "reported_by": "wake-failed",
     }
     if agent == "reviewer":
-        # The reviewer produces nothing for the owner by design (Move 11), so
-        # its death is a ledger line and no comms line, in its own log --
-        # the same file bin/review writes its run records to. Every death
-        # is its own line, as bin/review's own failures are since 10-13.
-        from loam_inbox import record_ledger  # noqa: PLC0415
-        record_ledger(agent, vault, reason)
+        from loam_inbox import record_fault  # noqa: PLC0415
+        record_fault(agent, vault, reason)
         with (lc.LOGS / "reviewer.jsonl").open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload) + "\n")
     else:

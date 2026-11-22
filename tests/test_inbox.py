@@ -119,7 +119,7 @@ try:
     check("failure: the log carries the whole reason",
           "it broke. And here is the long tail." in log, log)
     check("failure creates only its ledger", list(root.rglob("*.md")) == [root / loam_inbox.FAILURE_LOG])
-    check("failure: a persona's own failure is told to nobody else",
+    check("logging alone leaves delivery to the wake outcome",
           facts() == [], str(facts()))
 
     loam_inbox.record_failure("testagent", root, "it broke. And here is the long tail.")

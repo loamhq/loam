@@ -5,7 +5,6 @@ log.
 
 from __future__ import annotations
 
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -32,43 +31,23 @@ FAILURE_LOG = str(lc.get("vault.failure_log") or
 # this keeps working if the file moves again.
 FAILURE_LOG_LINK = "[[loam-wake-failures]]"
 
-# A fact's first line is a snippet, never the explanation. The failure reasons run
-# to 400 characters of relayed stderr; the link is what carries the rest.
-SNIPPET_CHARS = 200
-
 FAILURE_LOG_HEADER = """\
 # Loam wake failures
 
 Appended by `agents/bin/wake`, `agents/bin/wake-failed` and
 `agents/bin/lane-check` when a scheduled wake does not complete or the
 nightly lane check finds a broken layer. A run of these starting on the same
-night across agents means the sign-in expired. Nothing here is posted
-anywhere: a persona's own failed run is told to that persona at its next
-turn, and a fault that is no one persona's is handed to the agent chosen to
-hear of Loam's problems (Settings › Agents). A line that says
+night across agents can indicate the sign-in expired. Failed runs and system
+faults go to the agent selected in Settings › Agents. A persona also hears
+about its own latest failed scheduled run at its next turn. A line that says
 "a warning, not a refusal" is a run that went ahead, written at most once a
 night.
 
 """
 
 
-
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def snippet(reason: str) -> str:
-    """One line that brings the thing to his attention. First sentence, capped.
-
-    Failure reasons are written to be read whole in the log. Here they are an
-    invitation, so this takes the first sentence and stops -- and never lets a
-    newline through, because the sweep and the format are both per-line.
-    """
-    flat = " ".join(reason.split())
-    head = re.split(r"(?<=[.!?])\s", flat, maxsplit=1)[0]
-    if len(head) > SNIPPET_CHARS:
-        head = head[: SNIPPET_CHARS - 1].rstrip() + "…"
-    return head
 
 
 def _append_log(vault: Path, agent: str, reason: str, stamp: str) -> None:
@@ -89,9 +68,7 @@ def _append_log(vault: Path, agent: str, reason: str, stamp: str) -> None:
 
 
 def record_failure(agent: str, vault: Path, reason: str) -> None:
-    """Append the failure to the log. The lane notice delivers it separately to the
-    persona's next turn.
-    """
+    """Keep the full evidence. The wake outcome carries the notice."""
     _append_log(vault, agent, reason, now_iso())
 
 
@@ -105,7 +82,7 @@ def record_fault(by: str, vault: Path, reason: str, key: str | None = None) -> s
 
 
 def record_notice(agent: str, vault: Path, reason: str, key: str) -> bool:
-    """One warning line in the log, at most once a night. No comms line.
+    """One warning line in the log, at most once a night.
 
     ``key`` is what makes two notices the same notice -- the name of the
     file being warned about, in practice. The count in the text changes from
@@ -130,19 +107,6 @@ def record_notice(agent: str, vault: Path, reason: str, key: str) -> bool:
             return False
     _append_log(vault, agent, reason, stamp)
     return True
-
-
-def record_ledger(agent: str, vault: Path, reason: str) -> None:
-    """One line in the log, every time, and no comms line.
-
-    For a lane that produces nothing for the owner by design (the reviewer):
-    its failures are on the ledger like every other lane's, but they are
-    events, not a nightly warning, so unlike ``record_notice`` nothing is
-    deduplicated. The 09-09 20:36Z lock and recycle refusals went through
-    ``record_notice`` with the lane as the key and were swallowed as repeats
-    of the 20:16Z pair.
-    """
-    _append_log(vault, agent, reason, now_iso())
 
 
 VAULT_WRITE_REFUSED = (

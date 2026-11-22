@@ -156,9 +156,9 @@ and waits if neither is connected and automatic selection is on.
 
 **When something needs attention.** The app shows a turn’s status in its thread when it is waiting for room,
 could not run or ended without a reply. An agent whose own
-scheduled run failed is told at the top of its next turn. A problem that is
-no one agent's (drift, memory pressure, a check or a plugin's event, an
-update) goes to the one agent the owner chose in
+most recent scheduled run failed also sees that failure at the top of its next turn.
+Failed or refused runs (including the reviewer), failed chat turns, drift, memory pressure,
+checks, plugin events and updates go to the agent the owner chose in
 Settings › Agents (the first agent, unless they change it), as the input of
 a run of its own, told once. That agent decides whether to act, tell the owner, or record
 what happened in a thread, its memory or elsewhere. On installs with the first-weeks starter, release news
