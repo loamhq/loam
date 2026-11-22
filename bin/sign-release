@@ -30,12 +30,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_marketplace_pin  # noqa: E402
+import loam_offline  # noqa: E402
 import loam_release_notes  # noqa: E402
 import loam_signing  # noqa: E402
 
@@ -54,6 +57,8 @@ def main() -> int:
     ap.add_argument("--key", default=None)
     ap.add_argument("--remote", default="origin")
     ap.add_argument("--yes", action="store_true")
+    ap.add_argument("--no-marketplace-pin", action="store_true",
+                    help="skip moving loamhq/marketplace's reviewer Loam pin after pushing")
     a = ap.parse_args()
     tag, remote = a.version, a.remote
     if not loam_signing.TAG_RE.match(tag):
@@ -127,6 +132,16 @@ def main() -> int:
         sys.exit(f"The signed tag is made here but could not be pushed: "
                  f"{push.stderr.strip()}\nRun `git push {remote} refs/tags/{tag}`.")
     print(f"Release {tag} is signed and pushed.")
+    if (not a.no_marketplace_pin
+            and os.environ.get("LOAM_MARKETPLACE_PIN_SYNC") != "0"
+            and not loam_offline.offline()
+            and loam_marketplace_pin.repo_slug(repo, remote) == loam_marketplace_pin.DEFAULT_LOAM_REPO):
+        pin = loam_marketplace_pin.sync_pin(tag, sha, say=print)
+        if pin.get("state") == "failed":
+            print(f"ERROR: Release {tag} was signed and pushed, but moving the Market reviewer pin failed: "
+                  f"{pin.get('detail')}", file=sys.stderr)
+            return 2
+        print(f"Market reviewer pin: {pin.get('detail')}.")
     return 0
 
 

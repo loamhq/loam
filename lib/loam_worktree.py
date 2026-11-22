@@ -25,6 +25,8 @@ import loam_ci
 import loam_commit_identity
 import loam_git_identity
 import loam_lock
+import loam_marketplace_pin
+import loam_offline
 import loam_release_notes
 import loam_signing
 
@@ -1884,6 +1886,11 @@ def _land_once(project: eng.Project, record: dict, message: str, *,
         else:
             _land_tested(project, repo, tree, branch, message, keep_tree,
                          result, say, record, cancelled, lock, finish)
+        rel = result.get("release") or {}
+        if project.platform and rel.get("state") == "pushed" and rel.get("sha"):
+            pin = _sync_marketplace_pin(repo, rel["tag"], rel["sha"], say=say)
+            if pin is not None:
+                rel["marketplace_pin"] = pin
         return result
     except (WorktreeError, OSError, subprocess.SubprocessError,
             loam_lock.Busy) as exc:
@@ -2050,14 +2057,42 @@ def sign_release(repo: Path, tag: str, sha: str, local: str | None) -> dict:
             "detail": f"signed by {res.get('principal')} ({res.get('fingerprint')})"}
 
 
+def _sync_marketplace_pin(repo: Path, tag: str, sha: str, *, say=None) -> dict | None:
+    """Move the Market reviewer's Loam pin after a Loam release tag is pushed.
+
+    Runs outside the project live lock. Skips offline tests and non-Loam
+    repositories; on failure, alerts the system persona via loam_attention.
+    """
+    if os.environ.get("LOAM_MARKETPLACE_PIN_SYNC") == "0" or loam_offline.offline():
+        return None
+    if loam_marketplace_pin.repo_slug(repo) != loam_marketplace_pin.DEFAULT_LOAM_REPO:
+        return None
+    if say:
+        say(f"landing: syncing marketplace reviewer pin to {tag}")
+    pin = loam_marketplace_pin.sync_pin(tag, sha, say=say)
+    if pin.get("state") == "failed":
+        loam_marketplace_pin.notify_failure(pin)
+    return pin
+
+
 def release_section(release: dict | None) -> str:
     """The receipt's sentence on a release tag, or "" when none was asked."""
     if not release:
         return ""
     tag, sha = release["tag"], (release.get("sha") or "")[:7]
     if release["state"] == "pushed":
-        return (f" **Release tag `{tag}` pushed** at `{sha}` "
-                f"({release.get('detail')}).")
+        out = (f" **Release tag `{tag}` pushed** at `{sha}` "
+               f"({release.get('detail')}).")
+        pin = release.get("marketplace_pin")
+        if pin:
+            pstate = pin.get("state")
+            if pstate == "updated":
+                out += f" Market reviewer pin moved to `{tag}` ({pin.get('detail')})."
+            elif pstate == "current":
+                out += f" Market reviewer pin was already at `{tag}`."
+            elif pstate == "failed":
+                out += f" **Market reviewer pin move to `{tag}` FAILED**: {pin.get('detail')}."
+        return out
     if release["state"] == "to-sign":
         return (f" **Release `{tag}` is waiting to be signed** at `{sha}`: "
                 f"{release.get('detail')}. No tag was pushed; the landing "

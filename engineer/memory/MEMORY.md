@@ -2716,3 +2716,34 @@ provider still has to recognise its own soul and reject the held-out text.
 The wake log identifies the negative phrase's source. A scratch install's
 `bin/thread post` also needs its broker address and port to agree with the
 listener for immediate notification in an open page.
+
+## 2026-11-22 — Market reviewer: leads not verdicts, Loam pin automation, and proof CI
+
+- **Steering scan is a lead, not a regex overrule.** `prepare.py` surfaces
+  `scan.steering_leads` (removing the one-line regex exception from PR 15 and
+  ordering strong steering phrases ahead of generic AI words under the 40-lead
+  cap). `review.py` requires an explicit per-lead ruling in
+  `steering_lead_rulings`, and `decide.py` fails closed (`error`, no merge) if
+  any lead is unaccounted for and refuses if any ruling says `steers_review:
+  true`. No model-free regex overrule remains: in a public repo a regex is
+  trivially evaded while falsely refusing honest AI plugins.
+- **Loam pin follows releases via checked PRs.** `lib/loam_marketplace_pin.py`
+  runs outside the landing lock in `lib/loam_worktree.py` (and in
+  `bin/sign-release`) when a release tag pushes to `loamhq/loam`. It opens
+  `loam-pin/<version>`, waits for `review-tests` (`test`) and `review-proof`
+  (`proof`), merges on pass, or leaves the PR open and alerts via
+  `release_section()` + `loam_attention.tell()` on failure. The org GitHub App
+  has `contents: write`, `pull_requests: write`, `issues: write`, `checks: read`
+  (not `actions: write`), so PR-triggered CI works with existing permissions.
+  `.github/workflows/loam-pin.yml` is the scheduled safety net; `review.yml`
+  gains no permissions or triggers.
+- **Proof set runs on every reviewer change.** 17 synthetic cases live in
+  `review/proof/` (mirrored in `docs/marketplace/review/proof/`): original 9,
+  6 ordinary AI/code-review lines, a steering-only case, and a
+  `contributes.thread.file` case. `review-proof.yml` uses `pull_request` (never
+  `pull_request_target`) and blocks fork PRs from `LOAM_REVIEW_GEMINI_KEY`.
+  `proof_dedupe.py` skips duplicate push runs on `main` when a merged same-repo
+  PR already passed `proof` on the identical reviewer tree (~$0.25 per run on
+  Gemini 4 Argon). `tests/test_marketplace.py` runs `proof.py --offline-only
+  --loam-dir <ROOT>` inside the sealed suite so manifest-reader regressions
+  fail before landing.

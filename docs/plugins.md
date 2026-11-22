@@ -1511,9 +1511,10 @@ fork and the pull request. Nothing is sent from the box, and the owner's
 press is the yes.
 
 A copy of the repository's content (README, the empty list, `build.py`,
-the reviewer in `review/`, the workflows, the pull request template) is
-`docs/marketplace/` in this repository, for anyone who runs a marketplace of
-their own; its notes and listings are the live repository's.
+the reviewer in `review/` including its proof fixtures and runner, the
+workflows including `review-proof.yml` and `loam-pin.yml`, the pull request
+template) is `docs/marketplace/` in this repository, for anyone who runs a
+marketplace of their own; its notes and listings are the live repository's.
 
 ### Finding things, for an agent: `loam market search` and the card
 

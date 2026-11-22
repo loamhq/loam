@@ -94,3 +94,13 @@ tag, and installs refuse one that does not verify against the keys they
 already hold. The landing signs it when the checkout has a signing key, and
 otherwise leaves it for `bin/sign-release` on the machine that holds the
 key (`docs/signing.md`).
+
+After a release tag is pushed to `loamhq/loam`, the release path
+(`lib/loam_marketplace_pin.py`, called by the landing and by
+`bin/sign-release`) opens a pull request in `loamhq/marketplace` updating
+the Market reviewer's `review/config.json` to that named release commit,
+waits for `review-tests` and `review-proof` to pass, and merges it. If
+either check fails, the pull request stays open, `main` stays on the prior
+pin, and the failure is reported loudly in the release output (and through
+the install's attention seam on a landing). A scheduled fallback workflow
+(`.github/workflows/loam-pin.yml`) catches tags pushed outside that path.

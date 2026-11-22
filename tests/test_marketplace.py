@@ -264,6 +264,10 @@ try:
     check("the reviewer's own tests pass in the shipped copy",
           subprocess.run([sys.executable, str(ROOT / "docs" / "marketplace" / "review" / "test_review.py")],
                          capture_output=True, text=True, timeout=120).returncode, 0)
+    check("every proof fixture parses cleanly against this tree's manifest reader",
+          subprocess.run([sys.executable, str(ROOT / "docs" / "marketplace" / "review" / "proof.py"),
+                          "--offline-only", "--loam-dir", str(ROOT)],
+                         capture_output=True, text=True, timeout=120).returncode, 0)
     check("the shipped list is the empty one",
           json.loads((ROOT / "docs" / "marketplace" / "list.json").read_text()),
           {"version": 1, "stats": "stats.json", "plugins": []})
