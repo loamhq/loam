@@ -48,7 +48,7 @@ export function createRegistry({ changed = () => {}, failed = () => {} } = {}) {
       if (closed) throw new Error('This plugin is no longer active.')
       if (!registration || typeof registration.id !== 'string' || !registration.id || (registration.render !== undefined && typeof registration.render !== 'function')) throw new Error(`Invalid registration for ${name}`)
       if (records.get(name).some(entry => entry.owner === owner && entry.id === registration.id)) throw new Error(`Duplicate registration: ${name}/${registration.id}`)
-      const defaults = { 'app.overlay': 'overlay', 'composer.tool': 'extra', 'message.footer.action': 'leading', 'files.viewer': 'viewer', 'files.action': 'action' }
+      const defaults = { 'thread.header.action': 'below', 'app.overlay': 'overlay', 'composer.tool': 'extra', 'message.footer.action': 'leading', 'files.viewer': 'viewer', 'files.action': 'action' }
       const entry = { ...(!registration.component && defaults[name] ? { slot: defaults[name] } : {}), ...registration, owner, layer: row.layer, serial: ++serial }
       records.get(name).push(entry); changed()
       return track(() => { const list = records.get(name); const at = list.indexOf(entry); if (at >= 0) list.splice(at, 1) })

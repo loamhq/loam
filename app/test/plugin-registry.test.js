@@ -51,3 +51,43 @@ test('the Chats line falls through empty registrations and releases its place on
   a.dispose()
   assert.equal(registry.draw('thread.list.line')[0], 'today')
 })
+
+test('thread controls share the header without duplicating existing below-header actions', () => {
+  const registry = createCoreRegistry()
+  const plugin = registry.scope({ id: 'notes' })
+  plugin.places.thread.header.action.add({ id: 'extra', render: () => 'below the header' })
+  plugin.places.thread.header.action.add({ id: 'note', slot: 'control', render: ({ placement }) => placement })
+  assert.deepEqual(registry.draw('thread.header.action', { slot: 'below' }), ['below the header'])
+  assert.deepEqual(registry.draw('thread.header.action', { slot: 'control', placement: 'menu' }), ['menu'])
+  plugin.dispose()
+  assert.deepEqual(registry.draw('thread.header.action', { slot: 'control', placement: 'header' }), [])
+})
+
+test('Files keeps the projection used by an open edit and reselects it on the next open', async () => {
+  const { createFiles } = await import('../public/files.js')
+  const registry = createCoreRegistry()
+  const plugin = registry.scope({ id: 'notes' })
+  const row = { root: 'vault', path: 'notes.md', name: 'notes.md', kind: 'file', capabilities: { read: true, write: true } }
+  let raw = 'keep\nold'
+  plugin.places.files.viewer.add({ id: 'note-body', slot: 'projection',
+    when: ({ root, path }) => root === row.root && path === row.path,
+    render: () => ({ show: text => text.slice(text.indexOf('\n') + 1), write: (base, text) => base.split('\n')[0] + '\n' + text }),
+  })
+  const files = createFiles({ registry, schedule() {}, api: async (method, path, body) => {
+    if (method === 'PUT') {
+      assert.equal(body.base_revision, 'original')
+      raw = body.text
+    }
+    return { ...row, text: raw, revision: method === 'GET' ? 'original' : 'saved' }
+  } })
+  await files.openFile(row.root, row.path, row, { mode: 'edit' })
+  assert.equal(files.st.file.text, 'old')
+  plugin.dispose()
+  files.edit('new')
+  await files.save()
+  assert.equal(raw, 'keep\nnew')
+  files.closeFile()
+  await files.openFile(row.root, row.path, row, { mode: 'edit' })
+  assert.equal(files.st.file.text, raw)
+  files.closeFile()
+})

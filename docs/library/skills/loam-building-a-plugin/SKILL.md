@@ -156,3 +156,10 @@ and `raw.githubusercontent.com` in `touches.network`, can read
 has an `id`, `name`, `url` and `downloads`. The total includes updates and
 direct GitHub release-file downloads. Zero means none recorded. A missing or
 null value means the total is unavailable. The Market refreshes it nightly.
+
+## Thread controls and Markdown editing
+
+These API 0 slots are new and may change.
+
+- Register a `thread.header.action` with `slot: 'control'` to draw a button in the thread header. A side panel gives it `placement: 'menu'` in the thread actions menu. Call `closeMenu()` when choosing that item. Both placements receive the current `thread`. A control can open an existing `panel.item`. Omitting the slot keeps an action below the header.
+- Register a `files.viewer` with `slot: 'projection'` to edit a Markdown file through a different text view. Match `{root, path, row}` with `when`. Return `{show(raw), write(raw, edited), offsets?(raw)}`. The optional offset map supplies `toSource(offset, assoc)` and `fromSource(offset)` for annotations. The last matching projection is selected when the file opens and stays with that edit. Preserve hidden bytes, line endings and unedited text. Files continues to own the revision check and conflict handling.

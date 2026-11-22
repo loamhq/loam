@@ -791,13 +791,17 @@ export function createFiles({
     const known = isRow(row) ? row : st.listing.rows.find((x) => x.root === root && x.path === path)
     const r = known ?? { root, path, name: nameOf(path), kind: 'file' }
     const view = viewOf(r)
+    const context = { slot: 'projection', root, path, row: r }
+    const projection = view === 'markdown'
+      ? registry.draw('files.viewer', context).at(-1) ?? boardProjection(root, path)
+      : null
     closeFile({ remember: st.file?.root !== root || st.file.path !== path })
     const file = {
       root,
       path,
       row: r,
       view,
-      projection: view === 'markdown' ? boardProjection(root, path) : null,
+      projection,
       caps: capsOf(r),
       text: '',
       saved: '',
@@ -1268,7 +1272,8 @@ export function createFiles({
     file.failed = false
     schedule()
     try {
-      const storedText = file.projection?.write(file.rawText, text) ?? text
+      const storedText = file.projection ? file.projection.write(file.rawText, text) : text
+      if (typeof storedText !== 'string') throw new Error('The editor could not prepare this file for saving.')
       const got = readOf(await api('PUT', '/files/text', { root: file.root, path: file.path, text: storedText, base_revision: over ?? file.revision }))
       if (st.file !== file) return done()
       // What the host stored — not what was sent — is what the page holds and

@@ -1895,6 +1895,10 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     const defaultMember = o.thread.members.find((m) => m.persona === o.thread.default)
     const unmatched = [...o.permissions.values()].filter((p) => !o.messages.some((m) => m.id === p.message_id))
     const closeMenu = (act) => () => { o.headerMenu = false; act(); redraw() }
+    const headerContext = { thread: o.thread, state: o, open, patch }
+    const controls = placement => registry.draw('thread.header.action', {
+      ...headerContext, slot: 'control', placement, closeMenu: () => { o.headerMenu = false; redraw() },
+    })
     const header = chatHeader({ wide: st.wide,
       back: o.boardOpen ? null : historyButton() ?? (st.wide ? null : round('Back to threads', icon.chevronLeft(20), () => { close(); refreshList(); redraw() }, { class: 'iconbtn ghost tt-back' })),
       face: threadFace(o.thread, st.wide ? 42 : 40), onIdentity: showDetails, identityTitle: 'Thread details',
@@ -1902,7 +1906,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       onRename: general ? null : beginRename, renameLabel: 'Rename thread', titleField: o.renaming ? kept(title) : null,
       titleProps: { class: `${st.wide ? 'chattitle' : 'headtitle'} tt-title` },
       props: { class: `${st.wide ? 'chat-head' : 'thread-head'} tt-head` },
-      actions: [...(sidePanel ? side().controls().slice(0, 2) : [round('Board', [icon.list(18), count ? h('span', { class: 'navdot', 'aria-label': `${count} new board items` }) : null], () => chooseView(o.boardOpen ? null : 'board'), { class: 'iconbtn ghost tt-board-button', 'aria-description': count ? `${count} new board items` : 'Open thread board', 'aria-expanded': String(Boolean(o.boardOpen)) }), taskIndicator()]),
+      actions: [...(sidePanel ? side().controls().slice(0, 2) : [round('Board', [icon.list(18), count ? h('span', { class: 'navdot', 'aria-label': `${count} new board items` }) : null], () => chooseView(o.boardOpen ? null : 'board'), { class: 'iconbtn ghost tt-board-button', 'aria-description': count ? `${count} new board items` : 'Open thread board', 'aria-expanded': String(Boolean(o.boardOpen)) }), ...controls('header'), taskIndicator()]),
         round('Thread actions', icon.dots(20), () => { o.headerMenu = !o.headerMenu; redraw() }, { class: 'iconbtn ghost', 'aria-expanded': String(Boolean(o.headerMenu)) }),
         sidePanel ? side().controls().at(-1) : null] })
     const chosenModel = defaultMember?.engine && composerModel(defaultMember, o.messages, providerCatalog())
@@ -1935,11 +1939,12 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     return chatFrame({ wide: st.wide, props: { class: 'tt-thread', key: `thread:${o.thread.id}`, ...compose.dragProps() }, children: [
       st.fixture ? h('div', { class: 'tt-fixture' }, 'Design preview · sample conversation') : null,
       header,
-      registry.draw('thread.header.action', { thread: o.thread, state: o, open, patch }),
+      registry.draw('thread.header.action', { ...headerContext, slot: 'below' }),
       registry.draw('app.overlay', { slot: 'player' }),
       o.headerMenu ? menuSurface(h('div', { key: 'header-menu', class: 'popover tt-header-menu', role: 'menu' },
         side()?.available() && !o.creating && !o.createFailed ? settingsRow({ title: 'Open to the side', lead: icon.panelRight(18), onclick: closeMenu(() => side().openSide({ kind: 'thread', id: o.thread.id })) }) : null,
         sidePanel ? settingsRow({ title: 'Board', lead: icon.list(18), onclick: closeMenu(() => chooseView('board')) }) : null,
+        sidePanel ? controls('menu') : null,
         sidePanel ? settingsRow({ title: 'Tasks', lead: icon.code(18), onclick: closeMenu(() => { o.tasksOpen = true; o.focusTasks = true }) }) : null,
         settingsRow({ title: 'Thread details', lead: icon.users(18), onclick: closeMenu(showDetails) }),
         !general ? settingsRow({ title: o.thread.pinned ? 'Unpin thread' : 'Pin thread', lead: icon.pin(18), onclick: closeMenu(() => patch({ pinned: !o.thread.pinned })) }) : null,
