@@ -34,6 +34,16 @@ expected and what happened instead, word for word (the error, the tool
 result, the page's line); when, on which provider and lane (a conversation,
 a wake, a cron); and whether it happens every time.
 
+When an agent acted on the owner's request, in a wake or cron, or the bug
+is about what an agent did, say who did what by role: the owner in the app,
+or an agent on the owner's ask. Names come out, but roles stay ("one agent
+renamed another at the owner's request"). Say which skill or instruction
+the agent followed, what it did step by step, and where it stopped and why.
+Give your own reading of the cause as a reading, not fact: whether it lies
+in the code, the guidance, or the gap between them, and what you checked
+to think so. You are often not the agent that acted; read that agent's skill
+and the thread before writing.
+
 **A feature.** Say what must be true when it is done and why it matters to
 the owner, in their words where you have them, and what happens today. Do
 not design the mechanism. First ask whether a plugin could do it (see
