@@ -1319,6 +1319,19 @@ class Server:
             await writer.drain()
             return
 
+        if parts == ["v1", "plugin-services"]:
+            if method != "GET":
+                writer.write(response(405, {"error": "use GET for plugin services"},
+                                      "Cache-Control: no-store\r\n"))
+            else:
+                import loam_contributions
+                from urllib.parse import unquote_plus
+                iface = unquote_plus(params["interface"]) if "interface" in params else None
+                body = {"services": await asyncio.to_thread(loam_contributions.services_for, iface)}
+                writer.write(response(200, body, "Cache-Control: no-store\r\n"))
+            await writer.drain()
+            return
+
         if parts[:2] == ["v1", "plugins"]:
             await self.plugins_route(method, parts[2:], payload, writer,
                                      if_none_match=if_none_match)
@@ -2696,7 +2709,12 @@ class Server:
                  "resolve": lambda: files_api.resolve(q.get("ref"), q.get("from_root"),
                                                   q.get("from_path")),
                  "recent": lambda: loam_recent.recent_files(
-                     q.get("who", "all"), q.get("window", "default"))}
+                     q.get("who", "all"), q.get("window", "default")),
+                 "events": lambda: files_api.file_events(q.get("since")),
+                 "fingerprint": lambda: files_api.fingerprint(q.get("root", ""), q.get("path")),
+                 "locate": lambda: files_api.locate(q.get("root", ""), dev=q.get("dev"),
+                                                    ino=q.get("ino"), sha256=q.get("sha256"),
+                                                    size=q.get("size"), doc_id=q.get("doc_id"))}
         writes = {("text", "PUT"): (200, files_api.save_text),
                   ("file", "POST"): (201, files_api.create_file),
                   ("folder", "POST"): (201, files_api.create_folder),
@@ -2734,7 +2752,7 @@ class Server:
                     files_api.download, q.get("root", ""), q.get("path"))
                 try:
                     status = "200 OK"
-                    if headers["Content-Type"].startswith("video/"):
+                    if headers["Content-Type"].startswith(("video/", "audio/")):
                         headers["Accept-Ranges"] = "bytes"
                         if q.get("range"):
                             match = re.fullmatch(r"bytes=(\d{0,18})-(\d{0,18})", q["range"])
@@ -2744,7 +2762,7 @@ class Server:
                             start = int(first) if first else max(0, size - int(last))
                             end = min(size - 1, int(last)) if first and last else size - 1
                             if not 0 <= start <= end:
-                                raise files_api.FilesError(416, "Range outside this video.")
+                                raise files_api.FilesError(416, "Range outside this media file.")
                             headers["Content-Range"] = f"bytes {start}-{end}/{size}"
                             size = end - start + 1
                             os.lseek(fd, start, os.SEEK_SET)

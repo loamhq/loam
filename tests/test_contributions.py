@@ -43,6 +43,7 @@ GOOD = {
     "thread.file": [{"label": "checklist"}],
     "engineer.job": [{"run": "python3 job.py", "projects": ["acme"]}],
     "web.door": [{"why": "visitors by a link reach one doc"}],
+    "plugin.service": [{"interface": "hello.rpc", "version": 1, "mount": "/rpc"}],
     "made.up": [{"x": 1}],
 }
 

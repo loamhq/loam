@@ -1,5 +1,0 @@
-/* The harness's frame only: Latte's tokens, as Loam's page would supply them. */
-:root { --paper-page:#EEEAE3; --paper-pane:#F6F3EE; --paper-raised:#FAF8F4; --paper-card:#E9E4DC; --paper-hover-alpha:rgba(28,27,25,.045); --paper-ink:#1C1B19; --paper-ink-2:#4B4741; --paper-ink-3:#645F59; --paper-rule:rgba(28,27,25,.13); --latte-espresso:#2F2017; --latte-espresso-ink:#FFF8EE; --signal-crema:#B4733A; --font-body: Figtree, system-ui, sans-serif; --font-display: Georgia, serif; }
-:root.dark { --paper-page:#1A1917; --paper-pane:#22211F; --paper-raised:#302E2A; --paper-card:#2A2825; --paper-hover-alpha:rgba(236,231,223,.05); --paper-ink:#ECE7DF; --paper-ink-2:#C9C2B8; --paper-ink-3:#9C958B; --paper-rule:rgba(236,231,223,.13); --latte-espresso:#E9D5BB; --latte-espresso-ink:#1A1917; --signal-crema:#D89A5B; --shadow-ink:#000; }
-html, body { margin: 0; height: 100%; background: var(--paper-page); }
-#app { position: fixed; inset: 12px; border-radius: 26px; overflow: hidden; }

@@ -56,8 +56,8 @@ ring; inputs and textareas keep the 2px `--signal-crema` ring from
   `min-height: 44px` (and buttons `min-width: 44px`), so a control drawn
   smaller still has room for a finger. A plugin that means a smaller row
   under a mouse says so itself, e.g. `@media (pointer: fine) { … { min-height:
-  0 } }`; the doc-comments plugin's contents card does this
-  (`docs/doc-comments.md` at the repo root).
+  0 } }`; the `comments` plugin's contents card does this
+  (`docs/sharing-and-comments.md` at the repo root).
 
 ## Pane lead
 
@@ -89,7 +89,7 @@ headers and floating comments.
   back in (`oklab()`, `oklch()`, `color(srgb …)` as well as `rgb()`), by
   converting through a canvas; `test/colour-families-browser.mjs` proves it.
   It is guarded to Latte; strip the guard to run it in every look (as
-  `plugins/doc-comments/test/look-browser.mjs` does).
+  `plugins/comments/test/test_look.py` and `plugins/sharing/test/test_look.py` check tokens against core).
 - `test/control-style-guard.mjs`: every control's colours, borders and face
   resolve to tokens.
 - `test/themes.test.js`: theme CSS overrides only differences; geometry lives

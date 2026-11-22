@@ -1,5 +1,5 @@
 /** API 0: stable conveniences, not a sandbox. See docs/stable-parts.md. */
-export type PlaceName = 'agent.profile' | 'rail.section' | 'panel.item' | 'app.overlay' | 'settings.section' | 'thread.list.decoration' | 'thread.header.action' | 'message.renderer' | 'message.footer.action' | 'composer.tool' | 'files.viewer' | 'files.action' | 'files.root' | 'activity.kind' | 'apps.source' | 'apps.icon' | 'thread.list.line' | 'command'
+export type PlaceName = 'agent.profile' | 'rail.section' | 'panel.item' | 'app.overlay' | 'settings.section' | 'thread.list.decoration' | 'thread.header.action' | 'message.renderer' | 'message.footer.action' | 'composer.tool' | 'files.viewer' | 'files.action' | 'files.root' | 'files.share' | 'activity.kind' | 'apps.source' | 'apps.icon' | 'thread.list.line' | 'command'
 export type ComponentId = 'core.thread-list' | 'core.message' | 'core.composer' | 'core.files.viewer' | 'core.files.editor' | 'core.rail' | 'core.activity' | 'core.apps' | 'core.settings'
 export type View = Node | string | number | boolean | null | undefined | View[]
 export interface Handle { remove(): void }
@@ -49,7 +49,7 @@ export type Places = Record<PlaceName, Place> & {
   thread: { list: { decoration: Place }; header: { action: Place } }
   message: { renderer: Place; footer: { action: Place } }
   composer: { tool: Place }
-  files: { viewer: Place; action: Place }
+  files: { viewer: Place; action: Place; root: Place; share: Place }
   activity: { kind: Place }
   apps: { source: Place }
 }

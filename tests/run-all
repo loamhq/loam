@@ -64,7 +64,7 @@ SCRATCH_PATHS = {
 }
 
 # Start slow tests early so a single straggler does not extend the whole suite.
-SLOW_FIRST = ("test_doc_comments.py", "test_schedule.py", "test_app.py",
+SLOW_FIRST = ("test_sharing_comments.py", "test_schedule.py", "test_app.py",
               "test_cron_locks.py", "test_stuck_command.py", "test_threads.py",
               "test_settings.py")
 

@@ -531,6 +531,17 @@ async def move_file(source: str, destination: str) -> dict[str, Any]:
             shutil.move(str(src), str(dst))
     except OSError as exc:
         return _error("os_error", f"{type(exc).__name__}: {exc}")
+    if src.is_relative_to(VAULT) and dst.is_relative_to(VAULT):
+        try:
+            import loam_files  # noqa: PLC0415
+            st = os.stat(dst, follow_symlinks=False)
+            loam_files.record_file_event(
+                "move", "vault", vault_dir=VAULT,
+                **{"from": src.relative_to(VAULT).as_posix(),
+                   "to": dst.relative_to(VAULT).as_posix(),
+                   "kind": "file", "dev": st.st_dev, "ino": st.st_ino})
+        except Exception:  # noqa: BLE001 -- never break move_file for event logging
+            pass
     return {"ok": True, "moved": str(src), "to": str(dst)}
 
 

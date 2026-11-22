@@ -23,7 +23,7 @@ const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf
 const json = (res, body, status = 200) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)) }
 const rows = JSON.parse(execFileSync('python3', ['-c', `import sys, json, pathlib; sys.path.insert(0, ${JSON.stringify(ROOT + 'lib')}); import loam_plugins as P
 out = {}
-for pid in ['git-backup', 'images', 'doc-comments']:
+for pid in ['git-backup', 'images', 'comments', 'sharing']:
     f = pathlib.Path(${JSON.stringify(ROOT + 'plugins')}) / pid; r = P.read_folder(f, pid); m = r['manifest']
     out[pid] = {**m, 'guide': r['guide'], 'has': r['has'], 'declaration': P.declaration(m, r['has']), 'folder': str(f)}
 print(json.dumps(out))`]))
@@ -33,7 +33,7 @@ const tree = (id, name, set) => set
 const backupStatus = set => ({ ok: true, every: '15m', every_words: 'every 15 minutes', choices: { '15m': 'every 15 minutes', '1h': 'every hour', '6h': 'every 6 hours', '1d': 'once a day' },
   summary: set ? { level: 'ok', words: 'Everything is backed up.' } : { level: 'off', words: 'Nothing is backed up off this machine yet.' },
   trees: [tree('vault', 'Vault', set), tree('spaces', 'AI Spaces', set)], large_files: [] })
-const LABEL = { 'git-backup': 'Git backup', images: 'Images', 'doc-comments': 'Comments & suggestions' }
+const LABEL = { 'git-backup': 'Git backup', images: 'Images', comments: 'Comments & suggestions', sharing: 'Sharing' }
 const errors = []
 for (const set of [true, false]) for (const width of [1440, 390]) for (const mode of ['light', 'dark']) {
   const app = await marketFixture({ mode, look: 'latte' })
@@ -41,7 +41,7 @@ for (const set of [true, false]) for (const width of [1440, 390]) for (const mod
     const { guide, folder, ...m } = r
     const on = set || pid === 'git-backup' || pid === 'images'  // not set up: Git backup on with nothing connected, Images on with no key, Comments off
     const row = { ...m, layer: 'shipped', folder: `plugins/${pid}`, source: { kind: 'loam' }, effective: true, on, switch: 'plugin', broken: null, warnings: [], files: `/v1/plugins/${pid}/files/`,
-      ...(pid === 'doc-comments' && on ? { service: { state: 'running' } } : {}), ...(pid === 'git-backup' ? { service: { state: 'running' } } : {}) }
+      ...((pid === 'comments' || pid === 'sharing') && on ? { service: { state: 'running' } } : {}), ...(pid === 'git-backup' ? { service: { state: 'running' } } : {}) }
     app.installed.set(pid, row)
     app.routes[`GET /v1/plugins/${pid}`] = (req, res) => json(res, { plugin: { ...row, guide }, rows: [row] })
     const entries = row.contributes?.['settings.entry'] ?? []

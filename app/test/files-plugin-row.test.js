@@ -80,8 +80,8 @@ test("a plugin root's entry is a folder's own row: tile, label, open beside, the
   files.side = () => side
   const sheet = addSheet(files, { close: Object.assign(() => {}, { redraw() {} }) }).filter(Boolean)
   const labels = sheet.slice(1).map(n => n.textContent)
-  assert.deepEqual(labels.slice(0, 4), ['Open to the side', 'Rename', 'Open folder', 'Download'])
-  assert.match(labels[4], /link/i)
+  assert.deepEqual(labels.slice(0, 5), ['Open to the side', 'Rename', 'Move…', 'Open folder', 'Download'])
+  assert.match(labels[5], /link/i)
 })
 
 test('a folder row and a plugin row are drawn by the same code', () => {

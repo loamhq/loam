@@ -8,7 +8,7 @@ const baseline = process.env.FILES_DELETE_BASELINE
 const fixtureModule = baseline ? pathToFileURL(join(baseline, 'test/one-product-fixture.mjs')) : './one-product-fixture.mjs'
 const { oneProductFixture } = await import(fixtureModule)
 const out = process.env.FILES_DELETE_EVIDENCE
-const docComments = new URL('../../plugins/doc-comments/', import.meta.url)
+const commentsPlugin = new URL('../../plugins/comments/', import.meta.url)
 if (out) await mkdir(out, { recursive: true })
 const { chromium } = await import(process.env.LOAM_PLAYWRIGHT || 'playwright')
 const browser = await chromium.launch({ executablePath: process.env.LOAM_CHROME, args: ['--no-sandbox', '--disable-dev-shm-usage'] })
@@ -125,19 +125,19 @@ try {
       }
 
       app.routes['GET /v1/plugins'] = (_, res) => res.end(JSON.stringify({
-        plugins: [{ id: 'doc-comments', version: '1.0.0', api: 0, layer: 'shipped', switch: 'plugin', effective: true, on: true, has: { page_main: true } }],
+        plugins: [{ id: 'comments', version: '1.0.0', api: 0, layer: 'shipped', switch: 'plugin', effective: true, on: true, has: { page_main: true } }],
       }))
-      for (const path of await readdir(docComments, { recursive: true })) {
+      for (const path of await readdir(commentsPlugin, { recursive: true })) {
         if (!/^(page|assets)\/.*\.(js|css)$/.test(path)) continue
-        app.routes['GET /v1/plugins/doc-comments/files/' + path] = async (_, res) => {
+        app.routes['GET /v1/plugins/comments/files/' + path] = async (_, res) => {
           res.setHeader('content-type', path.endsWith('.css') ? 'text/css' : 'text/javascript')
-          res.end(await readFile(new URL(path, docComments)))
+          res.end(await readFile(new URL(path, commentsPlugin)))
         }
       }
-      await page.route('**/x/doc-comments/**', route => {
+      await page.route('**/x/comments/**', route => {
         const url = new URL(route.request().url())
         return route.fulfill({ json: { reach: 'everywhere', text: host.texts.get(url.searchParams.get('path')) ?? '',
-          revision: 'r1', notes: [], links: [], can: { edit: true, comment: true } } })
+          revision: 'r1', notes: [], can: { edit: true, comment: true } } })
       })
       const more = button('More')
       const docMenu = page.locator('.dc-menu[role="menu"]')

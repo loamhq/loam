@@ -273,6 +273,8 @@ export function viewOf(row) {
   if (ext === 'html' || ext === 'htm' || type === 'text/html') return 'html'
   if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif'].includes(ext)) return 'image'
   if (ext === 'pdf') return 'pdf'
+  if (['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'opus', 'weba'].includes(ext) || type.startsWith('audio/')) return 'audio'
+  if (['mp4', 'webm', 'mov', 'm4v', 'ogv'].includes(ext) || type.startsWith('video/')) return 'video'
   if (capsOf(row).write) return 'text'
   if (type.startsWith('text/') || /json|yaml|toml|xml/.test(type)) return 'text'
   if (['txt', 'json', 'jsonl', 'csv', 'tsv', 'cron', 'yaml', 'yml', 'toml', 'base', 'canvas', 'js', 'mjs', 'css', 'sh', 'py', 'log', 'ini', 'conf'].includes(ext)) return 'text'
@@ -894,7 +896,7 @@ export function createFiles({
       draft: null,
       revision: null,
       textLoaded: false,
-      metadataLoading: view === 'html' && !known?.capabilities,
+      metadataLoading: ['html', 'image', 'pdf', 'audio', 'video', 'other'].includes(view) && !known?.capabilities,
       mode: mode === 'edit' || mode === 'preview' ? mode : view === 'markdown' || view === 'html' ? 'preview' : 'edit',
       loading: true,
       error: '',
@@ -909,28 +911,28 @@ export function createFiles({
     st.file = file
     schedule()
     prepareLink(file)
+    // A cold panel address may contain only an identity. Non-text views do not
+    // call loadText (which returns the row), so fetch metadata alone first.
+    if (file.metadataLoading) {
+      try {
+        const got = await api('GET', `/files/stat?${q({ root, path })}`)
+        if (st.file !== file) return
+        file.row = got
+        file.caps = capsOf(got)
+        relist(got)
+      } catch (err) {
+        if (st.file !== file) return
+        file.metadataError = true
+        file.error = err.message
+        file.status = err.status
+        file.loading = false
+        schedule()
+        return
+      } finally { file.metadataLoading = false }
+    }
     // Rendering HTML uses the isolated download path, not the text editor.
     // In particular, embedded images can exceed the host's text-read limit.
     if (view === 'html') {
-      // A cold panel address may contain only an identity. The old text read
-      // supplied its row; fetch metadata alone before offering file actions.
-      if (file.metadataLoading) {
-        try {
-          const got = await api('GET', `/files/stat?${q({ root, path })}`)
-          if (st.file !== file) return
-          file.row = got
-          file.caps = capsOf(got)
-          relist(got)
-        } catch (err) {
-          if (st.file !== file) return
-          file.metadataError = true
-          file.error = err.message
-          file.status = err.status
-          file.loading = false
-          schedule()
-          return
-        } finally { file.metadataLoading = false }
-      }
       loadLive(file)
       if (file.mode === 'preview') {
         file.loading = false
@@ -939,7 +941,7 @@ export function createFiles({
       }
     }
     if (view === 'image' || view === 'pdf') return loadBytes(file)
-    if (view === 'other') {
+    if (view === 'audio' || view === 'video' || view === 'other') {
       file.loading = false
       schedule()
       return
@@ -1185,7 +1187,10 @@ export function createFiles({
   }
 
   function applyRename(answer) {
-    st.listing.rows = st.listing.rows.map(row => renamedResource(row, answer))
+    const movedFolder = answer?.from && answer.root === answer.from.root && parentOf(answer.path) !== parentOf(answer.from.path)
+    st.listing.rows = st.listing.rows
+      .map(row => renamedResource(row, answer))
+      .filter(row => !(movedFolder && st.root === answer.root && row.root === answer.root && row.path === answer.path && parentOf(row.path) !== st.path))
     if (st.listing.folder) st.listing.folder = renamedResource(st.listing.folder, answer)
     const folder = renamedResource({ root: st.root, path: st.path }, answer)
     st.root = folder.root
@@ -1206,7 +1211,7 @@ export function createFiles({
           f.blobUrl = null
           loadBytes(f)
         }
-        else if (['image', 'pdf', 'other'].includes(oldView) && ['text', 'markdown', 'html'].includes(f.view)) openFile(f.root, f.path, row)
+        else if (['image', 'pdf', 'audio', 'video', 'other'].includes(oldView) && ['text', 'markdown', 'html'].includes(f.view)) openFile(f.root, f.path, row)
       }
     }
     schedule()
@@ -1254,6 +1259,71 @@ export function createFiles({
       if (file) {
         file.renaming = false
         finishRename()
+        if (st.file === file && dirty()) soon(file)
+      }
+      schedule()
+    }
+  }
+
+  function beginMove(resource) {
+    if (!capsOf(resource).rename || isFolder(resource)) return
+    const sheet = { kind: 'move', resource, name: resource.name ?? nameOf(resource.path),
+      folder: parentOf(resource.path), folders: [], loading: true, busy: false, error: '' }
+    st.sheet = sheet
+    schedule()
+    browseMove(sheet.folder)
+  }
+
+  async function browseMove(folder) {
+    const s = st.sheet
+    if (s?.kind !== 'move' || s.busy) return
+    s.folder = folder
+    s.loading = true
+    s.error = ''
+    schedule()
+    try {
+      const body = await api('GET', `/files/list?${q({ root: s.resource.root, path: folder, limit: PAGE })}`)
+      if (st.sheet !== s || s.folder !== folder) return
+      s.folders = rowsOf(body).filter(r => isFolder(r) && capsOf(r).create)
+      s.loading = false
+    } catch (err) {
+      if (st.sheet !== s || s.folder !== folder) return
+      s.loading = false
+      s.error = err.message
+    }
+    schedule()
+  }
+
+  async function confirmMove() {
+    const s = st.sheet
+    if (s?.kind !== 'move' || s.busy) return
+    const to = joinPath(s.folder, s.resource.name ?? nameOf(s.resource.path))
+    if (to === s.resource.path) { st.sheet = null; schedule(); return }
+    s.busy = true
+    s.error = ''
+    const file = sameFileAddress(st.file, s.resource) ? st.file : null
+    let finishMove
+    if (file) {
+      file.renaming = true
+      file.renameFlight = new Promise(resolve => { finishMove = resolve })
+    }
+    schedule()
+    try {
+      if (file?.inflight && file.saving) await file.inflight
+      const answer = await api('POST', '/files/rename', { root: s.resource.root, path: s.resource.path, to })
+      if (!isRow(answer) || !answer.from) throw new Error('The host did not return the moved location.')
+      const offered = st.roots.shortcuts
+      applyRename(answer)
+      await onRename?.(answer, offered)
+      registry.emit('file.renamed', answer)
+      if (st.sheet === s) st.sheet = null
+    } catch (err) {
+      s.error = err.message
+    } finally {
+      s.busy = false
+      if (file) {
+        file.renaming = false
+        finishMove()
         if (st.file === file && dirty()) soon(file)
       }
       schedule()
@@ -1647,7 +1717,7 @@ export function createFiles({
     }
   }
 
-  return { registry, st, pluginRoot, pathLabels, itemsMenu, stat, readText, ago: when, beginRename, cancelRename, editRename, rename, applyRename, focusRename, canDeleteFile, beginDelete, confirmDelete, holdSavesForDelete, removeDeletedFile, refreshContainingFolder, revealOpen, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, downloadArchive, loadRoots, loadRecent, setRecentWho, showMoreRecent, toggleRecentGroup, togglePinsExpanded, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, resumeOwner, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
+  return { registry, st, pluginRoot, pathLabels, itemsMenu, stat, readText, ago: when, beginRename, cancelRename, editRename, rename, applyRename, focusRename, beginMove, browseMove, confirmMove, canDeleteFile, beginDelete, confirmDelete, holdSavesForDelete, removeDeletedFile, refreshContainingFolder, revealOpen, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, downloadArchive, loadRoots, loadRecent, setRecentWho, showMoreRecent, toggleRecentGroup, togglePinsExpanded, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, resumeOwner, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
 }
 
 function triggerBrowserDownload(href, filename) {
@@ -2299,16 +2369,16 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, s
   const back = backToThread ? { label: 'Back to thread', title: historyBack?.title ?? 'Back to thread',
     go: historyBack?.go ?? backToThread, shortcut: Boolean(historyBack) } : historyBack
   const context = { files, file: files.st.file, options: { close, closeLabel, wide, field, onLink, onTool, go, returnBack, embed, mic, take, notice, readAloud, audioBar, home }, slot: 'viewer' }
-  const custom = files.registry.entries('files.viewer', context).findLast(entry => !entry.component && entry.slot === 'viewer')
-  if (custom) {
+  const viewers = files.registry.entries('files.viewer', context).filter(entry => !entry.component && entry.slot === 'viewer')
+  for (let i = viewers.length - 1; i >= 0; i--) {
     if (files.st.file) files.st.file.openFolder = openFolder ?? close
-    // A kept editor may outlive a history entry or a phone/desktop resize.
-    // The shell owns this slot so neither change requires remounting it.
     const up = close && { title: `Back to ${closeLabel}`, go: close, label: `Back to ${closeLabel}` }
     const leading = historyBackButton(back ?? up)
-    const content = files.registry.invoke(custom, 'render', { ...context, options: { ...context.options, close: null, returnBack: null, openFolder: openFolder ?? close } })
-    return h('div', { class: 'fs-custom-view', key: `viewer:${files.st.file.root}:${files.st.file.path}` },
-      leading, h('div', { class: 'fs-custom-content', key: 'viewer-content' }, content))
+    const content = files.registry.invoke(viewers[i], 'render', { ...context, options: { ...context.options, close: null, returnBack: null, openFolder: openFolder ?? close } })
+    if (content) {
+      return h('div', { class: 'fs-custom-view', key: `viewer:${files.st.file.root}:${files.st.file.path}` },
+        leading, h('div', { class: 'fs-custom-content', key: 'viewer-content' }, content))
+    }
   }
   const f = files.st.file
   if (!f) return null
@@ -2346,6 +2416,11 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, s
         )
       : null
 
+  const panels = files.registry.draw('files.viewer', { slot: 'panel', files, file: f, options: { wide, side, close, go, home } })
+  const panelActions = panels.map(p => (p && typeof p === 'object' && !p.nodeType ? p.action : null)).filter(Boolean)
+  const panelNodes = panels.map(p => (p?.nodeType ? p : p?.node ?? null)).filter(Boolean)
+  const extraActions = [...files.registry.draw('files.action', { slot: 'action', file: f, files }), ...panelActions]
+
   const head = side ? null : files.registry.reduce('files.action', { slot: 'toolbar', file: f, files, defaultView: () => h(
     'div',
     { class: `fs-head fs-edhead${wide && tools ? ' withtools' : ''}${close && !returnBack ? ' folder-back' : ''}` },
@@ -2355,7 +2430,7 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, s
     tabs,
     modeToggle,
     readAloud?.glyph,
-    files.registry.draw('files.action', { slot: 'action', file: f, files }),
+    extraActions,
     wide ? readOnly : null,
     h('button', { class: 'iconbtn fs-filemenu', title: 'This file', 'aria-label': 'This file', onclick: openMenu }, icon.dots(18)),
     h('button', { class: 'iconbtn fs-copylink', title: copyLinkLabel(f), 'aria-label': copyLinkLabel(f), disabled: !f.shareLink, onclick: () => files.copyLink(f) }, icon.link(16)),
@@ -2367,6 +2442,7 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, s
     historyBackButton(back) ?? returnBack ?? (close ? h('button', { class: 'iconbtn fs-back', title: `Back to ${closeLabel}`, 'aria-label': `Back to ${closeLabel}`, onclick: close }, icon.chevronLeft(18)) : null),
     h('span', { class: 'fs-htmlmark', text: 'HTML' }),
     renameTitle(files, f.row, name, 'fs-htmlname'),
+    extraActions,
     htmlActionsInMenu ? null : h('button', { class: 'pillbtn fs-htmlreload', title: 'Reload page', disabled: f.liveLoading, text: 'Reload', onclick: () => files.loadLive(f) }),
     !htmlActionsInMenu && f.liveUrl ? h('a', { class: 'pillbtn fs-htmlopen', href: f.liveUrl, target: '_blank', rel: 'noopener noreferrer', title: 'Open in new tab', 'aria-label': 'Open in new tab' }, icon.external(16)) : null,
     h('button', { class: 'iconbtn fs-filemenu', title: 'This file', 'aria-label': 'This file', onclick: openMenu }, icon.dots(18)),
@@ -2409,7 +2485,22 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, s
       h('iframe', { class: 'fs-pdfframe', sandbox: '', referrerpolicy: 'no-referrer', title: `Preview of ${name}`, src: f.blobUrl }),
       h('div', { class: 'fs-note' }, h('span', { text: 'If the preview stays blank, your browser will not show PDFs in a sandbox. ' }), downloadButton(f, 'Download the PDF')),
     )
-  else if (f.view === 'image' || f.view === 'pdf' || f.view === 'other')
+  else if (f.view === 'audio' && f.caps.download)
+    body = h(
+      'div',
+      { class: 'fs-media fs-media-av' },
+      h('span', { class: 'fs-chip', text: `${tileOf(name).label} audio` }),
+      h('audio', { class: 'fs-audio', controls: true, preload: 'metadata', src: downloadHref(f.root, f.path) }),
+      downloadButton(f),
+    )
+  else if (f.view === 'video' && f.caps.download)
+    body = h(
+      'div',
+      { class: 'fs-media fs-media-av' },
+      h('video', { class: 'fs-video', controls: true, playsinline: true, preload: 'metadata', src: downloadHref(f.root, f.path) }),
+      downloadButton(f),
+    )
+  else if (f.view === 'image' || f.view === 'pdf' || f.view === 'audio' || f.view === 'video' || f.view === 'other')
     body = h(
       'div',
       { class: 'fs-media' },
@@ -2433,11 +2524,7 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, s
     )
   else body = h('div', { class: `fs-editwrap${take ? ' taking' : ''}` }, field(f, { readOnly: !editable, mono: f.view !== 'markdown' }), take, wide ? null : tools)
 
-  return h(
-    'div',
-    { class: `fs-file${wide ? ' wide' : ''}${htmlPreview ? ' html-live' : ''}`, key: `fs:file:${f.root}:${f.path}` },
-    htmlPreview ? liveHead : head,
-    audioBar,
+  const contentParts = [
     htmlPreview ? null : h(
       'div',
       { class: 'fs-titles' },
@@ -2459,6 +2546,18 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, s
     f.conflict ? conflictBox(files, f) : null,
     f.failed && f.flash ? h('div', { class: 'banner banner-retry', role: 'alert', text: f.flash }) : null,
     body,
+  ]
+
+  return h(
+    'div',
+    { class: `fs-file${wide ? ' wide' : ''}${htmlPreview ? ' html-live' : ''}${panelNodes.length ? ' has-panel' : ''}`, key: `fs:file:${f.root}:${f.path}` },
+    htmlPreview ? liveHead : head,
+    audioBar,
+    ...(panelNodes.length
+      ? [h('div', { class: 'fs-split', key: 'fs:split' },
+          h('div', { class: 'fs-main-col', key: 'fs:main-col' }, ...contentParts),
+          ...panelNodes.map((node, i) => h('aside', { class: 'fs-side-panel', key: `fs:panel:${i}` }, node)))]
+      : contentParts),
   )
 }
 
@@ -2571,6 +2670,27 @@ export function addSheet(files, { close, nameField, nameValue = () => nameField.
   const s = files.st.sheet
   // A save on the way out is quiet: the header already says "Saving…".
   if (!s || s.kind === 'saving') return null
+  if (s.kind === 'move') {
+    const rootName = ROOT_LOOK[s.resource.root]?.name ?? s.resource.root
+    const loc = s.folder ? `${rootName} / ${s.folder.split('/').join(' / ')}` : rootName
+    const same = s.folder === parentOf(s.resource.path)
+    return [
+      h('h2', { class: 'display sheettitle', text: `Move ${s.name}` }),
+      h('div', { class: 'fs-move-bar' },
+        s.folder ? h('button', { class: 'backbtn fs-move-up', type: 'button', disabled: s.busy, onclick: () => files.browseMove(parentOf(s.folder)) }, icon.chevronLeft(16), h('span', { text: 'Up' })) : null,
+        h('div', { class: 'fs-move-loc', text: loc })),
+      s.loading ? h('div', { class: 'fs-quiet', text: 'Loading folders…' })
+        : s.folders.length ? h('div', { class: 'fs-move-list' }, ...s.folders.map(f =>
+            h('button', { class: 'sheetrow fs-move-folder', key: `mv:${f.path}`, type: 'button', disabled: s.busy, onclick: () => files.browseMove(f.path) },
+              h('div', { class: 'icon-tile fs-foldertile' }, icon.folder(16)),
+              h('span', { text: f.name }), icon.chevronRight(10))))
+          : h('div', { class: 'fs-quiet', text: 'No subfolders here.' }),
+      s.error ? h('p', { class: 'fs-delete-error', role: 'alert', text: s.error }) : null,
+      h('div', { class: 'fs-actions fs-move-actions', 'aria-busy': String(s.busy) },
+        h('button', { class: 'pillbtn', type: 'button', disabled: s.busy, text: 'Cancel', onclick: close }),
+        h('button', { class: 'pillbtn primary fs-move-submit', type: 'button', disabled: s.busy || same, text: s.busy ? 'Moving…' : 'Move here', onclick: files.confirmMove })),
+    ]
+  }
   if (s.kind === 'delete') {
     return [
       h('h2', { class: 'display sheettitle', text: 'Delete file?' }),
@@ -2624,6 +2744,7 @@ export function addSheet(files, { close, nameField, nameValue = () => nameField.
       ...(s.resource ? menuItems(files, s.resource, close) : []),
       !s.side && s.resource && !isFolder(s.resource) && files.side?.()?.available() ? h('button', { class: 'sheetrow', onclick: () => { const row = s.resource; files.st.sheet = null; files.side().openSide({ kind: 'file', root: row.root, path: row.path, row }) } }, icon.panelRight(18), 'Open to the side') : null,
       capsOf(s.resource).rename ? h('button', { class: 'sheetrow fs-menu-rename', onclick: () => files.beginRename(s.resource, s.renameSlot ?? 'row') }, icon.pencil(18), h('span', { text: 'Rename' })) : null,
+      capsOf(s.resource).rename && !isFolder(s.resource) ? h('button', { class: 'sheetrow fs-menu-move', onclick: () => files.beginMove(s.resource) }, icon.folder(18), h('span', { text: 'Move…' })) : null,
       s.openFolder ? h('button', { class: 'sheetrow fs-menu-folder', onclick: () => { files.st.sheet = null; s.openFolder() } }, icon.folder(18), h('span', { text: 'Open folder' })) : null,
       viewMode ? h('button', { class: 'sheetrow fs-menu-source', onclick: () => { close(); files.setMode(viewMode === 'Preview' ? 'preview' : 'edit') } }, icon[viewMode === 'Preview' ? 'file' : viewMode === 'Edit' ? 'pencil' : 'code'](18), h('span', { text: viewMode })) : null,
       s.resource?.capabilities?.download ? h('a', { class: 'sheetrow fs-menu-download', href: downloadHref(s.resource.root, s.resource.path), download: s.name }, icon.send(18), h('span', { text: 'Download' })) : null,

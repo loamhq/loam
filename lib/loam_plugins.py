@@ -53,6 +53,7 @@ PLACES = (
     "rail.section", "app.overlay", "settings.section", "thread.list.decoration",
     "thread.header.action", "thread.kind", "message.renderer",
     "message.footer.action", "composer.tool", "files.viewer", "files.action", "files.root",
+    "files.share",
     "activity.kind", "apps.source", "apps.icon", "thread.list.line", "command",
     "provider", "compute", "publishing", "agent.tool", "route", "schedule.kind",
     # An agent's profile (2026-11-13): a row or a section a plugin adds to

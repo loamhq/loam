@@ -52,7 +52,8 @@ import loam_plugin_servers as servers  # noqa: E402
 DOOR_PATH = re.compile(r"^/s/([A-Za-z0-9_-]{32,64})(/[^?#]*)?(\?[^#]*)?$")
 DOOR_METHODS = {"GET", "HEAD", "POST", "PATCH", "DELETE"}
 DOOR_HEADERS = {"host", "content-type", "content-length", "accept", "accept-language",
-                "user-agent", "x-loam-share", "x-forwarded-for", "origin"}
+                "user-agent", "x-loam-share", "x-loam-agent-name", "x-forwarded-for",
+                "origin", "range"}
 DOOR_BODY_MAX = 2 * 1024 * 1024
 _owner_cache = {"at": 0.0, "pid": None}
 
