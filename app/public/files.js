@@ -793,7 +793,9 @@ export function createFiles({
     const view = viewOf(r)
     const context = { slot: 'projection', root, path, row: r }
     const projection = view === 'markdown'
-      ? registry.draw('files.viewer', context).at(-1) ?? boardProjection(root, path)
+      ? registry.draw('files.viewer', context).findLast(adapter =>
+        typeof adapter?.show === 'function' && typeof adapter.write === 'function' && typeof adapter.offsets === 'function')
+        ?? boardProjection(root, path)
       : null
     closeFile({ remember: st.file?.root !== root || st.file.path !== path })
     const file = {

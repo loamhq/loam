@@ -71,7 +71,14 @@ test('Files keeps the projection used by an open edit and reselects it on the ne
   let raw = 'keep\nold'
   plugin.places.files.viewer.add({ id: 'note-body', slot: 'projection',
     when: ({ root, path }) => root === row.root && path === row.path,
-    render: () => ({ show: text => text.slice(text.indexOf('\n') + 1), write: (base, text) => base.split('\n')[0] + '\n' + text }),
+    render: () => ({
+      show: text => text.slice(text.indexOf('\n') + 1),
+      write: (base, text) => base.split('\n')[0] + '\n' + text,
+      offsets: raw => {
+        const start = raw.indexOf('\n') + 1
+        return { toSource: offset => offset + start, fromSource: offset => Math.max(0, offset - start) }
+      },
+    }),
   })
   const files = createFiles({ registry, schedule() {}, api: async (method, path, body) => {
     if (method === 'PUT') {
