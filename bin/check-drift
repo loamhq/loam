@@ -698,6 +698,37 @@ def check_deploy(findings: list) -> list[str]:
                 live.splitlines(), expected.splitlines(),
                 fromfile=f"live:{path}", tofile="generator", lineterm="", n=1))))
 
+    if dep.AI_LABS.is_dir():
+        owner = os.stat(dep.AI_LABS)
+        ai_labs = dep.AI_LABS.resolve()
+        seen: set[Path] = set()
+        for root in dep.static_roots():
+            to_check: list[Path] = []
+            try:
+                rel = root.resolve().relative_to(ai_labs)
+            except ValueError:
+                to_check.append(root)
+            else:
+                cur = dep.AI_LABS
+                for part in rel.parts:
+                    cur = cur / part
+                    to_check.append(cur)
+            for d in to_check:
+                if d in seen:
+                    continue
+                seen.add(d)
+                if not d.is_dir():
+                    findings.append((f"deploy {d.name}", str(d),
+                                     f"MISSING on disk: {d}. `sudo bin/gen-deploy` creates it."))
+                else:
+                    st = os.stat(d)
+                    if st.st_uid != owner.st_uid or st.st_gid != owner.st_gid:
+                        findings.append((
+                            f"deploy {d.name}", str(d),
+                            f"owned by {st.st_uid}:{st.st_gid}, expected "
+                            f"{owner.st_uid}:{owner.st_gid}. `sudo bin/gen-deploy` fixes it.",
+                        ))
+
     live_caddy = dep.read_root_text(dep.CADDYFILE) or ""
     # Every name an app answers on: its host under the runtime's domain and
     # any hosts on a domain of its own. The extra domains' portal blocks

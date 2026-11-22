@@ -188,15 +188,45 @@ def validate_sudoers(content: str) -> None:
 
 def ensure_static_roots(dry: bool) -> None:
     """A static host's directory must exist for Caddy to serve it. Owned by
-    the owner of ai-labs, because the personas write there."""
+    the owner of ai-labs, because the personas write there. Every intermediate
+    directory created along the way (e.g. commons/ when commons/www/ is first
+    made) is chowned too, and any existing static root or intermediate
+    directory under ai-labs with wrong ownership is repaired."""
     owner = os.stat(dep.AI_LABS)
+    uid, gid = owner.st_uid, owner.st_gid
+    ai_labs = dep.AI_LABS.resolve()
+    seen: set[Path] = set()
     for root in dep.static_roots():
-        if root.is_dir():
-            continue
-        print(f"  {'would create' if dry else 'created'} {root}")
-        if not dry:
-            root.mkdir(parents=True)
-            os.chown(root, owner.st_uid, owner.st_gid)
+        missing: list[Path] = []
+        p = root
+        while not p.exists() and p != p.parent:
+            missing.append(p)
+            p = p.parent
+        if missing:
+            print(f"  {'would create' if dry else 'created'} {root}")
+            if not dry:
+                for d in reversed(missing):
+                    d.mkdir()
+                    os.chown(d, uid, gid)
+        to_check: list[Path] = []
+        try:
+            rel = root.resolve().relative_to(ai_labs)
+        except ValueError:
+            to_check.append(root)
+        else:
+            cur = dep.AI_LABS
+            for part in rel.parts:
+                cur = cur / part
+                to_check.append(cur)
+        for d in to_check:
+            if d in seen or not d.is_dir():
+                continue
+            seen.add(d)
+            st = os.stat(d)
+            if st.st_uid != uid or st.st_gid != gid:
+                print(f"  {'would chown' if dry else 'chowned'} {d}")
+                if not dry:
+                    os.chown(d, uid, gid)
 
 
 def wait_for_login() -> None:
