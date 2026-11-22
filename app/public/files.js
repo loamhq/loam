@@ -570,7 +570,7 @@ export function createFiles({
     if (root === 'spaces' && agent && agent !== 'commons' && agent !== 'README.md') {
       const known = row?.root === root && splitPath(row.path)[0] === agent
         ? row.workspace_name ?? (row.path === agent ? row.name : null) : null
-      parts[0] = known ?? agentLabel(agent) ?? agentName(null, agent)
+      parts[0] = known ?? agentLabel(agent) ?? st.roots.workspaceNames?.get(agent) ?? agentName(null, agent)
     }
     return parts
   }
@@ -593,7 +593,8 @@ export function createFiles({
       const body = await api('GET', '/files/roots')
       const shortcuts = await usedShortcuts(shortcutsOf(body))
       if (ticket !== rootsRequest) return
-      st.roots = { loaded: true, items: rootsOf(body), shortcuts, error: '' }
+      const workspaceNames = new Map(Object.entries(body?.workspace_names ?? {}))
+      st.roots = { loaded: true, items: rootsOf(body), shortcuts, workspaceNames, error: '' }
     } catch (err) {
       if (ticket !== rootsRequest) return
       st.roots = { loaded: true, items: [], shortcuts: [], error: err.message, status: err.status }

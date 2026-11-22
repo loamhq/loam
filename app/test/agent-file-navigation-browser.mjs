@@ -48,7 +48,7 @@ function routes(mode, state) {
     'GET /v1/system/reviewer': json({ name: 'Nightly reviewer' }),
     'GET /v1/system/persona': json({}),
     'GET /v1/plugins': json({ plugins: [] }),
-    'GET /v1/files/roots': json({ ...rootsAnswer(), shortcuts: [] }),
+    'GET /v1/files/roots': json({ ...rootsAnswer(), shortcuts: [], workspace_names: { iris: iris.name, 'old-agent': 'Green Hill' } }),
     'GET /v1/files/stat': (req, res, url) => json(resource(documentAt(url)))(req, res),
     'GET /v1/files/resolve': (req, res, url) => {
       const path = url.searchParams.get('ref')?.replace('/files/spaces/', '')
@@ -100,6 +100,11 @@ try {
       }
       const filesTab = profile.getByRole('tab', { name: 'Files', exact: true })
       if (!baseline) {
+        await page.addInitScript(origin => {
+          if (window !== window.top || location.origin !== origin) return
+          if (localStorage.getItem('loam-ui.files')) return
+          localStorage.setItem('loam-ui.files', JSON.stringify({ shortcuts: [{ root: 'spaces', path: 'old-agent' }] }))
+        }, new URL(app.url).origin)
         await page.goto(`${app.url}/files/spaces`)
         await page.locator('.fs-entry .fs-name').getByText(iris.name, { exact: true }).waitFor()
         await capture('renamed-spaces')
@@ -115,11 +120,13 @@ try {
         await capture('renamed-nested')
         await page.goto(`${app.url}/files`)
         await page.locator('.fs-shortcut .fs-name').getByText(iris.name, { exact: true }).waitFor()
+        await page.locator('.fs-shortcut .fs-name').getByText('Green Hill', { exact: true }).waitFor()
         await capture('renamed-shortcuts')
         await button('Settings').click()
         await page.locator('.sheet.settings').getByRole('button', { name: /^Files(?: |$)/ }).click()
         const shortcuts = page.getByRole('region', { name: 'Shortcuts' })
         await shortcuts.getByText(iris.name, { exact: true }).waitFor()
+        await shortcuts.getByText('Green Hill', { exact: true }).waitFor()
         await shortcuts.getByRole('button', { name: 'Remove shortcut to Violet' }).waitFor()
         await capture('renamed-settings-shortcuts')
       }

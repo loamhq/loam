@@ -409,10 +409,16 @@ async def main():
               status == 200 and body["folder"]["workspace_name"] == "Violet"
               and body["folder"]["name"] == "skills", body)
         old_card = LABS / "cleo" / "agent.json"
+        original = old_card.read_bytes()
+        old_card.write_text(json.dumps({"display": "Green Hill", "archived": "2026-11-20"}))
+        status, body = await http(port, "GET", "/v1/files/roots")
+        check("the shortcut labels include current names for archived agents",
+              status == 200 and body.get("workspace_names", {}).get("cleo") == "Green Hill", body)
         old_card.write_text(json.dumps({"name": "Legacy name", "archived": "2026-11-20"}))
         status, body = await http(port, "GET", "/v1/files/stat?root=spaces&path=cleo")
         check("an archived workspace without a display falls back to its ID's name",
               status == 200 and body["name"] == "Cleo" and body["path"] == "cleo", body)
+        old_card.write_bytes(original)
         out = await cli(port, "describe", "agent.provider")
         check("describe agent.provider lists the engines",
               out.get("setting", {}).get("allowed") == list(threads.ENGINES), out)

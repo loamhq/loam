@@ -401,15 +401,19 @@ def pinned(root: str, parts: list[str], kind: str) -> str | None:
     return None
 
 
+def _workspace_name(agent: str) -> str:
+    from loam_agents import card
+    from loam_profile import display_name
+    return display_name(agent, card(agent, cfg.AI_LABS))
+
+
 def _entry(root: str, parts: list[str], st: os.stat_result,
            *, include_workspace: bool = False) -> dict:
     kind = "folder" if stat.S_ISDIR(st.st_mode) else "file"
     workspace_name = None
     if (root == "spaces" and parts and parts[0] not in ("commons", "README.md")
             and (include_workspace or len(parts) == 1)):
-        from loam_agents import card
-        from loam_profile import display_name
-        workspace_name = display_name(parts[0], card(parts[0], cfg.AI_LABS))
+        workspace_name = _workspace_name(parts[0])
     name = parts[-1] if parts else ROOTS[root]["name"]
     return {
         "root": root,
@@ -503,7 +507,9 @@ def roots() -> dict:
         kind_caps = capabilities(key, [], "folder")
         out.append({"root": key, **meta, "link": link(key, []),
                     "capabilities": kind_caps})
-    return {"roots": out, "shortcuts": shortcuts()}
+    return {"roots": out, "shortcuts": shortcuts(),
+            "workspace_names": {agent: _workspace_name(agent) for agent in sorted(_agents())
+                                if not (cfg.AI_LABS / agent).is_symlink()}}
 
 
 def shortcuts() -> list[dict]:
