@@ -375,6 +375,8 @@ def _imports(path: Path, depth: int, seen: set) -> list[Path]:
 
 def instruction_sources(workspace: Path) -> list[Path]:
     """The workspace instructions and their imports in load order."""
+    import loam_loading
+    loam_loading.refresh_reach_import(workspace)
     return _imports(workspace / "CLAUDE.md", 0, set())
 
 

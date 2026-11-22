@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import os
+import os
+import re
+import tempfile
 from pathlib import Path
 
 import loam_config as lc
@@ -43,3 +46,52 @@ def ensure_owner_page() -> bool:
     page.parent.mkdir(parents=True, exist_ok=True)
     page.write_text(OWNER_PAGE_SEED, encoding="utf-8")
     return True
+
+
+def reach_view() -> Path:
+    """Runtime-owned import for installs with the former factory capability text."""
+    return lc.STATE / "instructions" / "reach.md"
+
+
+def _current_reach(text: str) -> str:
+    text = text.replace("\nthreads and boards, settings, the Market, the reviewer) is the shared skill",
+                        "\nthreads, settings, the Market, the reviewer) is the shared skill")
+    return re.sub(r"(?m)^(  edit one\)\.) Boards are in `[^`\n]+`; General's is\n"
+                  r"  `[^`\n]+`\. (Post with `mcp__engineer__thread`)$", r"\1 \2", text)
+
+
+def reach_import(source: Path) -> Path:
+    """Keep direct loading for current templates and individually written guidance."""
+    try:
+        original = source.read_text("utf-8")
+    except FileNotFoundError:
+        return source
+    return source if _current_reach(original) == original else reach_view()
+
+
+def refresh_reach_import(project: Path) -> None:
+    """Refresh only when the generated project instructions import the view.
+
+    The owner's shared source stays editable. Re-read it at provider startup so
+    personal additions and removals take effect without a provisioning cycle.
+    """
+    view = reach_view()
+    wrapper = project / "CLAUDE.md"
+    if not wrapper.is_file() or f"@{view}" not in wrapper.read_text("utf-8").splitlines():
+        return
+    source = lc.WORKSPACES / "_shared" / "reach.md"
+    content = _current_reach(source.read_text("utf-8"))
+    # Nested relative imports keep their original base in the shared workspace.
+    content = re.sub(r"(?m)^@([^\s]+)$",
+                     lambda m: "@" + str(source.parent / Path(m[1]).expanduser()), content)
+    content = f"Shared guidance from `{source}`. Make edits there.\n\n" + content
+    if view.is_file() and view.read_text("utf-8") == content:
+        return
+    view.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=view.parent,
+                                     prefix=".reach-", delete=False) as tmp:
+        tmp.write(content)
+    try:
+        os.replace(tmp.name, view)
+    finally:
+        Path(tmp.name).unlink(missing_ok=True)

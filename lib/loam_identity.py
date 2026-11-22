@@ -60,7 +60,7 @@ def _shared_imports() -> tuple[Path, ...]:
     """SHARED_IMPORTS, with the owner's page where a test has put the
     workspaces (lib/loam_loading.owner_page)."""
     import loam_loading  # noqa: PLC0415
-    return SHARED_IMPORTS + (loam_loading.owner_page().resolve(),)
+    return SHARED_IMPORTS + (loam_loading.owner_page().resolve(), loam_loading.reach_view().resolve())
 
 
 def _shared_texts() -> str:
@@ -84,7 +84,9 @@ def imported_paths(project: Path) -> list[Path]:
 
 
 def assert_imports_resolve(project: Path) -> list[Path]:
+    import loam_loading
     project = project.resolve()
+    loam_loading.refresh_reach_import(project)
     paths = imported_paths(project)
     if not paths:
         raise IdentityError(f"{project}/CLAUDE.md declares no @ imports")

@@ -30,6 +30,7 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_loading
 import loam_config as lc  # noqa: E402
 
 AI_LABS = lc.WORKSPACES
@@ -98,7 +99,6 @@ def skills_line() -> str:
 
 def claude_md(display: str, workspace: Path) -> str:
     """Render the shared persona instructions and imports for every lane."""
-    import loam_loading  # noqa: PLC0415
     return f"""You are {display}.
 
 @soul.md
@@ -130,7 +130,7 @@ it is an ordinary file of yours, to keep, fold in or delete.
 What you can reach and use is in the shared file below, which any agent may
 edit; what the owner's plugins add is at the end of this file:
 
-@{REACH}
+@{loam_loading.reach_import(REACH)}
 
 {skills_line()}
 
@@ -698,10 +698,10 @@ keep-coding-instructions: true
 
 
 def render_persona_loading(workspace: Path, display: str) -> None:
-    import loam_loading  # noqa: PLC0415
     if loam_loading.ensure_owner_page():
         print(f"  made {loam_loading.owner_page()}")
     write_if_changed(workspace / "CLAUDE.md", claude_md(display, workspace))
+    loam_loading.refresh_reach_import(workspace)
     styles = workspace / ".claude" / "output-styles"
     styles.mkdir(parents=True, exist_ok=True)
     write_if_changed(workspace / ".claude" / "settings.json",
@@ -731,7 +731,7 @@ ENGINEER_SEEDS = (("role.md", ENGINEER_ROLE_SRC), ("project.md", ENGINEER_PROJEC
 ENGINEER_SEEDED = lc.STATE / "engineer" / "seeded.json"
 
 # Keep the engineer's role, project and shared reach imports in their load order.
-ENGINEER_CLAUDE_MD = f"@role.md\n\n@project.md\n\n@{REACH}\n"
+ENGINEER_CLAUDE_MD = f"@role.md\n\n@project.md\n\n@{loam_loading.reach_import(REACH)}\n"
 
 # Two lines of operator voice, and then it is the engineer's. Nobody else
 # writes in here -- not provision, not a persona, not the operator session.
@@ -992,6 +992,7 @@ def provision_engineer(dry: bool = False) -> None:
     write_if_changed(ENGINEER / "role.md", role)
     write_if_changed(ENGINEER / "project.md", project)
     write_if_changed(ENGINEER / "CLAUDE.md", ENGINEER_CLAUDE_MD)
+    loam_loading.refresh_reach_import(ENGINEER)
     write_if_changed(ENGINEER / "agent.json",
                      json.dumps(engineer_config(), indent=2) + "\n")
     write_if_changed(ENGINEER / ".claude" / "settings.json",

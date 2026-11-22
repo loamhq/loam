@@ -473,3 +473,5 @@ What this does not prove: Let's Encrypt itself on a real domain. The
 certificate route is the one every install on a name already uses (one
 certificate per host, HTTP-01 / TLS-ALPN-01), and nothing in it depends on
 which domain it is.
+
+On an older installation, Loam can omit retired factory capability instructions when assembling a provider’s context. Its runtime-owned copy still reads the current shared reach file on startup. Agents and owners keep editing the original file.

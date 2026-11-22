@@ -724,6 +724,8 @@ class Session:
     async def start(self, resume: bool = False) -> None:
         if not (self.workspace / "agent.json").is_file():
             raise BrokerError(404, f"no agent named {self.agent!r}")
+        import loam_loading
+        loam_loading.refresh_reach_import(self.workspace)
         if (self.origin == adoption.ORIGIN_APP
                 and self.cli_session_id is None
                 and not (self.source and Path(self.source).is_file())):
