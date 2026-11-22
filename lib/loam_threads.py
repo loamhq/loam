@@ -23,12 +23,10 @@ module usable by bin/thread without the broker's environment.
 from __future__ import annotations
 
 import fcntl
-import hashlib
 import json
 import os
 import re
 import secrets
-import stat
 import tempfile
 import time
 from contextlib import contextmanager
@@ -38,6 +36,7 @@ from pathlib import Path
 import loam_config as lc
 
 import loam_clock
+import loam_file_revision
 
 VAULT = Path(os.environ.get("LOAM_VAULT") or lc.VAULT)
 AI_LABS = Path(os.environ.get("LOAM_AI_LABS") or lc.WORKSPACES)
@@ -1530,15 +1529,11 @@ def board_text(meta: dict, create_missing: bool = True) -> str:
             return path.read_bytes().decode("utf-8")
 
 
-def _board_revision(data: bytes) -> str:
-    return "sha256:" + hashlib.sha256(data).hexdigest()
-
-
 def board_snapshot(meta: dict, markdown: str | None = None) -> dict:
     if markdown is None:
         markdown = board_text(meta)
     return {"path": meta["board"], "markdown": markdown,
-            "revision": _board_revision(markdown.encode("utf-8"))}
+            "revision": loam_file_revision.revision(markdown.encode("utf-8"))}
 
 
 def write_board(meta: dict, markdown: str, revision: str) -> dict:
@@ -1546,33 +1541,11 @@ def write_board(meta: dict, markdown: str, revision: str) -> dict:
         raise ThreadError(400, "A board save needs markdown and its base revision")
     path = VAULT / meta["board"]
     with locked(path):
-        _replace_board(path, markdown, revision)
-        return board_snapshot(meta, markdown)
-
-
-def _replace_board(path: Path, markdown: str, revision: str) -> None:
-    """Replace a board with the thread lock already held."""
-    try:
-        mode = stat.S_IMODE(path.stat().st_mode)
-    except FileNotFoundError:
-        raise ThreadError(409, "The board moved or was removed") from None
-    # File tools need not take the runtime lock. Stage the replacement
-    # first so the revision check sits immediately beside the rename.
-    with tempfile.NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.",
-                                     delete=False) as handle:
-        tmp = Path(handle.name)
-    try:
-        tmp.write_bytes(markdown.encode("utf-8"))
-        tmp.chmod(mode)
         try:
-            current = path.read_bytes()
-        except FileNotFoundError:
-            raise ThreadError(409, "The board moved or was removed") from None
-        if _board_revision(current) != revision:
-            raise ThreadError(409, "The board changed since you opened it")
-        os.replace(tmp, path)
-    finally:
-        tmp.unlink(missing_ok=True)
+            loam_file_revision.replace_text(path, markdown, revision)
+        except loam_file_revision.RevisionConflict as exc:
+            raise ThreadError(409, f"The board {exc}") from None
+        return board_snapshot(meta, markdown)
 
 
 def item_meta(line: str) -> list[str]:

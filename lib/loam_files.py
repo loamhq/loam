@@ -11,7 +11,6 @@ import ctypes
 import errno
 import fcntl
 import fnmatch
-import hashlib
 import mimetypes
 import os
 import re
@@ -27,6 +26,7 @@ from functools import wraps
 from pathlib import Path
 
 import loam_config as lc
+from loam_file_revision import revision
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 import loam_broker as cfg
@@ -429,10 +429,6 @@ def link(root: str, parts: list[str]) -> str:
     """The app's deep link to a resource: ``/files/<root>/<path>``, each name
     percent-encoded on its own so a ``/`` in the result is always a separator."""
     return "/files/" + root + "".join("/" + quote(p, safe="") for p in parts)
-
-
-def revision(data: bytes) -> str:
-    return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
 # --- System ------------------------------------------------------------------

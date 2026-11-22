@@ -7,6 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import loam_agents
+import loam_file_revision
 import loam_map_migration
 import loam_starter as starter
 import loam_threads as threads
@@ -30,10 +31,8 @@ def refresh_file(path: Path, replacement: str, originals) -> bool:
     if data == replacement.encode() or not any(data == text.encode() for text in originals):
         return False
     try:
-        threads._replace_board(path, replacement, threads._board_revision(data))
-    except threads.ThreadError as exc:
-        if exc.status != 409:
-            raise
+        loam_file_revision.replace_text(path, replacement, loam_file_revision.revision(data))
+    except loam_file_revision.RevisionConflict:
         return False
     return True
 
