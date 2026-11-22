@@ -530,7 +530,8 @@ declaration shown before install (`touches.agents`, `.schedule`, `.settings`,
 `.engineer_env`, `.engineer_job`, `.secrets`, `.drift_check`, `.inbound`, and `.keys` from
 `keys:`), so a plugin cannot
 declare less than it does. A later version that adds a tool, a lane, a timer
-or a secret asks again, as a new network host does. Side-loaded plugins get
+or a secret asks again, as a new network host does; adding an ordinary plugin
+preference (`settings.entry`) does not hold an automatic update. Side-loaded plugins get
 the same display and no rules: what Loam stamps is held to the principles,
 and nothing else is.
 

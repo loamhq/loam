@@ -1293,7 +1293,8 @@ def declaration(manifest: dict, has: dict) -> dict:
 
 def added(before: dict | None, after: dict) -> dict:
     """What ``after`` declares beyond ``before``: the "asks again" of a later
-    version. Empty when it declares nothing more."""
+    version. Empty when it declares nothing more. Ordinary plugin settings
+    (``settings.entry`` -> ``touches["settings"]``) are not access escalations."""
     if not before:
         return {}
     out: dict = {}
@@ -1314,7 +1315,7 @@ def added(before: dict | None, after: dict) -> dict:
     if after.get("page_code") and not before.get("page_code"):
         out["page_code"] = True
     for key, value in at.items():
-        if key in ("network", "record", "memory", "server"):
+        if key in ("network", "record", "memory", "server", "settings"):
             continue
         previous = bt.get(key)
         if isinstance(value, list) and isinstance(previous, list):

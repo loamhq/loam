@@ -20,6 +20,7 @@ import loam_plugin_servers
 import loam_plugins as plugins
 
 DAY = 86400
+REVIEW_FORMAT = 4
 _lock = threading.Lock()
 
 
@@ -195,12 +196,17 @@ def check(nightly=False):
         for folder in plugins._folders(plugins.yours_root()) + plugins._folders(plugins.yours_root() / "_copies"):
             if plugins.ID.fullmatch(folder.name) and folder.name not in lines:
                 lines[folder.name] = {"source": {"kind": "built"}}
+        old_held = {
+            (pid, rec["commit"])
+            for pid, rec in (cache.get("plugins") or {}).items()
+            if isinstance(rec, dict) and rec.get("held") and rec.get("commit")
+        }
         new_install = lines.keys() - cache.get("plugins", {}).keys()
-        if cache.get("review_format") != 3 or new_install or time.time() - cache.get("checked", 0) >= DAY:
+        if cache.get("review_format") != REVIEW_FORMAT or new_install or time.time() - cache.get("checked", 0) >= DAY:
             catalogue = market.read(refresh=True) if lines else {"plugins": [], "state": "empty"}
             entries = {entry["id"]: entry for entry in catalogue["plugins"]}
             cache = {"checked": time.time(), "market_state": catalogue["state"],
-                     "entries": {}, "plugins": {}, "errors": {}, "review_format": 3}
+                     "entries": {}, "plugins": {}, "errors": {}, "review_format": REVIEW_FORMAT}
             for pid, line in lines.items():
                 upstream_id = line.get("id", pid)
                 entry = entries.get(upstream_id)
@@ -289,14 +295,17 @@ def check(nightly=False):
                 except plugins.PluginError as exc:
                     errors[pid] = str(exc)
                 continue
-            if record.get("held") and not record.get("notified"):
-                told = loam_attention.tell(
-                    f"{pid} {record['version']} needs your yes. Review the update in Settings › Plugins.",
-                    by="plugin-updates", key=f"{pid}-{record['commit']}", evidence=record["link"],
-                    detail=json.dumps(record["added"]) if record["added"] else None)
-                if told in ("told", "repeat"):
-                    record["notified"] = True
-                    cache_changed = True
+            if record.get("held"):
+                if not record.get("notified"):
+                    told = loam_attention.tell(
+                        f"{pid} {record['version']} needs your yes. Review the update in Settings › Plugins.",
+                        by="plugin-updates", key=f"{pid}-{record['commit']}", evidence=record["link"],
+                        detail=json.dumps(record["added"]) if record["added"] else None)
+                    if told in ("told", "repeat"):
+                        record["notified"] = True
+                        cache_changed = True
+            elif record.get("commit"):
+                loam_attention.withdraw({f"plugin-updates:{pid}-{record['commit']}"})
             if not record.get("link"):
                 continue
             if nightly and not record["held"] and pref["auto_update"]:
@@ -307,6 +316,17 @@ def check(nightly=False):
                     updates.pop(pid)
                 except (plugins.PluginError, OSError) as exc:
                     errors[pid] = str(exc)
+        stale_held = {
+            f"plugin-updates:{pid}-{commit}"
+            for pid, commit in old_held
+            if pid not in errors and not (
+                isinstance(cache["plugins"].get(pid), dict)
+                and cache["plugins"][pid].get("held")
+                and cache["plugins"][pid].get("commit") == commit
+            )
+        }
+        if stale_held:
+            loam_attention.withdraw(stale_held)
         if cache_changed:
             tmp = path.with_suffix(".tmp")
             tmp.write_text(json.dumps(cache))
