@@ -296,6 +296,8 @@ def input_text(records: list[dict]) -> str:
         f"about this install, for you as the agent that hears when something "
         f"in Loam needs attention (Settings › Agents). "
         f"Nobody is in a conversation, and nothing has been posted anywhere. "
+        f"You decide what to do with each fact. You can act on it, tell the owner, "
+        f"or record it in a thread, your memory or another place you choose. "
         f"Each is told once; a repeat is not told again until it has been "
         f"quiet for {QUIET_DAYS} days.]", ""]
     for record in records:

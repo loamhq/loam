@@ -6,7 +6,7 @@ log.
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 import loam_config as lc
@@ -69,17 +69,6 @@ def snippet(reason: str) -> str:
     if len(head) > SNIPPET_CHARS:
         head = head[: SNIPPET_CHARS - 1].rstrip() + "…"
     return head
-
-
-def append_comms(
-    vault: Path, agent: str, text: str, link: str,
-    section: str = "Urgent", when: date | None = None,
-) -> bool:
-    """Support callers of the legacy entry point by handing the line to the system persona
-    as a deduplicated fact. Return whether it was told.
-    """
-    import loam_attention  # noqa: PLC0415
-    return loam_attention.tell(text, by=agent, evidence=link or None) == "told"
 
 
 def _append_log(vault: Path, agent: str, reason: str, stamp: str) -> None:

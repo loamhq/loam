@@ -661,8 +661,8 @@ draws no pasted-key form for a plugin that declares `keys:`.
 A plugin reports a failed backup, a spending threshold, an expiring
 credential or a completed resize to the agent the owner chose in
 Settings › Agents (`system.persona`, initially the first agent). That agent hears it as the
-input of a run of its own and decides what to do, including whether the
-owner hears of it, in General, in its own words.
+input of a run of its own. The agent chooses whether to act, tell the owner,
+or record the fact in a thread, its memory or elsewhere.
 
 From a shell, a timer's command or any language:
 
@@ -686,9 +686,7 @@ when the same fact was already told: the same `key` (default: the fact's
 first sentence with its numbers taken out, so "RAM at 91%" and "RAM at
 93%" are one fact) is told once, and again only after it has been quiet for
 three days. Give a `key` when the words of one fact change in other ways
-(`--key "spend:2026-11:80"`). `lib/loam_attention.py` is the reference;
-`loam_inbox.append_comms`, which plugins called before, still works and
-now does exactly this.
+(`--key "spend:2026-11:80"`). `lib/loam_attention.py` is the reference.
 
 ## The installed list: `installed.json`
 

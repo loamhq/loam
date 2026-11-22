@@ -194,12 +194,6 @@ try:
     loam_inbox.record_fault("lane-check", root, "ada: a different thing broke.")
     check("fault: a different fact is told", len(facts()) == 2)
 
-    # An older plugin's call writes nothing on the board.
-    loam_inbox.append_comms(root, "someplugin", "a plugin's line", "[[x]]")
-    check("append_comms: kept for old plugins, it tells and posts nothing",
-          not (root / loam_inbox.COMMS).exists()
-          and any(f["fact"] == "a plugin's line" and f["by"] == "someplugin"
-                  for f in facts()), str(facts()))
 finally:
     shutil.rmtree(root, ignore_errors=True)
 

@@ -152,7 +152,9 @@ try:
                                   "the backup failed: no key", "Evidence: Settings › Plugins",
                                   "job x hung twice", "4 facts")), text)
     check("...and says nothing was posted, without telling it what to do",
-          "nothing has been posted anywhere" in text and "brief" not in text.lower(), text)
+          all(words in text for words in ("nothing has been posted anywhere",
+                                          "You decide what to do with each fact",
+                                          "another place you choose")), text)
     row = [json.loads(x) for x in (TMP / "logs" / "wake-ada.jsonl").read_text().splitlines()][-1]
     check("...its own row in the wake log, lane attention",
           (row["lane"], row["ok"], len(row["facts"])) == ("attention", True, 4), row)

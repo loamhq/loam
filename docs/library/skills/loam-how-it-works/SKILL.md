@@ -173,9 +173,8 @@ scheduled run failed is told at the top of its next turn. A problem that is
 no one agent's (drift, memory pressure, a check or a plugin's event, an
 update) goes to the one agent the owner chose in
 Settings › Agents (the first agent, unless they change it), as the input of
-a run of its own, told once. That agent decides what to do: it can brief
-the engineer, and it tells the owner in General, in its own words, only if
-they need to know. On installs with the first-weeks starter, release news
+a run of its own, told once. That agent decides whether to act, tell the owner, or record
+what happened in a thread, its memory or elsewhere. On installs with the first-weeks starter, release news
 worth sharing goes to the original Hello thread. If the owner deletes Hello,
 the chosen agent shares news in General. The failure log and Activity keep the quiet record.
 
