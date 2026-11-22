@@ -1720,7 +1720,7 @@ test('removing the last key sends the next mic press to browser recognition and 
   dictation.config.geminiApiKey = ''
   try {
     await openDictation()
-    await until(() => text(find(root, 'speech-provider')).includes('Using this browser'))
+    await until(() => text(find(root, 'speech-provider')).includes('Using browser speech recognition'))
     assert.deepEqual(cards().map(c => text(find(c, 'kicker'))), ['Mode'])
     assert.equal(held().mode, 'record')
     await closeSettings()

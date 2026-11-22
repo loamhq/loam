@@ -462,7 +462,9 @@ async function transcribeTake() {
   if (failed !== null) {
     if (needsKey) {
       // No key is not a take that failed: say what is missing and where it goes.
-      say(NEEDS_KEY, host.guide ? { act: 'guide', label: 'Add free key' } : null)
+      say(NEEDS_KEY, host.guide
+        ? { act: 'guide', label: 'Add free key' }
+        : { act: 'settings', label: 'Add a key' })
     } else {
       say(/OpenAI|Google|Gemini|provider changed/i.test(failed) ? failed : TAKE_FAILED, take.retried ? null : { act: 'retry', label: 'Retry', take, detail: failed })
     }
