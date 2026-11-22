@@ -54,8 +54,6 @@ contributes:
       label: Google model
       advanced: true
       default: gemini-3-pro-image-preview
-  vault.folder:
-    - setting: folder
 ---
 
 Ask any agent for a picture (a cover for an essay, an illustration for a

@@ -7,12 +7,15 @@ import { all, find, text } from './browser.js'
 import { rootsAnswer } from './fixtures/files-contract.js'
 
 test('removing either kind of shortcut survives storage and a renewed host answer; adding it again restores one row', () => {
-  const offered = rootsAnswer().shortcuts
+  const offered = [
+    { label: 'System notes', resource: { root: 'vault', path: '00_System', name: '00_System', kind: 'folder' } },
+    { label: 'App', resource: { root: 'vault', path: 'Projects/App', name: 'App', kind: 'folder' } },
+  ]
   let held = filesSettings({ shortcuts: [{ root: 'vault', path: 'plan.md', kind: 'file' }] })
   for (const target of [{ root: 'vault', path: 'plan.md', kind: 'file' }, offered[0].resource]) {
     held = toggleFileShortcut(held, offered, target.root, target.path, target.kind)
     held = filesSettings(JSON.parse(JSON.stringify(held)))
-    assert.equal(fileShortcuts(held, rootsAnswer().shortcuts).some(s => s.path === target.path), false)
+    assert.equal(fileShortcuts(held, offered).some(s => s.path === target.path), false)
     held = toggleFileShortcut(held, offered, target.root, target.path, target.kind)
     assert.equal(fileShortcuts(held, offered).filter(s => s.path === target.path).length, 1)
     assert.equal(held.hiddenShortcuts.length, 0)

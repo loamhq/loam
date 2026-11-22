@@ -13,7 +13,7 @@ folder itself. The **marketplace** is a list of such links that every Loam
 shows in Settings › Market; being on it is asking, not publishing.
 
 **Built in, or in the Market.** Loam has two kinds of plugin, as Obsidian
-does. *Built-in* ones ship inside Loam (Images, Daily notes, Comments, the
+does. *Built-in* ones ship inside Loam (Images, Quick actions, Comments, the
 reviewer, Latte and Plain): they come with every release, most start off,
 and the owner turns them on in Settings › Plugins. *Market* ones each live
 in their maker's own repository and are listed in their maker's name.

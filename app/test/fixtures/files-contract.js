@@ -14,7 +14,7 @@ const enc = (path) => path.split('/').filter(Boolean).map(encodeURIComponent).jo
 const TYPES = { md: 'text/markdown', txt: 'text/plain', html: 'text/html', png: 'image/png', pdf: 'application/pdf', svg: 'image/svg+xml', json: 'application/json', css: 'text/css' }
 
 export function row(root, path, { kind, size = 100, authority = 'user', capabilities, source, modified = '2026-10-01T10:00:00Z' } = {}) {
-  const name = path === '' ? { vault: 'Vault', spaces: 'AI Spaces', system: 'System' }[root] : path.split('/').at(-1)
+  const name = path === '' ? { vault: 'Your files', spaces: 'Agent files', system: 'System' }[root] : path.split('/').at(-1)
   const k = kind ?? (/\.[a-z0-9]+$/i.test(name) ? 'file' : 'folder')
   const ext = (/\.([a-z0-9]+)$/i.exec(name)?.[1] ?? '').toLowerCase()
   const r = {
@@ -36,13 +36,13 @@ export function row(root, path, { kind, size = 100, authority = 'user', capabili
 export function rootsAnswer() {
   return {
     roots: [
-      { root: 'vault', name: 'Vault', description: 'Your notes, shared with your agents.', link: '/files/vault', capabilities: { read: true, download: false, write: false, create: true } },
-      { root: 'spaces', name: 'AI Spaces', description: 'One home per agent.', link: '/files/spaces', capabilities: { read: true, download: false, write: false, create: false } },
+      { root: 'vault', name: 'Your files', description: 'Written by you or your agents, for you.', link: '/files/vault', capabilities: { read: true, download: false, write: false, create: true } },
+      { root: 'spaces', name: 'Agent files', description: 'What your agents keep for themselves.', link: '/files/spaces', capabilities: { read: true, download: false, write: false, create: false } },
       { root: 'system', name: 'System', description: 'The host’s own records.', link: '/files/system', capabilities: { read: true, download: false, write: false, create: false } },
     ],
-    shortcuts: [
-      { label: 'System notes', resource: row('vault', '00_System') },
-      { label: 'App', resource: row('vault', 'Projects/App') },
+    shortcuts: [],
+    loam_files: [
+      { key: 'system', path: '00_System', name: '00_System', description: 'How your agents work: skills, conventions, tools.', resource: row('vault', '00_System') },
     ],
   }
 }

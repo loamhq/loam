@@ -372,27 +372,18 @@ async function shortcutsWith(listings) {
   return { labels: files.st.roots.shortcuts.map((s) => s.label), listed }
 }
 
-test('9. Files: a fresh install’s developer folders are not offered to a new person; an install that uses them keeps every one', async () => {
-  // A fresh vault (bin/library seed-vault, and the schedule page the timers write).
-  const fresh = await shortcutsWith({
-    System: [entry('System/Loam'), entry('System/skills')],
-    'Projects/Loam': [entry('Projects/Loam/infrastructure')],
-    'Projects/Loam/infrastructure': [entry('Projects/Loam/infrastructure/schedule.md', 'file')],
-  })
-  assert.deepEqual(fresh.labels, ['Conventions'], 'only what the host offers beyond the install’s own folders')
-  assert.deepEqual(fresh.listed.sort(), ['Projects/Loam', 'Projects/Loam/infrastructure', 'System'], 'only the three are looked into')
-
-  // A box that works in them, as the first install does.
-  const used = await shortcutsWith({
-    System: [entry('System/Loam'), entry('System/skills'), entry('System/conventions'), entry('System/Dictation terms.md', 'file')],
-    'Projects/Loam': [entry('Projects/Loam/architecture'), entry('Projects/Loam/infrastructure')],
-    'Projects/Loam/infrastructure': [entry('Projects/Loam/infrastructure/schedule.md', 'file'), entry('Projects/Loam/infrastructure/agent-runtime.md', 'file')],
-  })
-  assert.deepEqual(used.labels, ['Vault system', 'Loam project', 'Loam infrastructure', 'Conventions'], 'in the host’s order, as before')
-
-  // A folder that cannot be read is not offered.
-  const unread = await shortcutsWith({ System: [entry('System/Notes')] })
-  assert.deepEqual(unread.labels, ['Vault system', 'Conventions'])
+test('9. Files: no developer folders are seeded as pins; host roots answer carries empty shortcuts and Loam files', async () => {
+  const files = createFiles({ schedule() {}, api: async (method, path) => {
+    if (path === '/files/roots') return {
+      roots: [{ root: 'vault', name: 'Your files', capabilities: { read: true } }],
+      shortcuts: [],
+      loam_files: [{ key: 'system', path: 'System', name: 'System', description: 'How your agents work.', resource: { root: 'vault', path: 'System', name: 'System', kind: 'folder' } }],
+    }
+    return {}
+  } })
+  await files.loadRoots()
+  assert.deepEqual(files.st.roots.shortcuts, [], 'nothing is seeded pinned on a new install')
+  assert.deepEqual(files.st.roots.loamFiles.map((x) => x.path), ['System'])
 })
 
 // ---------------------------------------------------------------- 10

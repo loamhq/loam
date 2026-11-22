@@ -2674,6 +2674,9 @@ def run_inner(project: eng.Project, job_id: str) -> int:
     timed_out = False
     codex_run = None
     agy_run = None
+    import loam_recent  # noqa: PLC0415
+    vault_snap = loam_recent.snapshot_vault(vault) if not probe else {}
+    snap_started = time.time()
     try:
         if p["cancelled"].is_file():
             # Honor a cancellation that arrived while acquiring admission.
@@ -2714,6 +2717,13 @@ def run_inner(project: eng.Project, job_id: str) -> int:
                 returncode, envelope, timed_out = run_session(
                     argv, str(workdir), ceiling_seconds(meta), p)
     finally:
+        if not probe:
+            try:
+                loam_recent.record_diff(
+                    vault_snap, kind="engineer", actor="engineer",
+                    source="engineer-job", vault=vault, started_at=snap_started)
+            except Exception:  # noqa: BLE001
+                pass
         stop.set()
         eng.remove_scratch(job_id)
         os.environ.pop("TMPDIR", None)
@@ -2991,6 +3001,11 @@ def run_inner(project: eng.Project, job_id: str) -> int:
                   / f"{day}-{job_id}-{facts['slug']}.md")
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(receipt, encoding="utf-8")
+        try:
+            loam_recent.record_write(target, kind="engineer", actor="engineer",
+                                     source="launcher", vault=vault)
+        except Exception:  # noqa: BLE001
+            pass
 
     ok = outcome == "completed" and p["receipt"].is_file() and cancelled is None
     write_result(p, {

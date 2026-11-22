@@ -953,12 +953,11 @@ def test_system_pointers(c: Client) -> None:
     status, body, text = c.get("roots")
     check("roots: still the three, in order",
           [r["root"] for r in body["roots"]], ["vault", "spaces", "system"])
-    rows = {s["label"]: s["resource"] for s in body["shortcuts"]}
-    check("shortcuts: only the vault folders that exist",
-          sorted(rows), ["Conventions", "Loam project", "Vault system"])
-    check("shortcuts are vault rows, with the vault's capabilities",
-          {(r["root"], r["kind"], r["capabilities"]["create"]) for r in rows.values()},
-          {("vault", "folder", True)})
+    check("shortcuts: no host-offered pins are seeded",
+          body["shortcuts"], [])
+    loam_keys = {item["key"] for item in body.get("loam_files") or []}
+    check("loam_files: reports existing configured machinery folders",
+          {"conversations", "system"}.issubset(loam_keys), True)
     _, row, _ = c.get("stat", root="system", path="Engineer/Role.md")
     check("a System copy names its vault source",
           row.get("source"), {"root": "vault",

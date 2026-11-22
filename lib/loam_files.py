@@ -105,22 +105,20 @@ SYSTEM_VAULT_SOURCES = {
         f"{lc.vault_folder('projects')}/Loam/engineer/projects/loam.md",
 }
 
-# Offer shortcuts only for folders present on this install.
-_SYS, _PROJ = lc.vault_folder("system"), lc.vault_folder("projects")
-VAULT_SHORTCUTS = (
-    ("Vault system", _SYS),
-    ("Conventions", f"{_SYS}/conventions"),
-    ("Loam project", f"{_PROJ}/Loam"),
-    ("Loam architecture", f"{_PROJ}/Loam/architecture"),
-    ("Loam infrastructure", f"{_PROJ}/Loam/infrastructure"),
-    ("Loam decisions", f"{_PROJ}/Loam/decisions"),
+# Vault machinery folders hidden from the main Your files listing and gathered
+# behind one quiet Loam files row. Names come from [vault] in loam.toml.
+LOAM_FOLDER_DESCRIPTIONS = (
+    ("conversations", "The record of every chat, written as you talk."),
+    ("attachments", "Images and files added to chats."),
+    ("boards", "Each chat’s board."),
+    ("system", "How your agents work: skills, conventions, tools."),
 )
 
 ROOTS = {
-    "vault": {"name": "Vault",
-              "description": "The vault, whole. Transcripts are read-only."},
-    "spaces": {"name": "AI Spaces",
-               "description": "Each persona's workspace, and the commons."},
+    "vault": {"name": "Your files",
+              "description": "Written by you or your agents, for you."},
+    "spaces": {"name": "Agent files",
+               "description": "What your agents keep for themselves."},
     "system": {"name": "System",
                "description": "The runtime's own documents. Read-only."},
 }
@@ -507,21 +505,31 @@ def roots() -> dict:
         kind_caps = capabilities(key, [], "folder")
         out.append({"root": key, **meta, "link": link(key, []),
                     "capabilities": kind_caps})
-    return {"roots": out, "shortcuts": shortcuts(),
+    return {"roots": out, "shortcuts": shortcuts(), "loam_files": loam_files(),
             "workspace_names": {agent: _workspace_name(agent) for agent in sorted(_agents())
                                 if not (cfg.AI_LABS / agent).is_symlink()}}
 
 
 def shortcuts() -> list[dict]:
-    """The vault folders that document the system, offered beside System as
-    plain vault rows -- their capabilities are the vault's, so a shortcut is
-    a way in, never a second copy or a second authority. Only those that
-    exist and are visible today."""
-    out = []
-    for label, path in VAULT_SHORTCUTS:
-        row = _exists("vault", path.split("/"))
+    """Host-offered shortcuts are retired: Pinned starts empty and holds only
+    items the owner pinned themselves."""
+    return []
+
+
+def loam_files() -> list[dict]:
+    """The configured vault machinery folders (conversations, attachments,
+    boards, system) that sit behind the quiet Loam files entry."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for key, description in LOAM_FOLDER_DESCRIPTIONS:
+        rel = (lc.vault_folder(key) or "").strip("/")
+        if not rel or rel in seen:
+            continue
+        row = _exists("vault", rel.split("/"))
         if row and row["kind"] == "folder":
-            out.append({"label": label, "resource": row})
+            seen.add(rel)
+            out.append({"key": key, "path": rel, "name": row["name"],
+                        "description": description, "resource": row})
     return out
 
 
@@ -1148,6 +1156,15 @@ def save_text(payload: dict) -> dict:
         os.close(dfd)
     out.update({"revision": revision(data), "text": text,
                 "provenance": text != payload["text"]})
+    if root == "vault":
+        import loam_recent  # noqa: PLC0415
+        by = payload.get("by")
+        if by is not None and not lc.is_owner(by):
+            loam_recent.record_write("/".join(parts), kind="agent", actor=str(by),
+                                     source="app", vault=root_path("vault"))
+        else:
+            loam_recent.record_write("/".join(parts), kind="owner", actor=lc.OWNER_ID,
+                                     source="app", vault=root_path("vault"))
     record = schedule_record(root, parts)
     if record:
         import loam_activity  # noqa: PLC0415
@@ -1203,6 +1220,10 @@ def create_file(payload: dict) -> dict:
         os.close(dfd)
     out.update({"revision": revision(data), "text": text,
                 "provenance": text != payload["text"]})
+    if root == "vault":
+        import loam_recent  # noqa: PLC0415
+        loam_recent.record_write("/".join(parts), kind="owner", actor=lc.OWNER_ID,
+                                 source="app", vault=root_path("vault"))
     return out
 
 
@@ -1351,6 +1372,10 @@ def rename(payload: dict) -> dict:
         os.close(dfd)
     out["from"] = {"root": root, "path": "/".join(parts),
                    "link": link(root, parts)}
+    if root == "vault":
+        import loam_recent  # noqa: PLC0415
+        loam_recent.record_rename("/".join(parts), "/".join(dest),
+                                  vault=root_path("vault"))
     return out
 
 
@@ -1641,6 +1666,11 @@ def upload(root: str, raw_folder: str | None, part: dict) -> dict:
         os.close(dfd)
     out.update({"revision": revision(data), "requested_name": name,
                 "renamed": final != name, "provenance": data != sent})
+    if root == "vault":
+        import loam_recent  # noqa: PLC0415
+        loam_recent.record_write("/".join(parent + [final]), kind="owner",
+                                 actor=lc.OWNER_ID, source="app",
+                                 vault=root_path("vault"))
     return out
 
 

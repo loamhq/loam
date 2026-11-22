@@ -14,18 +14,10 @@ import loam_config as lc
 # vault: bin/wake and bin/lane-check both read it out of agent.json, so a
 # test tree and the live tree take the same path through here.
 #
-# Keep the existing ledger beside incoming agent notes on older installs.
-_inbox = Path(lc.vault_folder("inbox"))
-# A customized install may already have a ledger beside its former inbox
-# document. Consult the old configuration solely to retain that ledger.
-_previous_note = lc.get("vault.general_board")
-_previous_folder = Path(_previous_note).parent if _previous_note else _inbox / "from-agents"
-if str(_previous_folder) == lc.get("vault.boards"):
-    _previous_folder = _inbox
-_old_log = _previous_folder / "loam-wake-failures.md"
-FAILURE_LOG = str(lc.get("vault.failure_log") or
-                  (_old_log if (lc.VAULT / _old_log).is_file()
-                   else _inbox / "loam-wake-failures.md"))
+# Stored in Loam files (<system>/loam-wake-failures.md) by default, so alert
+# notes stay out of the person's inbox. Explicit vault.failure_log overrides.
+_system = Path(lc.vault_folder("system"))
+FAILURE_LOG = str(lc.get("vault.failure_log") or (_system / "loam-wake-failures.md"))
 
 # The failure log's wiki-link. Obsidian resolves by basename, so
 # this keeps working if the file moves again.

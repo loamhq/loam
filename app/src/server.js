@@ -638,7 +638,7 @@ export function createApp({
       return sendJson(res, 404, { error: 'That location is no longer shown.' })
     }
     // Files capabilities and source mappings are the host's.
-    const filesGet = /^\/files\/(roots|list|stat|read|resolve)$/.exec(rest)
+    const filesGet = /^\/files\/(roots|list|stat|read|resolve|recent)$/.exec(rest)
     if (filesGet && method === 'GET') {
       const query = filesQuery(url, FILES_PARAMS[filesGet[1]])
       if (query.error) return sendJson(res, 400, { error: query.error })
@@ -1070,6 +1070,7 @@ const FILES_PARAMS = {
   read: ['root', 'path'],
   download: ['root', 'path'],
   resolve: ['ref', 'from_root', 'from_path'],
+  recent: ['who', 'window'],
 }
 
 // A file's text is read up to 2 MiB; written back as JSON, every byte of it

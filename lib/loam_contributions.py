@@ -356,7 +356,17 @@ def contributes_of(value, folder: Path | None, warnings: list[str]) -> dict:
                 if setting is not None and not (isinstance(setting, str) and KEY.match(setting)):
                     raise ContributionError(f"{where}: `setting` is one of its own "
                                             f"settings.entry keys")
-                items.append({"path": path, "setting": setting})
+                item = {"path": path, "setting": setting}
+                when = e.get("when")
+                if when is not None:
+                    if (not isinstance(when, dict)
+                            or not (isinstance(when.get("setting"), str) and KEY.match(when["setting"]))
+                            or not (isinstance(when.get("in"), list) and when["in"]
+                                    and all(isinstance(v, str) for v in when["in"]))):
+                        raise ContributionError(
+                            f"{where}: `when` is `{{setting: <key>, in: [<values>]}}`")
+                    item["when"] = {"setting": when["setting"], "in": list(when["in"])}
+                items.append(item)
             elif place == "web.door":
                 why = e.get("why")
                 if not isinstance(why, str) or not why.strip():
@@ -626,7 +636,7 @@ def set_setting(pid: str, key: str, value) -> dict:
     if plugin and any(s.get("setting") == key
                       for s in plugin["contributes"].get("schedule.kind") or []):
         out["units"] = apply_units()
-    if plugin and any(f.get("setting") == key
+    if plugin and any(f.get("setting") == key or (f.get("when") or {}).get("setting") == key
                       for f in plugin["contributes"].get("vault.folder") or []):
         if real_layer():
             out["folders_made"] = ensure_vault_folders([plugin])
@@ -802,12 +812,19 @@ def vault_folders(plugins: list[dict] | None = None) -> list[str]:
     """The vault folders the plugins in force use, as paths in the vault."""
     out = []
     for p in active() if plugins is None else plugins:
+        entries = {e["key"]: e for e in p["contributes"].get("settings.entry") or []}
+        vals = setting_values(p["id"])
         for f in p["contributes"].get("vault.folder") or []:
+            when = f.get("when")
+            if when:
+                wkey = when["setting"]
+                current = vals.get(wkey, entries.get(wkey, {}).get("default"))
+                if current not in when["in"]:
+                    continue
             path = f.get("path")
             if f.get("setting"):
-                entry = next((e for e in p["contributes"].get("settings.entry") or []
-                              if e["key"] == f["setting"]), {})
-                path = setting_values(p["id"]).get(f["setting"], entry.get("default"))
+                entry = entries.get(f["setting"], {})
+                path = vals.get(f["setting"], entry.get("default"))
             if _vault_rel(path):
                 out.append(path.strip().strip("/"))
     return out

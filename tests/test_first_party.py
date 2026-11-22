@@ -71,12 +71,12 @@ def active(pid):
 check("the reviewer is first-party, shipped and on by default",
       row("reviewer")["layer"] == "shipped" and row("reviewer")["on"] is True
       and not row("reviewer")["broken"] and row("reviewer")["warnings"] == [], row("reviewer"))
-check("daily notes ships off", row("daily-notes")["on"] is False
-      and not row("daily-notes")["broken"], row("daily-notes"))
+check("quick actions ships off", row("quick-actions")["on"] is False
+      and not row("quick-actions")["broken"], row("quick-actions"))
 lp.set_on("reviewer", False)
-lp.set_on("daily-notes", True)
+lp.set_on("quick-actions", True)
 check("a saved choice wins over default_on, both ways",
-      row("reviewer")["on"] is False and row("daily-notes")["on"] is True)
+      row("reviewer")["on"] is False and row("quick-actions")["on"] is True)
 listed = json.loads((YOURS / "installed.json").read_text())
 listed["on"].pop("reviewer")
 (YOURS / "installed.json").write_text(json.dumps(listed))
@@ -134,19 +134,23 @@ check("its run starts the reviewer's lane unit and does not wait for it",
       ran.returncode == 0 and (TMP / "systemctl.args").read_text().split()
       == ["--user", "start", "--no-block", "loam-reviewer.service"], ran.stderr)
 
-# -- daily notes ---------------------------------------------------------------
+# -- quick actions -------------------------------------------------------------
 vault = TMP / "vault"
 made = c.ensure_vault_folders()
-check("on: its folder is made (Daily, unless set)", made == ["Daily"]
-      and (vault / "Daily").is_dir(), made)
-c.set_setting("daily-notes", "folder", "10_DAILY")
-check("a new folder setting: the new folder, the old one kept",
+check("on: both default folders are made when actions=both", sorted(made) == ["Daily", "Inbox"]
+      and (vault / "Daily").is_dir() and (vault / "Inbox").is_dir(), made)
+c.set_setting("quick-actions", "daily_folder", "10_DAILY")
+check("a new daily folder setting: the new folder, the old one kept",
       c.ensure_vault_folders() == ["10_DAILY"] and (vault / "Daily").is_dir()
       and (vault / "10_DAILY").is_dir())
+c.set_setting("quick-actions", "actions", "daily-note")
+check("actions=daily-note wants only the daily folder, not inbox",
+      c.vault_folders() == ["10_DAILY"], c.vault_folders())
+c.set_setting("quick-actions", "actions", "both")
 check("a folder outside the vault is never made",
       c._vault_rel("../etc") is False and c._vault_rel("/etc") is False)
 (vault / "10_DAILY" / "2026-11-14.md").write_text("a note\n")
-lp.set_on("daily-notes", False)
+lp.set_on("quick-actions", False)
 check("off: no folder is wanted, and nothing is removed",
       c.vault_folders() == [] and (vault / "10_DAILY" / "2026-11-14.md").is_file())
 
@@ -233,8 +237,9 @@ decl = lp.declaration(row("keyed"), {})
 touches = decl.get("touches", {})
 check("the declaration names the plugin's secrets",
       touches.get("secrets") == ["GEMINI_API_KEY", "KEYED_API_KEY", "LOOSE_KEY"], touches)
-check("daily notes' declaration names its folder",
-      lp.declaration(row("daily-notes"), {})["touches"].get("vault") == ["(its folder setting)"])
+check("quick actions' declaration names its folder settings",
+      lp.declaration(row("quick-actions"), {})["touches"].get("vault")
+      == ["(its daily_folder setting)", "(its inbox_folder setting)"])
 
 # -- the routes ----------------------------------------------------------------
 import loam_broker as cfg  # noqa: E402
@@ -307,14 +312,15 @@ async def routes():
         st, body = await http(port, "DELETE", "/v1/plugins/keyed/secrets/GEMINI_API_KEY", {})
         check("DELETE forgets the plugin's own key",
               st == 200 and c.secret_source("keyed", "GEMINI_API_KEY") in (None, "box"), body)
-        st, body = await http(port, "PATCH", "/v1/plugins/daily-notes/settings",
-                              {"values": {"folder": "Journal"}})
-        check("daily notes: off, its settings are refused (on first)", st == 400, body)
-        lp.set_on("daily-notes", True)
-        st, body = await http(port, "PATCH", "/v1/plugins/daily-notes/settings",
-                              {"values": {"folder": "Journal"}})
-        check("daily notes: on, the folder setting reads back",
-              st == 200 and body["values"]["folder"] == "Journal", body)
+        st, body = await http(port, "PATCH", "/v1/plugins/quick-actions/settings",
+                              {"values": {"daily_folder": "Journal"}})
+        check("quick actions: off, its settings are refused (on first)", st == 400, body)
+        lp.set_on("quick-actions", True)
+        st, body = await http(port, "PATCH", "/v1/plugins/quick-actions/settings",
+                              {"values": {"actions": "daily-note", "daily_folder": "Journal"}})
+        check("quick actions: on, its settings read back",
+              st == 200 and body["values"]["daily_folder"] == "Journal"
+              and body["values"]["actions"] == "daily-note", body)
     finally:
         tcp.close()
         await tcp.wait_closed()

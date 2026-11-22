@@ -211,6 +211,7 @@ LEAD_AGENT = ENGINEER_BRIEFERS[0] if ENGINEER_BRIEFERS else "iris"
 
 _VAULT_DEFAULTS = {
     "inbox": "Inbox",
+    "boards": "Boards",
     "conversations": "Conversations",
     "projects": "Projects",
     "attachments": "Attachments",

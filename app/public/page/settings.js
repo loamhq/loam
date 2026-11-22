@@ -311,7 +311,7 @@ function settingsRoot() {
     appearance: `${({ system: 'System', sun: 'Sun', dark: 'Dark', light: 'Light' })[host.theme.value.mode]} · ${host.theme.value.size}%`,
     chats: 'Message shortcuts', agents: `${host.state.agents.list.length} agents`,
     connections: [providerCount(), ...services, apiKeys.st.list ? apiKeys.summary() : null].filter(Boolean).join(' · ') || 'AI providers, services and API keys',
-    files: 'Shortcuts and folders', plugins: 'Themes and extensions',
+    files: 'Pinned, quick actions and exports', plugins: 'Themes and extensions',
     about: updates.st.data?.check?.available ? `Loam ${updates.st.data.check.latest?.version} is ready` : version ? `Version ${version}` : 'Version and updates' }
   const jobs = host.activity.st.now
   const working = host.running.rows().filter(row => row.state === 'working').length
@@ -327,46 +327,31 @@ function settingsRoot() {
 
 // ---------------------------------------------------------- settings, files
 
-// The two vault folders the Files home writes into. A field saves when it is
-// left or on Enter; an empty or unusable path puts the default back, which is
-// what the vault's own layout names.
-const filesFolderFields = {}
-
-for (const [which, label] of [['inbox', 'Inbox folder']]) {
-  const commit = () => {
-    const field = filesFolderFields[which]
-    host.store.files = { ...host.store.files, [which]: field.value }
-    field.value = host.store.files[which]
-    host.schedule()
-  }
-  filesFolderFields[which] = h('input', {
-    class: 'field-input fs-setfolder',
-    type: 'text',
-    autocomplete: 'off',
-    spellcheck: 'false',
-    'aria-label': label,
-    onchange: commit,
-    onkeydown: (e) => {
-      if (e.key === 'Enter') commit()
-    },
-  })
+const QUICK_ACTION_LABELS = {
+  both: 'New note and Today’s note',
+  'new-note': 'New note only',
+  'daily-note': 'Today’s note only',
 }
 
 function settingsFiles({ back = true } = {}) {
   const held = host.store.files
   const shortcuts = fileShortcuts(held, host.files.st.roots.shortcuts)
   const archive = host.files?.st?.archive ?? null
-  for (const [which, field] of Object.entries(filesFolderFields)) {
-    if (globalThis.document?.activeElement !== field) field.value = held[which]
-  }
-  const folderCard = (which, label, why) =>
-    h('div', { class: 'card fs-setcard', key: `files:${which}` }, h('div', { class: 'kicker', text: label }), kept(filesFolderFields[which]), h('div', { class: 'setrow-sub', text: why }))
+  const qa = host.quickActions?.st
+  const qaSub = qa?.on ? (QUICK_ACTION_LABELS[qa.actions] ?? 'On') : 'Off'
   return [
     back ? settingsBack('Settings', 'root') : null,
-    settingsHead('Files', 'Folders and shortcuts for this device.'),
-    folderCard('inbox', 'Inbox folder', 'New inbox notes are saved here.'),
-    h('section', { class: 'settings-section', 'aria-label': 'Shortcuts' },
-      h('h3', { class: 'kicker', text: 'Shortcuts' }),
+    settingsHead('Files', 'Quick actions, pinned items and downloads.'),
+    h('section', { class: 'settings-section', 'aria-label': 'Quick actions' },
+      h('h3', { class: 'kicker', text: 'Quick actions' }),
+      h('div', { class: 'rows' }, settingsRow({
+        lead: tile(icon.plus(16)),
+        title: 'Quick actions in Files',
+        sub: qaSub,
+        onclick: () => goSettings('plugins', 'quick-actions'),
+      }))),
+    h('section', { class: 'settings-section', 'aria-label': 'Pinned' },
+      h('h3', { class: 'kicker', text: 'Pinned' }),
       shortcuts.length ? h('div', { class: 'rows' }, ...shortcuts.map(shortcut => {
         const path = host.files.pathLabels(shortcut.root, shortcut.path)
         const root = ROOT_LOOK[shortcut.root]?.name ?? shortcut.root
@@ -374,11 +359,11 @@ function settingsFiles({ back = true } = {}) {
         return h('div', { class: 'setrow', key: `${shortcut.root}:${shortcut.path}` },
           h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: name }),
             h('div', { class: 'setrow-sub', text: [root, ...path].join(' / ') })),
-          h('button', { class: 'iconbtn content-mark', 'aria-label': `Remove shortcut to ${name}`, onclick: () => {
+          h('button', { class: 'iconbtn content-mark', 'aria-label': `Unpin ${name}`, onclick: () => {
             host.store.files = toggleFileShortcut(host.store.files, host.files.st.roots.shortcuts, shortcut.root, shortcut.path, shortcut.kind); host.schedule()
           } }, icon.close(12)))
       }))
-        : h('p', { class: 'note', text: 'Add shortcuts from a file or folder’s menu.' })),
+        : h('p', { class: 'note', text: 'Open any file or folder’s ⋯ menu and choose Pin to keep it on your Files home.' })),
     h('section', { class: 'settings-section', 'aria-label': 'Your data' },
       h('h3', { class: 'kicker', text: 'Your data' }),
       h('div', { class: 'rows' },
@@ -387,8 +372,8 @@ function settingsFiles({ back = true } = {}) {
             h('div', { class: 'setrow-title', text: 'Download as zip' }),
             h('div', { class: 'setrow-sub', text: 'Your files in open formats, ready to take with you.' })),
           h('div', { class: 'fs-export-actions' },
-            h('button', { class: 'pillbtn content-mark fs-export-btn', type: 'button', disabled: Boolean(archive?.busy), text: archive?.busy && archive.key === 'vault:' ? 'Preparing Vault…' : 'Download the Vault', onclick: () => host.files.downloadArchive('vault', '') }),
-            h('button', { class: 'pillbtn content-mark fs-export-btn', type: 'button', disabled: Boolean(archive?.busy), text: archive?.busy && archive.key === 'spaces:' ? 'Preparing AI Spaces…' : 'Download AI Spaces', onclick: () => host.files.downloadArchive('spaces', '') }))),
+            h('button', { class: 'pillbtn content-mark fs-export-btn', type: 'button', disabled: Boolean(archive?.busy), text: archive?.busy && archive.key === 'vault:' ? 'Preparing Your files…' : 'Download Your files', onclick: () => host.files.downloadArchive('vault', '') }),
+            h('button', { class: 'pillbtn content-mark fs-export-btn', type: 'button', disabled: Boolean(archive?.busy), text: archive?.busy && archive.key === 'spaces:' ? 'Preparing Agent files…' : 'Download Agent files', onclick: () => host.files.downloadArchive('spaces', '') }))),
         archive && ['vault:', 'spaces:'].includes(archive.key) && (archive.error || archive.status)
           ? h('div', { class: `setrow fs-export-feedback${archive.error ? ' warn' : ''}`, role: archive.error ? 'alert' : 'status' },
               h('span', { class: 'note', text: archive.error || archive.status }))
@@ -921,7 +906,6 @@ return Object.defineProperties({}, {
     settingsHead: { enumerable: true, get: () => settingsHead },
     tile: { enumerable: true, get: () => tile },
     settingsRoot: { enumerable: true, get: () => settingsRoot },
-    filesFolderFields: { enumerable: true, get: () => filesFolderFields },
     settingsFiles: { enumerable: true, get: () => settingsFiles },
     settingsAgents: { enumerable: true, get: () => settingsAgents },
     goSettingsDetail: { enumerable: true, get: () => goSettingsDetail },

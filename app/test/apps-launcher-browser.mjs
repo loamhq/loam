@@ -59,7 +59,7 @@ try {
     const json = (res, body) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)) }
     // Complete the ordinary boot contract so the console assertion covers the
     // whole page, rather than hiding unrelated missing-fixture 404s.
-    host.routes['GET /v1/plugins/daily-notes'] = (req, res) => json(res, { plugin: { id: 'daily-notes', on: false } })
+    host.routes['GET /v1/plugins/quick-actions'] = (req, res) => json(res, { plugin: { id: 'quick-actions', on: false } })
     host.routes['GET /v1/sessions/live'] = (req, res) => json(res, { sessions: [], box: { sessions: { live: 0 } } })
     host.routes['GET /v1/sessions/live/events'] = (req, res) => { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write(': open ping=15000\n\n') }
     host.routes['GET /v1/limits'] = (req, res) => json(res, { attachment_max_bytes: 10485760, attachment_types: [] })

@@ -70,9 +70,9 @@ try {
       assert.doesNotMatch(text(find(root, 'settings')), /Accounts/)
     }
     if (label === 'Files') {
-      assert.match(text(find(root, 'settings')), /Shortcuts[\s\S]*Notes/)
-      click(all(root, 'iconbtn').find(node => node.getAttribute('aria-label') === 'Remove shortcut to Notes'))
-      await until(() => text(find(root, 'settings')).includes('Add shortcuts from a file or folder’s menu.'))
+      assert.match(text(find(root, 'settings')), /Pinned[\s\S]*Notes/)
+      click(all(root, 'iconbtn').find(node => node.getAttribute('aria-label') === 'Unpin Notes'))
+      await until(() => text(find(root, 'settings')).includes('Open any file or folder’s ⋯ menu and choose Pin'))
       assert.deepEqual(JSON.parse(globalThis.localStorage.getItem('loam-ui.files')).shortcuts, [])
     }
     page.press('Escape'); await until(() => !find(root, 'settings'))
@@ -101,10 +101,10 @@ try {
 
   page.press('Escape'); await until(() => !find(root, 'activity-page'))
 
-  click(section('Files')); await until(() => all(root, 'fs-rootcard').length === 2)
-  assert.deepEqual(all(root, 'fs-rootname').map(text), ['Vault', 'AI Spaces'])
-  assert.equal(all(root, 'fs-shortcuts').length, 1)
-  click(all(root, 'fs-rootcard')[1]); await until(() => text(root).includes('Nothing here yet'))
+  click(section('Files')); await until(() => all(root, 'fs-place').length === 2)
+  assert.deepEqual(all(root, 'fs-rootname').map(text), ['Your files', 'Agent files'])
+  assert.equal(all(root, 'fs-pinned').length, 1)
+  click(all(root, 'fs-place')[1]); await until(() => find(root, 'fs-title') && text(find(root, 'fs-title')) === 'Agent files' && text(root).includes('Nothing here yet'))
   assert.equal(find(root, 'fs-host-records'), null)
 
   if (width < 1100) {

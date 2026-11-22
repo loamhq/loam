@@ -1,6 +1,6 @@
 import { syncFirstUse, usedControl } from './first-use.js'
 import { welcomeScreen, untouchedHello, hasPlacesGreeting } from './onboarding.js'
-import { createDailyNotes } from './daily-notes.js'
+import { createQuickActions } from './quick-actions.js'
 import { createSecretSettings } from './plugin-secrets.js'
 import { isOwner, ownerInitial, setOwner } from './owner.js'
 import { createProfiles, mountProfile } from './agent-profile.js'
@@ -224,7 +224,7 @@ async function api(method, path, body, { signal } = {}) {
   }
   if (!['GET', 'HEAD'].includes(method)) {
     pluginLoader?.refresh()
-    if (path.startsWith('/plugins/daily-notes')) dailyNotes.refresh()
+    if (path.startsWith('/plugins/quick-actions')) quickActions.refresh()
     if (/^\/plugins\/[^/]+\/secrets\//.test(path)) registry.emit('plugin.secrets.changed', { id: path.split('/')[2] })
     // A shared key changed (API keys): every plugin that uses it hears so.
     if (path.startsWith('/keys/')) for (const user of parsed?.plugins ?? []) registry.emit('plugin.secrets.changed', { id: user.id })
@@ -240,7 +240,7 @@ const moved = Object.fromEntries(Object.entries({
   accounts: "loadGithub githubStep keepGithub setupGithub connectOrg installGithub refreshGithub disconnectGithub githubReturn providerSignIn connectKeys orgField orgAppField",
   composer: "DRAFT_MAX_PX MAC draft editorDraft openEditor closeEditor sendFromEditor fileChooser imageChooser growDraft submitDraft attachStrip chipSub loginNotice activeThread composer expandGlyph editorNodes menuPage menuRootOf menuOpen openPage openMenu togglePlus closeMenus composerMenu menuRow menuSheet menuGroups menuPopover",
   transcript: "lineKeys lineCount keyOf MINE_MAX_PX MINE_SLACK_PX fitMine COPIED_MS copied copyWithCue copyButton stepItems stepChildren itemNode foldCard stepNode askLine openBlocks longToolDetails toggleOpen toolNode toolDetail fitToolOutputs answeredLine openTurns toggleTurn turnModelName turnFacts turnLine",
-  settings: "backInSettings settingsBody settingsSheet settingsItems settingsDialog settingsPlugins settingsAppearance settingsChats goSettings settingsBack settingsHead tile settingsRoot filesFolderFields settingsFiles settingsAgents settingsProviders settingsApiKey settingsAccount settingsConnections settingsAbout apiKeys settingsProvider usageCard providersWarn integrationsWarn listWords settingsIntegrations githubOutcome connectCard githubCard GH_PILLS githubPills githubConfirm githubLinks openReviewerSettings",
+  settings: "backInSettings settingsBody settingsSheet settingsItems settingsDialog settingsPlugins settingsAppearance settingsChats goSettings settingsBack settingsHead tile settingsRoot settingsFiles settingsAgents settingsProviders settingsApiKey settingsAccount settingsConnections settingsAbout apiKeys settingsProvider usageCard providersWarn integrationsWarn listWords settingsIntegrations githubOutcome connectCard githubCard GH_PILLS githubPills githubConfirm githubLinks openReviewerSettings",
   layout: "nav profileScreen profileBody desk rail filesList listColumn setCollapsed mainPane profilePane filesPane",
   sheets: "openSheet closeSheet sheetTop SHEET_SETTLE_MS pickerNodes filesSheetNodes sheetNodes",
   market: "backMarketOverlay marketCards marketState openMarket openMarketInstall openLinkInstall marketNodes marketInstallNodes marketSync marketDoor marketFindMore marketLinkDoor loadMarket"
@@ -305,7 +305,7 @@ const shell = Object.defineProperties({}, {
   activity: { get: () => activity },
   profileActivity: { get: () => profileActivity },
   profiles: { get: () => profiles },
-  dailyNotes: { get: () => dailyNotes },
+  quickActions: { get: () => quickActions },
   changedAgent: { get: () => changedAgent },
   settingsProfiles: { get: () => settingsProfiles },
   settingsProfileUI: { get: () => settingsProfileUI },
@@ -392,7 +392,7 @@ const activityOptions = { registry, api, redraw: schedule, agents: () => state.a
 const activity = createActivity(activityOptions)
 const profileActivity = createActivity({ ...activityOptions, scoped: true })
 const engineerActivity = createActivity({ ...activityOptions, scoped: true })
-const dailyNotes = createDailyNotes({ api, redraw: schedule })
+const quickActions = createQuickActions({ api, redraw: schedule })
 let agentsRequest = null, agentRosterRevision = 0
 const changedAgent = agent => {
   if (!agent) return
@@ -1335,7 +1335,7 @@ pluginSettingsUI = createPluginSettings({ loader: pluginLoader, theme, host: pag
 // files is still starting (plugin-loader.js, `pending`).
 files.pluginPending = (place) => pluginLoader.pending(place)
 const pluginsReady = pluginLoader.refresh()
-dailyNotes.refresh()
+quickActions.refresh()
 
 
 // ------------------------------------------------------------------- wiring
@@ -1562,7 +1562,7 @@ window.addEventListener('loam:signin', () => {
 
 // App size uses the host preference rather than the browser's own zoom.
 document.addEventListener('keydown', (event) => theme.key(event, theme.kind === 'desktop'))
-window.addEventListener('focus', () => { theme.refresh(); pluginLoader.refresh(); dailyNotes.refresh() })
+window.addEventListener('focus', () => { theme.refresh(); pluginLoader.refresh(); quickActions.refresh(); if (state.navigator === 'files' && !page.files.st.root) page.files.loadRecent() })
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') theme.save()
   else theme.refresh()

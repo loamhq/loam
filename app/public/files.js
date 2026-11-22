@@ -3,7 +3,7 @@ import { historyBackButton } from './panel-history.js'
 import { noteDateParts } from './time.js'
 import { fileShortcuts } from './store.js'
 import { createCoreRegistry } from './core-registrations.js'
-import { formatDate } from './time.js'
+import { formatDate, formatTime } from './time.js'
 import { segmentedControl } from './chat-ui.js'
 import { authenticatedFetch as fetch } from './auth.js'
 import { agentName } from './sessions.js'
@@ -28,7 +28,8 @@ import { agentName } from './sessions.js'
 // the README's Files section. Every row the host sends is one flat shape (see
 // there); nothing here unwraps a `row` key or invents a count.
 
-import { h, icon, on, kept } from './ui.js'
+import { h, icon, blob, on, kept } from './ui.js'
+import { ownerInitial } from './owner.js'
 import { emptyState } from './empty-state.js'
 import { copyText } from './clipboard.js'
 import { markdown, safeHref, anchorOf, toggleTask } from './markdown.js'
@@ -42,10 +43,20 @@ export function copyLinkLabel(resource) {
 }
 
 // The two supported roots use host names and shared semantic colours.
-// Their descriptions explain what can be read and written in each.
+// Home carries short lines; each folder page carries the longer explanation.
 export const ROOT_LOOK = {
-  vault: { name: 'Vault', color: 'var(--paper-ink-2)', desc: 'Your notes — inbox, daily notes, projects, people. The one place you and your agents both write.' },
-  spaces: { name: 'AI Spaces', color: 'var(--latte-espresso)', desc: 'Each agent’s own home — its soul, memory and skills — and the Commons they share. They write here; you read.' },
+  vault: {
+    name: 'Your files',
+    color: 'var(--paper-ink-2)',
+    homeDesc: 'Written by you or your agents, for you.',
+    desc: 'Everything made for you to read and keep, written by you or your agents.',
+  },
+  spaces: {
+    name: 'Agent files',
+    color: 'var(--latte-espresso)',
+    homeDesc: 'What your agents keep for themselves.',
+    desc: 'What your agents keep for themselves: who they are, what they remember, how they work. Theirs to write, yours to read.',
+  },
 }
 
 // Why a row is read-only, by the host's `authority`. A `user` file that cannot
@@ -339,6 +350,7 @@ export function rootsOf(body) {
       return {
         root: r.root,
         name: typeof r.name === 'string' && r.name ? r.name : look.name ?? r.root,
+        homeDesc: look.homeDesc ?? (typeof r.description === 'string' ? r.description : ''),
         desc: look.desc ?? (typeof r.description === 'string' ? r.description : ''),
         color: look.color ?? 'var(--paper-ink-2)',
         link: typeof r.link === 'string' ? r.link : filesHref(r.root),
@@ -352,19 +364,10 @@ export function shortcutsOf(body) {
   return list.filter((s) => s?.resource?.root !== 'system' && s && typeof s.label === 'string' && isRow(s.resource))
 }
 
-// The host offers its developer shortcuts wherever those folders exist, and
-// every install has them: a fresh vault's System holds only Loam's library
-// and the empty skills shelf (`bin/library seed-vault`), and its Projects/Loam
-// only the schedule page the timers write. So a new person would meet
-// "Vault system", "Loam project" and "Loam infrastructure" for folders they
-// never made. Each is shown only once its folder holds something beyond what
-// the install put there (first-day walk, 2026-11-16); an install that uses
-// them keeps them, and a shortcut the person pinned themselves always shows.
-const INSTALLED_ONLY = new Map([
-  ['Vault system', new Set(['loam', 'skills'])],
-  ['Loam project', new Set(['infrastructure'])],
-  ['Loam infrastructure', new Set(['schedule.md'])],
-])
+export function loamFilesOf(body) {
+  const list = Array.isArray(body?.loam_files) ? body.loam_files : []
+  return list.filter((x) => x && typeof x.path === 'string' && x.path && isRow(x.resource))
+}
 
 export function rowsOf(body) {
   return Array.isArray(body?.entries) ? body.entries.filter(isRow) : []
@@ -541,8 +544,10 @@ export function createFiles({
   const st = {
     // What the host takes as an upload (`/api/limits`), null until it says.
     upload: { max: null, types: null },
-    roots: { loaded: false, items: [], shortcuts: [], error: '' },
-    // The folder being listed. `root: null` is the three cards.
+    roots: { loaded: false, items: [], shortcuts: [], loamFiles: [], workspaceNames: new Map(), error: '' },
+    recent: { loaded: false, loading: false, who: 'all', window: 'default', days: [], hasMore: false, usedFallback: false, totalShown: 0, totalWeek: 0, error: '', status: null, expanded: new Set() },
+    pinsExpanded: false,
+    // The folder being listed. `root: null` is the Files home.
     root: null,
     path: '',
     listing: { key: '', rows: [], folder: null, cursor: null, total: null, loading: false, error: '', status: null },
@@ -576,30 +581,82 @@ export function createFiles({
   }
 
   let rootsRequest = 0
-  async function usedShortcuts(offered) {
-    const kept = await Promise.all(offered.map(async (s) => {
-      const installed = INSTALLED_ONLY.get(s.label)
-      if (!installed) return true
-      try {
-        const listing = await api('GET', `/files/list?${q({ root: s.resource.root, path: s.resource.path, limit: 50 })}`)
-        return rowsOf(listing).some((entry) => !installed.has((entry.name ?? nameOf(entry.path)).toLowerCase()))
-      } catch { return false }
-    }))
-    return offered.filter((_, i) => kept[i])
-  }
   async function loadRoots() {
     const ticket = ++rootsRequest
     try {
       const body = await api('GET', '/files/roots')
-      const shortcuts = await usedShortcuts(shortcutsOf(body))
       if (ticket !== rootsRequest) return
       const workspaceNames = new Map(Object.entries(body?.workspace_names ?? {}))
-      st.roots = { loaded: true, items: rootsOf(body), shortcuts, workspaceNames, error: '' }
+      st.roots = { loaded: true, items: rootsOf(body), shortcuts: shortcutsOf(body), loamFiles: loamFilesOf(body), workspaceNames, error: '' }
     } catch (err) {
       if (ticket !== rootsRequest) return
-      st.roots = { loaded: true, items: [], shortcuts: [], error: err.message, status: err.status }
+      st.roots = { loaded: true, items: [], shortcuts: [], loamFiles: [], workspaceNames: new Map(), error: err.message, status: err.status }
     }
     schedule()
+  }
+
+  let recentRequest = 0
+  async function loadRecent(who = st.recent.who, win = st.recent.window) {
+    const ticket = ++recentRequest
+    st.recent.who = who
+    st.recent.window = win
+    st.recent.loading = true
+    st.recent.error = ''
+    st.recent.status = null
+    schedule()
+    try {
+      const body = await api('GET', `/files/recent?${q({ who, window: win })}`)
+      if (ticket !== recentRequest) return
+      st.recent.days = Array.isArray(body?.days) ? body.days : []
+      st.recent.hasMore = body?.has_more === true
+      st.recent.usedFallback = body?.used_fallback === true
+      st.recent.totalShown = Number.isInteger(body?.total_shown) ? body.total_shown : 0
+      st.recent.totalWeek = Number.isInteger(body?.total_week) ? body.total_week : 0
+      st.recent.loaded = true
+      st.recent.loading = false
+      st.recent.error = ''
+      st.recent.status = null
+    } catch (err) {
+      if (ticket !== recentRequest) return
+      st.recent.loaded = true
+      st.recent.loading = false
+      // An older broker without /v1/files/recent leaves Recent empty quietly.
+      if (err.status === 404 || err.status === 405) {
+        st.recent.days = []
+        st.recent.hasMore = false
+        st.recent.error = ''
+        st.recent.status = null
+      } else {
+        st.recent.error = err.message
+        st.recent.status = err.status
+      }
+    }
+    schedule()
+  }
+
+  function setRecentWho(who) {
+    if (!['all', 'you', 'agents'].includes(who) || (st.recent.who === who && st.recent.window === 'default' && st.recent.loaded)) return
+    st.recent.expanded = new Set()
+    return loadRecent(who, 'default')
+  }
+
+  function showMoreRecent() {
+    return loadRecent(st.recent.who, 'week')
+  }
+
+  function toggleRecentGroup(id) {
+    if (st.recent.expanded.has(id)) st.recent.expanded.delete(id)
+    else st.recent.expanded.add(id)
+    schedule()
+  }
+
+  function togglePinsExpanded() {
+    st.pinsExpanded = !st.pinsExpanded
+    schedule()
+  }
+
+  function refreshRecentIfLoaded() {
+    if (st.recent.loaded) loadRecent(st.recent.who, st.recent.window)
   }
 
   // A plugin's own root (2026-11-16, `files.root`; doc-comments' Shared
@@ -611,6 +668,11 @@ export function createFiles({
 
   async function loadFolder(more = false, keepRows = false) {
     if (!st.root) return
+    if (st.root === 'loam') {
+      st.listing = { key: 'loam:', rows: [], folder: null, cursor: null, total: null, loading: false, error: '', status: null }
+      await loadRoots()
+      return
+    }
     const own = pluginRoot()
     if (!own && st.root.startsWith('@')) {
       // A plugin's root whose plugin has not registered yet (a cold load of
@@ -747,6 +809,16 @@ export function createFiles({
       st.path = ''
       if (!keepFile) closeFile()
       if (!st.roots.loaded) loadRoots()
+      loadRecent()
+      schedule()
+      return
+    }
+    if (root === 'loam') {
+      st.root = 'loam'
+      st.path = ''
+      st.listing = { key: 'loam:', rows: [], folder: null, cursor: null, total: null, loading: false, error: '', status: null }
+      if (!keepFile) closeFile()
+      loadRoots()
       schedule()
       return
     }
@@ -1081,6 +1153,7 @@ export function createFiles({
     if (sameFileAddress(st.sheet?.resource, resource)) st.sheet = null
     if (sameFileAddress(st.renaming?.resource, resource)) st.renaming = null
     if (sameFileAddress(st.file, resource)) closeFile()
+    refreshRecentIfLoaded()
   }
 
   function refreshContainingFolder(resource) {
@@ -1172,6 +1245,7 @@ export function createFiles({
       applyRename(answer)
       await onRename?.(answer, offered)
       registry.emit('file.renamed', answer)
+      refreshRecentIfLoaded()
       if (st.renaming === s) st.renaming = null
     } catch (err) {
       s.error = err.message
@@ -1308,6 +1382,7 @@ export function createFiles({
       file.schedule = got.schedule
       file.flash = got.provenance ? 'Saved · the host stamped it' : 'Saved'
       registry.emit('file.changed', { root: file.root, path: file.path, revision: file.revision })
+      refreshRecentIfLoaded()
     } catch (err) {
       if (st.file !== file) return done()
       if (err.status === 409) {
@@ -1395,13 +1470,41 @@ export function createFiles({
     homeRefusal(new Error('Every name for a note this minute is taken. Try again in a minute.'))
   }
 
+  async function ensureVaultFolder(folderPath) {
+    const segs = splitPath(folderPath)
+    let cur = ''
+    for (const seg of segs) {
+      cur = cur ? `${cur}/${seg}` : seg
+      try {
+        await api('POST', '/files/folder', { root: 'vault', path: cur })
+      } catch (err) {
+        if (err.status !== 409) throw err
+      }
+    }
+  }
+
   async function makeNote(path, { quietConflict = false } = {}) {
     try {
       const body = await api('POST', '/files/file', { root: 'vault', path, text: '' })
       const made = isRow(body) ? body : readOf(body).row
+      refreshRecentIfLoaded()
       onResolveTo?.(made?.root ?? 'vault', made?.path ?? path, true, made)
       return 'made'
     } catch (err) {
+      if (err.status === 404 && parentOf(path)) {
+        try {
+          await ensureVaultFolder(parentOf(path))
+          const body = await api('POST', '/files/file', { root: 'vault', path, text: '' })
+          const made = isRow(body) ? body : readOf(body).row
+          refreshRecentIfLoaded()
+          onResolveTo?.(made?.root ?? 'vault', made?.path ?? path, true, made)
+          return 'made'
+        } catch (retryErr) {
+          if (quietConflict && retryErr.status === 409) return 'taken'
+          homeRefusal(retryErr)
+          return 'refused'
+        }
+      }
       if (quietConflict && err.status === 409) return 'taken'
       homeRefusal(err)
       return 'refused'
@@ -1544,7 +1647,7 @@ export function createFiles({
     }
   }
 
-  return { registry, st, pluginRoot, pathLabels, itemsMenu, stat, readText, ago: when, beginRename, cancelRename, editRename, rename, applyRename, focusRename, canDeleteFile, beginDelete, confirmDelete, holdSavesForDelete, removeDeletedFile, refreshContainingFolder, revealOpen, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, downloadArchive, loadRoots, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, resumeOwner, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
+  return { registry, st, pluginRoot, pathLabels, itemsMenu, stat, readText, ago: when, beginRename, cancelRename, editRename, rename, applyRename, focusRename, canDeleteFile, beginDelete, confirmDelete, holdSavesForDelete, removeDeletedFile, refreshContainingFolder, revealOpen, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, downloadArchive, loadRoots, loadRecent, setRecentWho, showMoreRecent, toggleRecentGroup, togglePinsExpanded, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, resumeOwner, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
 }
 
 function triggerBrowserDownload(href, filename) {
@@ -1690,50 +1793,276 @@ function fromList(go, list) {
   return Object.assign(from, go)
 }
 
-// Chosen files and folders, in their chosen order, as one card of rows, or the
-// empty state that says how to make one.
-function homeShortcuts(files, home, go) {
+const PIN_PREVIEW_CAP = 4
+
+function displayFileName(name) {
+  return String(name ?? '').replace(/\.(?:md|markdown)$/i, '')
+}
+
+function recentWhen(iso, day, now = Date.now()) {
+  const t = Date.parse(iso ?? '')
+  if (!Number.isFinite(t)) return ''
+  if (day === 'Today') {
+    const s = Math.max(0, (now - t) / 1000)
+    if (s < 60) return 'Now'
+    if (s < 3600) return `${Math.floor(s / 60)}m`
+    return `${Math.max(1, Math.floor(s / 3600))}h`
+  }
+  return formatTime(t)
+}
+
+function recentAvatar(author, home, size = 30) {
+  if (author?.kind === 'agent') {
+    const look = home?.agentLook ? home.agentLook(author.id) : { agentId: author.id, initial: (author.name || author.id || '?').charAt(0).toUpperCase(), color: 'var(--latte-espresso)', ink: 'var(--latte-espresso-ink)', shape: '50%' }
+    return blob(look, { size, font: Math.round(size * 0.42), className: 'fs-recent-av', inline: true, decorative: false })
+  }
+  return h('span', {
+    class: `fs-av-you${size <= 20 ? ' small' : ''}`,
+    style: { width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * 0.42)}px` },
+    title: 'You',
+    'aria-hidden': 'true',
+    text: ownerInitial(),
+  })
+}
+
+function formatFolderPath(folder) {
+  if (!folder) return 'Your files'
+  return folder.split('/').filter(Boolean).join(' › ')
+}
+
+// Pinned files and folders: always shown on the Files home, with a calm empty
+// state when nothing is pinned yet. Shows the first 4 pins and a "Show all N"
+// toggle when there are more.
+function homePinned(files, home, go) {
   const list = home?.shortcuts ?? fileShortcuts(null, files.st.roots.shortcuts)
   const marksFor = openFileMarks(files, go)
+  const expanded = Boolean(files.st.pinsExpanded)
+  const visible = expanded ? list : list.slice(0, PIN_PREVIEW_CAP)
   return h(
-    'div',
-    { class: 'fs-shortcuts', key: 'fs:myshortcuts' },
-    h('div', { class: 'kicker fs-kicker', text: 'Shortcuts' }),
+    'section',
+    { class: 'fs-section fs-pinned', key: 'fs:pinned', 'aria-label': 'Pinned' },
+    h(
+      'div',
+      { class: 'fs-section-head' },
+      h('h2', { class: 'kicker fs-kicker', text: 'Pinned' }),
+      list.length > PIN_PREVIEW_CAP
+        ? h('button', {
+            class: 'fs-section-action fs-pins-more',
+            type: 'button',
+            onclick: () => files.togglePinsExpanded(),
+            text: expanded ? 'Show fewer' : `Show all ${list.length}`,
+          })
+        : null,
+    ),
     list.length === 0
-      ? h('p', { class: 'fs-noshort', text: 'Nothing pinned yet. Add any file or folder from its ⋯ menu.' })
+      ? h(
+          'div',
+          { class: 'fs-pinned-empty', key: 'fs:pinned:empty' },
+          h('span', { class: 'fs-pinned-empty-icon', 'aria-hidden': 'true' }, icon.pin(16)),
+          h(
+            'div',
+            { class: 'fs-pinned-empty-text' },
+            h('div', { class: 'fs-pinned-empty-title', text: 'Nothing pinned yet' }),
+            h('p', { class: 'fs-noshort', text: 'Open any file or folder’s ⋯ menu and choose Pin to keep it here.' }),
+          ),
+        )
       : h(
           'div',
           { class: 'card card-group' },
-          ...list.map((s) => {
+          ...visible.map((s) => {
             const { isMain, isSide } = marksFor(s.root, s.path, s.kind === 'file')
             const path = files.pathLabels(s.root, s.path)
             const root = ROOT_LOOK[s.root]?.name ?? s.root
             const name = s.label || path.at(-1) || root
             return h('div', { class: `fs-entry${isMain ? ' on' : ''}${isSide ? ' in-side' : ''}`, key: `shortcut:${s.root}:${s.path}` }, renameField(files, s, 'shortcut') ?? h(
               'button',
-              { class: `setrow ${s.offered ? 'fs-host-shortcut' : 'fs-shortcut'}${isMain ? ' on' : ''}`, key: `my:${s.root}:${s.path}`, 'aria-current': isMain ? 'page' : null, onclick: event => event.altKey && go.side?.()?.available() && s.kind === 'file' ? go.side().openSide({ kind: 'file', root: s.root, path: s.path }) : files.openShortcut(s, go) },
+              { class: `setrow fs-shortcut${isMain ? ' on' : ''}`, key: `my:${s.root}:${s.path}`, 'aria-current': isMain ? 'page' : null, onclick: event => event.altKey && go.side?.()?.available() && s.kind === 'file' ? go.side().openSide({ kind: 'file', root: s.root, path: s.path }) : files.openShortcut(s, go) },
               s.kind === 'file' ? h('div', { class: 'icon-tile', style: { background: tileOf(s.path).bg, color: tileOf(s.path).fg } }, icon.file(14), h('span', { text: tileOf(s.path).label })) : h('div', { class: 'icon-tile fs-foldertile' }, icon.folder(18)),
-              h('div', { class: 'fs-words' }, h('div', { class: 'fs-name', text: name }), h('div', { class: 'fs-meta', text: [root, ...path.slice(0, -1)].join(' / ') })),
+              h('div', { class: 'fs-words' }, h('div', { class: 'fs-name', text: name }), h('div', { class: 'fs-meta', text: [root, ...path.slice(0, -1)].join(' › ') })),
               icon.chevronRight(10),
             ), s.kind === 'file' && go.side?.()?.available() ? h('span', { class: 'row-side-action' }, go.side().affordance({ kind: 'file', root: s.root, path: s.path })) : null,
             isSide ? h('span', { class: 'row-side-mark', title: 'Open in side panel', 'aria-label': 'Open in side panel' }, icon.panelRight(13)) : null,
-            renamingHere(files, s, 'shortcut') ? null : h('button', { class: 'iconbtn content-mark fs-shortcutmenu', title: `Shortcut actions for ${name}`, 'aria-label': `Shortcut actions for ${name}`, onclick: () => files.shortcutMenu(s, home) }, icon.dots(18)))
+            renamingHere(files, s, 'shortcut') ? null : h('button', { class: 'iconbtn content-mark fs-shortcutmenu', title: `Actions for ${name}`, 'aria-label': `Actions for ${name}`, onclick: () => files.shortcutMenu(s, home) }, icon.dots(18)))
           }),
         ),
   )
 }
 
-// The home's two actions: a new note in the inbox, today's daily note.
-function homeActions(home) {
-  if (!home) return null
-  const act = (cls, glyph, label, sub, onclick) =>
-    h('button', { class: `fs-action ${cls}`, type: 'button', onclick }, h('div', { class: 'fs-actionglyph' }, glyph), h('div', { class: 'fs-name', text: label }), h('div', { class: 'fs-meta', text: sub }))
+// Recent files in Your files (outside Loam files), newest first under day
+// headings, with Everyone / You / Agents segmented filter and 3+ folder/day
+// grouping expandable in place.
+function homeRecent(files, home, go) {
+  const rec = files.st.recent
+  const marksFor = openFileMarks(files, go)
+  const filter = segmentedControl({
+    label: 'Filter recent files',
+    value: rec.who,
+    choose: (who) => files.setRecentWho(who),
+    options: [
+      { id: 'all', label: 'Everyone' },
+      { id: 'you', label: 'You' },
+      { id: 'agents', label: 'Agents' },
+    ],
+    props: { class: 'segmented fs-filter' },
+  })
+
+  let content
+  if (!rec.loaded && rec.loading) {
+    content = h('div', { class: 'fs-recent-empty', text: 'Loading…' })
+  } else if (rec.error) {
+    content = errorBox(rec.error, rec.status, () => files.loadRecent())
+  } else if (rec.days.length === 0) {
+    const [lead, detail] = rec.who === 'you'
+      ? ['Nothing of yours yet', 'Notes you write, here or on any synced device, show up here.']
+      : rec.who === 'agents'
+        ? ['Nothing from your agents yet', 'Files your agents make for you show up here.']
+        : ['Nothing here yet', 'Files you and your agents make show up here, newest first.']
+    content = h(
+      'div',
+      { class: 'fs-recent-empty', key: `recent:empty:${rec.who}` },
+      h('div', { class: 'fs-recent-empty-title', text: lead }),
+      h('p', { text: detail }),
+    )
+  } else {
+    const blocks = []
+    for (const dayGroup of rec.days) {
+      blocks.push(h('div', { class: 'fs-recent-day', key: `day:${dayGroup.day_key}`, text: dayGroup.day }))
+      for (const item of dayGroup.items) {
+        if (item.kind === 'group') {
+          const open = rec.expanded.has(item.id)
+          const parentPath = parentOf(item.folder)
+          const where = parentPath ? formatFolderPath(parentPath) : formatFolderPath(item.folder)
+          const whoName = item.author?.kind === 'owner' ? 'You' : item.author?.name || 'Agent'
+          blocks.push(
+            h(
+              'div',
+              { class: `fs-recent-group${open ? ' open' : ''}`, key: `rgroup:${item.id}` },
+              h(
+                'button',
+                { class: 'setrow fs-recent-row fs-recent-grouprow', type: 'button', 'aria-expanded': String(open), onclick: () => files.toggleRecentGroup(item.id) },
+                h(
+                  'span',
+                  { class: 'fs-stack', 'aria-hidden': 'true' },
+                  h('span', { class: 'fs-stack-cnt', text: String(item.count) }),
+                  h('span', { class: 'fs-stack-av' }, recentAvatar(item.author, home, 18)),
+                ),
+                h(
+                  'div',
+                  { class: 'fs-words' },
+                  h('div', { class: 'fs-name', text: item.label }),
+                  h('div', { class: 'fs-meta', text: `${whoName} · ${where}` }),
+                ),
+                h('span', { class: 'fs-recent-when', text: recentWhen(item.modified, dayGroup.day) }),
+                h('span', { class: 'fs-recent-chev' }, icon.chevronRight(10)),
+              ),
+              open
+                ? h(
+                    'div',
+                    { class: 'fs-recent-kids', key: `rkids:${item.id}` },
+                    ...(item.items ?? []).map((child) => {
+                      const { isMain, isSide } = marksFor('vault', child.path, true)
+                      return h(
+                        'button',
+                        {
+                          class: `setrow fs-recent-kid${isMain ? ' on' : ''}${isSide ? ' in-side' : ''}`,
+                          key: `rkid:${child.path}`,
+                          type: 'button',
+                          onclick: (event) => {
+                            if (event?.altKey && go.side?.()?.available()) go.side().openSide({ kind: 'file', root: 'vault', path: child.path, row: child.row })
+                            else go('vault', child.path, { isFile: true, row: child.row })
+                          },
+                        },
+                        h('span', { class: 'fs-recent-kid-ic' }, icon.file(14)),
+                        h('div', { class: 'fs-words' }, h('div', { class: 'fs-name', text: displayFileName(child.name) })),
+                      )
+                    }),
+                  )
+                : null,
+            ),
+          )
+        } else {
+          const { isMain, isSide } = marksFor('vault', item.path, true)
+          const metaParts = [formatFolderPath(item.folder)]
+          if (item.author?.kind === 'agent' && item.author.name) metaParts.push(item.author.name)
+          const side = go.side?.()
+          const sideItem = { kind: 'file', root: 'vault', path: item.path, row: item.row }
+          blocks.push(
+            h(
+              'div',
+              { class: `fs-entry fs-recent-entry${isMain ? ' on' : ''}${isSide ? ' in-side' : ''}`, key: `recent:${item.path}` },
+              h(
+                'button',
+                {
+                  class: `setrow fs-recent-row${isMain ? ' on' : ''}`,
+                  type: 'button',
+                  'aria-current': isMain ? 'page' : null,
+                  onclick: (event) => {
+                    if (event?.altKey && side?.available()) side.openSide(sideItem)
+                    else go('vault', item.path, { isFile: true, row: item.row })
+                  },
+                },
+                recentAvatar(item.author, home, 30),
+                h(
+                  'div',
+                  { class: 'fs-words' },
+                  h('div', { class: 'fs-name', text: displayFileName(item.name) }),
+                  h('div', { class: 'fs-meta', text: metaParts.join(' · ') }),
+                ),
+                h('span', { class: 'fs-recent-when', text: recentWhen(item.modified, dayGroup.day) }),
+              ),
+              side?.available() ? h('span', { class: 'row-side-action' }, side.affordance(sideItem)) : null,
+              isSide ? h('span', { class: 'row-side-mark', title: 'Open in side panel', 'aria-label': 'Open in side panel' }, icon.panelRight(13)) : null,
+            ),
+          )
+        }
+      }
+    }
+    content = h(
+      'div',
+      { class: 'fs-recent-list', key: `recent:list:${rec.who}:${rec.window}` },
+      ...blocks,
+      rec.hasMore
+        ? h('button', {
+            class: 'fs-section-action fs-recent-more',
+            type: 'button',
+            disabled: rec.loading,
+            onclick: () => files.showMoreRecent(),
+            text: rec.loading ? 'Loading…' : 'Show more',
+          })
+        : null,
+    )
+  }
+
   return h(
-    'div',
-    { class: 'fs-actions-home', key: 'fs:actions' },
-    act('fs-newinbox', icon.plus(18), 'New inbox note', home.inbox, home.onInbox),
-    home.daily !== null && home.daily !== undefined ? act('fs-daily', icon.file(16), 'Open daily note', home.daily, home.onDaily) : null,
+    'section',
+    { class: 'fs-section fs-recent', key: 'fs:recent', 'aria-label': 'Recent' },
+    h('div', { class: 'fs-section-head fs-recent-head' }, h('h2', { class: 'kicker fs-kicker', text: 'Recent' }), filter),
+    content,
   )
+}
+
+// Optional one-tap quick actions from the core quick-actions plugin.
+// Plain labels only — no folder codes.
+function homeActions(home) {
+  if (!home || (!home.showNewNote && !home.showDailyNote)) return null
+  const buttons = []
+  if (home.showNewNote) {
+    buttons.push(h(
+      'button',
+      { class: 'fs-action fs-newinbox', type: 'button', onclick: home.onInbox },
+      h('span', { class: 'fs-actionglyph', 'aria-hidden': 'true' }, icon.plus(18)),
+      h('span', { class: 'fs-actionlabel', text: 'New note' }),
+    ))
+  }
+  if (home.showDailyNote) {
+    buttons.push(h(
+      'button',
+      { class: 'fs-action fs-daily', type: 'button', onclick: home.onDaily },
+      h('span', { class: 'fs-actionglyph', 'aria-hidden': 'true' }, icon.sun(18)),
+      h('span', { class: 'fs-actionlabel', text: 'Today’s note' }),
+    ))
+  }
+  return h('div', { class: `fs-actions-home${buttons.length === 1 ? ' single' : ''}`, key: 'fs:actions' }, ...buttons)
 }
 
 // The header, the title and the list of one folder — the phone's whole Files
@@ -1742,20 +2071,28 @@ function homeActions(home) {
 export function folderView(files, { go, wide, collapse = null, historyBack = null, returnBack = null, home = null, showParent = true }) {
   const { st } = files
   const atRoot = !st.root
+  const atLoam = st.root === 'loam'
   const own = files.pluginRoot?.() ?? null
+  const loamList = st.roots.loamFiles ?? []
+  const loamPaths = new Set(loamList.map((item) => item.path))
+  const inLoamTop = st.root === 'vault' && loamPaths.has(st.path)
   const rootRow = st.roots.items.find((r) => r.root === st.root) ?? null
-  const rootName = rootRow?.name ?? ROOT_LOOK[st.root]?.name ?? st.root
-  const folderRow = st.listing.folder ?? (st.path === '' && rootRow ? { root: st.root, path: '', kind: 'folder', name: rootName, capabilities: rootRow.capabilities } : !atRoot && !own && !st.listing.error ? { root: st.root, path: st.path, kind: 'folder', name: st.path === '' ? rootName : nameOf(st.path) } : null)
+  const rootName = atLoam ? 'Loam files' : rootRow?.name ?? ROOT_LOOK[st.root]?.name ?? st.root
+  const folderRow = atLoam ? null : st.listing.folder ?? (st.path === '' && rootRow ? { root: st.root, path: '', kind: 'folder', name: rootName, capabilities: rootRow.capabilities } : !atRoot && !own && !st.listing.error ? { root: st.root, path: st.path, kind: 'folder', name: st.path === '' ? rootName : nameOf(st.path) } : null)
   const folderCaps = capsOf(folderRow)
-  const canAdd = !atRoot && folderCaps.create
+  const canAdd = !atRoot && !atLoam && folderCaps.create
   // A plugin's root opened cold, before its plugin has registered: no
   // heading yet (its address, "@<id>", is not a name).
   const coldPlugin = !own && typeof st.root === 'string' && st.root.startsWith('@')
-  const path = files.pathLabels(st.root, st.path, st.listing.folder)
-  const title = atRoot ? 'Files' : own ? own.name : coldPlugin ? '' : path.at(-1) ?? rootName
-  const parent = atRoot ? null : st.path === '' ? 'Files' : path.at(-2) ?? rootName
-  const sub = atRoot || coldPlugin ? '' : own ? (own.desc || '') : st.path === '' ? (rootRow?.desc ?? ROOT_LOOK[st.root]?.desc ?? '') : [rootName, ...path].join(' / ')
-  const pinned = !atRoot && !own && home?.isShortcut ? home.isShortcut(st.root, st.path) : false
+  const path = atLoam ? [] : files.pathLabels(st.root, st.path, st.listing.folder)
+  const title = atRoot ? 'Files' : atLoam ? 'Loam files' : own ? own.name : coldPlugin ? '' : path.at(-1) ?? rootName
+  const parent = atRoot ? null : atLoam ? (ROOT_LOOK.vault.name) : inLoamTop ? 'Loam files' : st.path === '' ? 'Files' : path.at(-2) ?? rootName
+  const sub = atRoot || coldPlugin ? ''
+    : atLoam ? 'What Loam needs to run. You’ll rarely need this: everything here also shows up where it is used, in a chat or a note.'
+      : own ? (own.desc || '')
+        : st.path === '' ? (rootRow?.desc ?? ROOT_LOOK[st.root]?.desc ?? '')
+          : [rootName, ...path].join(' › ')
+  const pinned = !atRoot && !atLoam && !own && home?.isShortcut ? home.isShortcut(st.root, st.path) : false
 
   // The home's header is the Chats header, class for class, so the two tabs
   // start at the same place: no back row above it and no line under it.
@@ -1768,18 +2105,26 @@ export function folderView(files, { go, wide, collapse = null, historyBack = nul
     showParent && !historyBack && parent !== null
       ? h(
           'button',
-          { class: 'backbtn fs-back', title: wide ? `Open parent folder: ${parent}` : `Back to ${parent}`, onclick: () => go(st.path === '' ? null : st.root, parentOf(st.path), { isFile: false }) },
+          {
+            class: 'backbtn fs-back',
+            title: wide ? `Open parent folder: ${parent}` : `Back to ${parent}`,
+            onclick: () => {
+              if (atLoam) go('vault', '', { isFile: false })
+              else if (inLoamTop) go('loam', '', { isFile: false })
+              else go(st.path === '' ? null : st.root, parentOf(st.path), { isFile: false })
+            },
+          },
           icon.chevronLeft(20),
           h('span', { text: parent }),
         )
       : null,
     h('div', { class: 'headspace' }),
-    home?.toggleShortcut && !own
+    home?.toggleShortcut && !own && !atLoam
       ? h('button', { class: 'iconbtn fs-menu', title: 'This folder', 'aria-label': 'This folder', onclick: () => { if (!st.archive?.busy) st.archive = null; st.sheet = { kind: 'folder', resource: folderRow, renameSlot: 'folder', name: title, on: pinned, toggle: () => home.toggleShortcut(st.root, st.path) }; go.redraw?.() } }, icon.dots(18))
       : null,
     canAdd
       ? h('button', { class: 'roundbtn fs-add', title: 'Add to this folder', onclick: () => { st.sheet = { kind: 'add' }; go.redraw() } }, icon.plus(20))
-      : !atRoot && !own && !st.listing.loading && !st.listing.error && folderRow
+      : !atRoot && !atLoam && !own && !st.listing.loading && !st.listing.error && folderRow
         ? h('span', { class: 'fs-tag', text: 'Read-only' })
         : null,
     collapse,
@@ -1790,30 +2135,69 @@ export function folderView(files, { go, wide, collapse = null, historyBack = nul
     if (!st.roots.loaded) body.push(h('div', { class: 'fs-quiet', text: 'Loading…' }))
     else if (st.roots.error) body.push(errorBox(st.roots.error, st.roots.status, () => files.loadRoots()))
     else if (st.roots.items.length === 0) body.push(h('div', { class: 'fs-quiet', text: 'The host offers no files.' }))
-    body.push(homeActions(home))
+    const qa = homeActions(home)
+    if (qa) body.push(qa)
+    const places = []
     for (const r of st.roots.items) {
-      body.push(
+      const glyph = r.root === 'spaces' ? icon.spark(20) : icon.folder(20)
+      places.push(
         h(
           'button',
-          { class: 'fs-rootcard', key: `root:${r.root}`, onclick: () => go(r.root, '') },
-          h('div', { class: 'fs-blob', style: { background: 'var(--paper-card)' } }, icon.folder(20)),
-          h('div', { class: 'fs-rootwords' }, h('div', { class: 'display fs-rootname', text: r.name }), r.desc ? h('div', { class: 'fs-rootdesc', text: r.desc }) : null),
+          { class: 'fs-place', key: `root:${r.root}`, type: 'button', onclick: () => go(r.root, '') },
+          h('span', { class: 'fs-place-tile', 'aria-hidden': 'true' }, glyph),
+          h('div', { class: 'fs-rootwords' }, h('div', { class: 'fs-rootname', text: r.name }), r.homeDesc ? h('div', { class: 'fs-rootdesc', text: r.homeDesc }) : null),
           icon.chevronRight(10),
         ),
       )
     }
     for (const r of files.registry.entries('files.root', {})) {
-      body.push(
+      places.push(
         h(
           'button',
-          { class: 'fs-rootcard', key: `root:@${r.id}`, onclick: () => go(`@${r.id}`, '') },
-          h('div', { class: 'fs-blob', style: { background: 'var(--paper-card)' } }, typeof r.icon === 'function' ? r.icon(20) : icon[r.icon]?.(20) ?? icon.folder(20)),
-          h('div', { class: 'fs-rootwords' }, h('div', { class: 'display fs-rootname', text: r.name }), r.desc ? h('div', { class: 'fs-rootdesc', text: r.desc }) : null),
+          { class: 'fs-place', key: `root:@${r.id}`, type: 'button', onclick: () => go(`@${r.id}`, '') },
+          h('span', { class: 'fs-place-tile', 'aria-hidden': 'true' }, typeof r.icon === 'function' ? r.icon(20) : icon[r.icon]?.(20) ?? icon.folder(20)),
+          h('div', { class: 'fs-rootwords' }, h('div', { class: 'fs-rootname', text: r.name }), r.desc ? h('div', { class: 'fs-rootdesc', text: r.desc }) : null),
           icon.chevronRight(10),
         ),
       )
     }
-    if (st.roots.loaded && !st.roots.error) body.push(homeShortcuts(files, home, go))
+    if (places.length > 0) body.push(h('div', { class: 'fs-places', key: 'fs:places' }, ...places))
+    if (st.roots.loaded && !st.roots.error) {
+      body.push(homePinned(files, home, go))
+      body.push(homeRecent(files, home, go))
+    }
+  } else if (atLoam) {
+    if (!st.roots.loaded) body.push(h('div', { class: 'fs-quiet', text: 'Loading…' }))
+    else if (st.roots.error) body.push(errorBox(st.roots.error, st.roots.status, () => files.loadRoots()))
+    else if (loamList.length === 0) body.push(h('div', { class: 'fs-quiet', text: 'No Loam files folders found.' }))
+    else {
+      body.push(
+        h(
+          'div',
+          { class: 'card card-group fs-loam-list' },
+          ...loamList.map((item) =>
+            h(
+              'button',
+              {
+                class: 'setrow fs-loam-row',
+                key: `loam:${item.path}`,
+                type: 'button',
+                onclick: () => go('vault', item.path, { isFile: false, row: item.resource }),
+              },
+              h('div', { class: 'icon-tile fs-foldertile' }, icon.folder(18)),
+              h(
+                'div',
+                { class: 'fs-words' },
+                h('div', { class: 'fs-name', text: item.name }),
+                h('div', { class: 'fs-meta', text: item.description }),
+              ),
+              item.resource?.modified ? h('span', { class: 'fs-recent-when', text: when(item.resource.modified) }) : null,
+              icon.chevronRight(10),
+            ),
+          ),
+        ),
+      )
+    }
   } else if (!own && st.root?.startsWith?.('@')) {
     body.push(h('div', { class: 'fs-quiet', 'aria-busy': 'true' }))
   } else if (own) {
@@ -1824,14 +2208,17 @@ export function folderView(files, { go, wide, collapse = null, historyBack = nul
   } else if (st.listing.loading && st.listing.rows.length === 0) {
     body.push(h('div', { class: 'fs-quiet', text: 'Loading…' }))
   } else {
-    if (st.listing.rows.length === 0) body.push(emptyState({ object: 'folder', size: 'small', title: 'Nothing here yet', body: firstUseActive() ? 'Keep files here with your agents.' : 'What you or your agents put in this folder shows up here.', props: { class: 'fs-quiet' } }))
-    else if (st.listing.rows.length > 0) {
+    const atVaultTop = st.root === 'vault' && st.path === ''
+    const visibleRows = atVaultTop ? st.listing.rows.filter((row) => !loamPaths.has(row.path)) : st.listing.rows
+    if (visibleRows.length === 0 && !(atVaultTop && loamList.length > 0)) {
+      body.push(emptyState({ object: 'folder', size: 'small', title: 'Nothing here yet', body: firstUseActive() ? 'Keep files here with your agents.' : 'What you or your agents put in this folder shows up here.', props: { class: 'fs-quiet' } }))
+    } else if (visibleRows.length > 0) {
       const marksFor = openFileMarks(files, go)
       body.push(
         h(
           'div',
           { class: 'card card-group' },
-          ...st.listing.rows.map((row) => fileEntry(files, row, { go, home, marksFor })),
+          ...visibleRows.map((row) => fileEntry(files, row, { go, home, marksFor })),
         ),
       )
     }
@@ -1843,6 +2230,22 @@ export function folderView(files, { go, wide, collapse = null, historyBack = nul
           onclick: () => files.loadFolder(true),
           text: st.listing.loading ? 'Loading…' : st.listing.total !== null ? `Show more (${st.listing.rows.length} of ${st.listing.total})` : 'Show more',
         }),
+      )
+    }
+    if (atVaultTop && loamList.length > 0) {
+      body.push(
+        h(
+          'button',
+          { class: 'fs-loam-entry', key: 'fs:loamfiles', type: 'button', onclick: () => go('loam', '', { isFile: false }) },
+          h('span', { class: 'fs-loam-tile', 'aria-hidden': 'true' }, icon.cog(18)),
+          h(
+            'div',
+            { class: 'fs-words' },
+            h('div', { class: 'fs-name', text: 'Loam files' }),
+            h('div', { class: 'fs-meta', text: 'What Loam needs to run. You’ll rarely need this.' }),
+          ),
+          icon.chevronRight(10),
+        ),
       )
     }
   }
@@ -2233,9 +2636,9 @@ export function addSheet(files, { close, nameField, nameValue = () => nameField.
       s.resource && files.st.notice ? h('div', { class: 'listnotice inline', role: 'status', text: files.st.notice }) : null,
       h(
         'button',
-        { class: 'sheetrow fs-shortcuttoggle', onclick: () => { s.toggle(); files.st.sheet = null; close.redraw?.() } },
-        s.resource && !isFolder(s.resource) ? h('div', { class: 'icon-tile', style: { background: tileOf(s.name).bg, color: tileOf(s.name).fg } }, icon.file(18), h('span', { text: tileOf(s.name).label })) : h('div', { class: 'icon-tile fs-foldertile' }, icon.folder(18)),
-        h('div', { class: 'fs-words' }, h('div', { class: 'fs-name', text: s.on ? 'Remove from shortcuts' : 'Add to shortcuts' }), h('div', { class: 'fs-meta', text: s.on ? 'It leaves the Files home; the original stays.' : 'It appears on the Files home, after the others.' })),
+        { class: 'sheetrow fs-shortcuttoggle fs-pintoggle', onclick: () => { s.toggle(); files.st.sheet = null; close.redraw?.() } },
+        icon.pin(18),
+        h('div', { class: 'fs-words' }, h('div', { class: 'fs-name', text: s.on ? 'Unpin' : 'Pin' }), h('div', { class: 'fs-meta', text: s.on ? 'Remove from Pinned on Files home; the original stays.' : 'Keep in Pinned on your Files home.' })),
       ),
       s.kind === 'resource' && s.includeDelete && canDeleteFile(s.resource) ? h('button', { class: 'sheetrow fs-menu-delete danger', type: 'button', onclick: () => files.beginDelete(s.resource) }, icon.trash(18), h('span', { text: 'Delete' })) : null,
     ]

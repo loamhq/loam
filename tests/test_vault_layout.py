@@ -102,17 +102,17 @@ def main() -> int:
     flat = json.dumps(inst)
     check("an install: no path names the first install's folders",
           [w for w in ("00_INBOX", "40_PROJECTS", "99_SYSTEM", "from-agents") if w in flat], [])
-    check("an install: the failure log is in the inbox",
+    check("an install: the failure log is in Loam files (System)",
           (inst["failure_log"], inst["activity_log"]),
-          ("Inbox/loam-wake-failures.md", "Inbox/loam-wake-failures.md"))
+          ("System/loam-wake-failures.md", "System/loam-wake-failures.md"))
     check("an install: receipts under Projects", inst["receipts"], "Projects/widget/receipts")
     check("an install: pinned paths are the install's",
-          inst["pinned"][:3], ["Inbox/loam-wake-failures.md", "Inbox/archive",
+          inst["pinned"][:3], ["System/loam-wake-failures.md", "Inbox/archive",
                                "Projects/*/receipts"])
     check("an install: the inbox sweep reads the install's folders", inst["sweep"],
           "Inbox/archive")
     check("an install: a failure lands there", inst["written"],
-          ["Inbox/loam-wake-failures.md"])
+          ["System/loam-wake-failures.md"])
 
     print(f"\n{'OK' if not FAILURES else f'{FAILURES} FAILED'}")
     return 1 if FAILURES else 0

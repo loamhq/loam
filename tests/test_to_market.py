@@ -119,7 +119,7 @@ try:
 
     # On: installed from the Market listing's link.
     reset()
-    switches({**dict.fromkeys(moved.MOVED, True), "daily-notes": True})
+    switches({**dict.fromkeys(moved.MOVED, True), "quick-actions": True})
     settings_dir = loam_plugins.agents_path("read-aloud")
     settings_dir.parent.mkdir(parents=True)
     settings_dir.write_text(json.dumps({"agents": {"ada": {"voice": "Kore"}}}))

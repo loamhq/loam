@@ -103,16 +103,64 @@ def warnings_for(raw: str, workspace: Path | None) -> list[str]:
     return out
 
 
+def _response_paths(payload: dict) -> list[str]:
+    """Extract output paths returned by image/document tools when target_path was omitted."""
+    tool = payload.get("tool_name", "")
+    if tool not in ("mcp__images__generate_image", "mcp__composition__generate_image",
+                    "mcp__composition__generate_pdf"):
+        return []
+    resp = payload.get("tool_response")
+    if isinstance(resp, str):
+        try:
+            resp = json.loads(resp)
+        except ValueError:
+            return []
+    if isinstance(resp, list):
+        for item in resp:
+            if isinstance(item, dict) and isinstance(item.get("text"), str):
+                try:
+                    resp = json.loads(item["text"])
+                    break
+                except ValueError:
+                    continue
+    if not isinstance(resp, dict):
+        return []
+    out: list[str] = []
+    for key in ("paths", "vault_paths"):
+        vals = resp.get(key)
+        if isinstance(vals, list):
+            out.extend(str(v) for v in vals if isinstance(v, str) and v)
+    if isinstance(resp.get("path"), str) and resp["path"]:
+        out.append(resp["path"])
+    return out
+
+
 def main() -> None:
     try:
         payload = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
         sys.exit(0)
     try:
-        workspace = Path(load_config(project_dir_from(payload))["workspace"])
+        config = load_config(project_dir_from(payload))
+        workspace = Path(config["workspace"])
     except (LayerError, KeyError, OSError, ValueError):
+        config = {}
         workspace = None
     paths = written_paths(payload)
+    extra = _response_paths(payload)
+    # Record write attribution for Files › Recent before returning warnings.
+    all_written = list(dict.fromkeys([*paths, *extra]))
+    if all_written and workspace is not None:
+        agent_id = str(config.get("id") or workspace.name).strip().lower()
+        vault = Path(config["vault"]) if config.get("vault") else None
+        if agent_id:
+            try:
+                import loam_recent  # noqa: PLC0415
+                for raw in all_written:
+                    loam_recent.record_write(raw, kind="agent", actor=agent_id,
+                                             source="hook", vault=vault)
+            except Exception:  # noqa: BLE001 -- attribution must never block a tool
+                pass
     if not paths:
         sys.exit(0)
     found = [w for raw in paths for w in warnings_for(raw, workspace)]

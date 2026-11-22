@@ -2716,3 +2716,39 @@ provider still has to recognise its own soul and reject the held-out text.
 The wake log identifies the negative phrase's source. A scratch install's
 `bin/thread post` also needs its broker address and port to agree with the
 listener for immediate notification in an open page.
+
+## 2026-11-22 — Files home, write-time attribution, and vault cleanup
+
+- **Names and Loam files.** The UI presents the vault as **Your files** and
+  agent workspaces as **Agent files** (paths and config keys stay unchanged).
+  Configured `[vault]` machinery folders (`conversations`, `attachments`,
+  `boards`, `system`) are listed under `loam_files` on `GET /v1/files/roots`
+  and hidden from the top of Your files behind a quiet **Loam files** entry
+  (`/files/loam`); search/resolve, wiki-links, and deep links still reach them.
+  Host-offered default shortcuts (`VAULT_SHORTCUTS`) were removed so Pinned
+  starts empty and only carries what the owner pins.
+- **Write-time attribution ledger (`lib/loam_recent.py`).** Vault auto-commit
+  uses one bot identity and frontmatter is neither required nor trustworthy
+  (launcher receipts carry the briefing persona's name). Writes are recorded
+  into `<state>/files/attribution.sqlite` (WAL) from app saves/creates/uploads,
+  the persona PostToolUse hook (`hooks/loading_size.py`), thread turns, wakes,
+  and engineer jobs/receipts. Engineer writes, `<projects>/*/receipts/**`,
+  `<projects>/Loam/engineer/**`, `schedule.md`, and Loam files never appear in
+  Recent. **Keep `run_turn`'s `finally:` non-awaiting** before
+  `remember_session(..., watch=...)`: yielding with `await asyncio.to_thread`
+  there opens a SIGTERM race that drops after-result watches
+  (`test_session_processes.py`); schedule `record_diff` with `run_in_executor`
+  instead.
+- **Phone back from a file opened on Files (`returnToList`).** Opening a file
+  from the Files list on a narrow viewport sets `returnToList` so Back returns
+  to Files even when a chat or prior file remains in the main history stack.
+- **`quick-actions` and update cleanup.** `plugins/quick-actions/` (`default_on:
+  false`) replaces `daily-notes` and the always-on inbox button, using
+  conditional `vault.folder` (`when: {setting, in: [...]}`) so `Inbox` is not
+  created when only `daily-note` is chosen. `lib/loam_vault_cleanup.py` (hooked
+  into `bin/library install` on updates) moves thread boards into `[vault].boards`
+  and `loam-wake-failures.md` into `<system>/`, moves empty or insubstantial
+  (`<= 5` non-frontmatter words) seeded folders (`Inbox`, `Daily`, `Images`)
+  recoverably into `<vault>/.trash/loam-cleanup-<stamp>/`, and migrates active
+  inbox/daily installs into `quick-actions`. New installs seed only
+  `About me.md`, `<projects>/Loam/Start here.html`, `README.md`, and Loam files.

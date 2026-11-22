@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Start here — Loam</title>
+<style>
+  :root {
+    --bg: #f6f2eb;
+    --surface: #fcfaf6;
+    --card: #ede7dc;
+    --ink: #1e1b18;
+    --ink-2: #524b43;
+    --ink-3: #6e665c;
+    --rule: rgba(30, 27, 24, 0.11);
+    --accent: #7a5236;
+    --accent-soft: #e6d8c5;
+    --sand: #cda57f;
+    --umber: #7a5236;
+    --earth: #4a3a2e;
+    --radius: 20px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1b1917;
+      --surface: #24211e;
+      --card: #2d2925;
+      --ink: #f3ede4;
+      --ink-2: #c9bfb2;
+      --ink-3: #a69c90;
+      --rule: rgba(243, 237, 228, 0.12);
+      --accent: #d4ad86;
+      --accent-soft: #3a3027;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    padding: clamp(20px, 5vw, 56px) clamp(16px, 4vw, 32px) 72px;
+  }
+  main {
+    max-width: 720px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+  .hero {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 26px;
+    padding: clamp(24px, 5vw, 40px);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .mark-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .kicker {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  h1 {
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+    font-weight: 400;
+    font-size: clamp(30px, 6vw, 42px);
+    line-height: 1.12;
+    letter-spacing: -0.01em;
+  }
+  .lead {
+    font-size: 17px;
+    color: var(--ink-2);
+    max-width: 58ch;
+  }
+  .section-head {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 0 4px;
+  }
+  h2 {
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+    font-weight: 400;
+    font-size: 24px;
+    line-height: 1.2;
+  }
+  .section-head p {
+    color: var(--ink-2);
+    font-size: 15px;
+  }
+  .places {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+  }
+  @media (max-width: 640px) {
+    .places { grid-template-columns: 1fr; }
+  }
+  .place {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .icon-badge {
+    width: 42px;
+    height: 42px;
+    border-radius: 13px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    display: grid;
+    place-items: center;
+    flex: none;
+  }
+  .place h3 {
+    font-size: 17px;
+    font-weight: 650;
+  }
+  .place p {
+    font-size: 14.5px;
+    color: var(--ink-2);
+    line-height: 1.48;
+  }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    padding: clamp(20px, 4vw, 28px);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .agent-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  .agent-dots {
+    display: flex;
+    align-items: center;
+    flex: none;
+    padding-top: 2px;
+  }
+  .dot {
+    width: 34px;
+    height: 34px;
+    border-radius: 56% 44% 52% 48% / 48% 55% 45% 52%;
+    border: 2px solid var(--surface);
+    display: grid;
+    place-items: center;
+    font-size: 13px;
+    font-weight: 700;
+    color: #fff;
+  }
+  .dot + .dot { margin-left: -10px; }
+  .dot-1 { background: #7a5236; }
+  .dot-2 { background: #4e7a72; }
+  .dot-3 { background: #8a7d4a; }
+  @media (max-width: 520px) {
+    .agent-row { flex-direction: column; gap: 12px; }
+  }
+  .steps {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .steps li {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    background: var(--card);
+    font-size: 15px;
+    color: var(--ink-2);
+  }
+  .steps strong { color: var(--ink); font-weight: 650; }
+  .num {
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--accent);
+    font-size: 12.5px;
+    font-weight: 700;
+    display: grid;
+    place-items: center;
+    flex: none;
+    margin-top: 1px;
+  }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.9em;
+    background: var(--surface);
+    padding: 1px 6px;
+    border-radius: 6px;
+    color: var(--ink);
+  }
+  footer {
+    text-align: center;
+    font-size: 13.5px;
+    color: var(--ink-3);
+    padding-top: 4px;
+  }
+</style>
+</head>
+<body>
+<main>
+  <section class="hero">
+    <div class="mark-row">
+      <svg width="42" height="42" viewBox="0 0 64 64" aria-hidden="true">
+        <defs>
+          <clipPath id="loam-clip">
+            <path d="M34 3 C52 3 61 15 60 33 C59 51 49 61 31 61 C13 61 3 50 4 32 C5 14 16 3 34 3 Z"/>
+          </clipPath>
+        </defs>
+        <g clip-path="url(#loam-clip)">
+          <rect width="64" height="64" fill="var(--sand)"/>
+          <path d="M0 27 C12 21 22 33 34 27 S54 23 64 29 V64 H0 Z" fill="var(--umber)"/>
+          <path d="M0 45 C14 39 24 51 36 45 S56 41 64 47 V64 H0 Z" fill="var(--earth)"/>
+        </g>
+      </svg>
+      <span class="kicker">Welcome to Loam</span>
+    </div>
+    <h1>Start here</h1>
+    <p class="lead">
+      Loam is your own quiet place to think, write, and build alongside personal AI agents — backed by plain files that belong to you.
+    </p>
+  </section>
+
+  <section aria-labelledby="places-heading">
+    <div class="section-head">
+      <h2 id="places-heading">Three places</h2>
+      <p>Everything in Loam lives in three tabs.</p>
+    </div>
+    <div class="places" style="margin-top: 14px;">
+      <article class="place">
+        <div class="icon-badge" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20.5 11.7a8 8 0 0 1-8.6 8 8.7 8.7 0 0 1-3.6-.9L3.5 20.5l1.7-4.8a8 8 0 0 1-.9-3.7 8 8 0 0 1 8-8 8 8 0 0 1 8.2 7.7z"/>
+          </svg>
+        </div>
+        <h3>Chats</h3>
+        <p>Talk with one agent or bring several into the same thread. Every conversation stays saved and searchable.</p>
+      </article>
+
+      <article class="place">
+        <div class="icon-badge" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 7a2 2 0 0 1 2-2h3.5l2 2.5H19a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+          </svg>
+        </div>
+        <h3>Files</h3>
+        <p><strong>Your files</strong> holds everything written by you or your agents. <strong>Agent files</strong> lets you see what each agent keeps for itself.</p>
+      </article>
+
+      <article class="place">
+        <div class="icon-badge" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="7" rx="1.5"/>
+            <rect x="14" y="3" width="7" height="7" rx="1.5"/>
+            <rect x="3" y="14" width="7" height="7" rx="1.5"/>
+            <rect x="14" y="14" width="7" height="7" rx="1.5"/>
+          </svg>
+        </div>
+        <h3>Apps</h3>
+        <p>Small web apps, dashboards, and tools you and your agents build and run on your own server.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="agents-heading">
+    <div class="agent-row">
+      <div class="agent-dots" aria-hidden="true">
+        <span class="dot dot-1">I</span>
+        <span class="dot dot-2">C</span>
+        <span class="dot dot-3">A</span>
+      </div>
+      <div>
+        <h2 id="agents-heading" style="margin-bottom: 6px;">Who your agents are</h2>
+        <p style="color: var(--ink-2); font-size: 15px;">
+          Each agent has its own voice, memory, and skills in <strong>Agent files</strong>, and collaborates with you in <strong>Your files</strong>. You can read everything they keep, shape how they work, and add new agents whenever a distinct perspective would help.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="yours-heading">
+    <div>
+      <h2 id="yours-heading" style="margin-bottom: 4px;">Make Loam yours</h2>
+      <p style="color: var(--ink-2); font-size: 15px;">A few easy first moves — none required.</p>
+    </div>
+    <ol class="steps">
+      <li>
+        <span class="num">1</span>
+        <div><strong>Say hello in Chats.</strong> Tell your starter agent what you are working on, or ask it to introduce itself.</div>
+      </li>
+      <li>
+        <span class="num">2</span>
+        <div><strong>Shape <code>About me.md</code>.</strong> It lives at the top of Your files — your agents learn from it and keep it up to date with you.</div>
+      </li>
+      <li>
+        <span class="num">3</span>
+        <div><strong>Pin what matters.</strong> Open any file or folder’s <code>⋯</code> menu and choose <strong>Pin</strong> so it stays one tap away on your Files home.</div>
+      </li>
+      <li>
+        <span class="num">4</span>
+        <div><strong>Explore Settings › Plugins.</strong> Turn on Quick actions (for one-tap New note and Today’s note buttons), Images, themes, or extensions from the Market.</div>
+      </li>
+    </ol>
+  </section>
+
+  <footer>
+    This page lives at <code>Projects/Loam/Start here.html</code>. Edit it, move it, or delete it anytime.
+  </footer>
+</main>
+</body>
+</html>

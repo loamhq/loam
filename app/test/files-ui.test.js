@@ -19,8 +19,8 @@ import { filesHost } from './files-host.js'
 import { rendered } from './layout.js'
 
 const { host, routes } = filesHost()
-routes['GET /v1/plugins/daily-notes'] = (req, res) => res.end(JSON.stringify({ plugin: { id: 'daily-notes', on: true } }))
-routes['GET /v1/plugins/daily-notes/settings'] = (req, res) => res.end(JSON.stringify({ id: 'daily-notes', entries: [], values: { folder: '10_DAILY' } }))
+routes['GET /v1/plugins/quick-actions'] = (req, res) => res.end(JSON.stringify({ plugin: { id: 'quick-actions', on: true } }))
+routes['GET /v1/plugins/quick-actions/settings'] = (req, res) => res.end(JSON.stringify({ id: 'quick-actions', entries: [], values: { actions: 'both', inbox_folder: '00_INBOX', daily_folder: '10_DAILY' } }))
 threadPage(routes, { sent: host.sent, started: host.started })
 const broker = await fakeBroker(routes)
 const app = await appAgainst(broker)
@@ -143,7 +143,7 @@ test('a link found elsewhere opens it; several is a choice; nothing says what wa
   const sheet = await until(() => find(root, 'fs-sheet'))
   assert.equal(text(find(sheet, 'sheettitle')), 'Which file?')
   assert.match(text(sheet), /matches 7 files; the 2 nearest the top are shown/)
-  assert.deepEqual(all(sheet, 'fs-candidate').map((c) => text(find(c, 'fs-meta'))), ['Vault / a', 'Vault / b / c'])
+  assert.deepEqual(all(sheet, 'fs-candidate').map((c) => text(find(c, 'fs-meta'))), ['Your files / a', 'Your files / b / c'])
   click(find(sheet, 'iconbtn'))
   await until(() => !find(root, 'fs-sheet'))
   click(link('Gone'))
@@ -260,16 +260,16 @@ test('leaving an edit saves it on the way out; one that cannot be saved asks in 
   await until(() => find(root, 'fs-leave'))
   assert.equal(globalThis.location.pathname, '/files/vault/Notes/plan.md')
   click(find(root, 'fs-leave'))
-  await until(() => !find(root, 'fs-file') && text(find(root, 'fs-title')) === 'Vault')
+  await until(() => !find(root, 'fs-file') && text(find(root, 'fs-title')) === 'Your files')
   assert.equal(globalThis.location.pathname, '/files/vault')
   assert.equal(nativeAsked.length, 0)
   // A reload over an unsaved edit is the one place the browser asks.
   assert.equal((winListeners.get('beforeunload') ?? []).length, 1)
 })
 
-test('the Files home starts as Chats does, and its shortcuts are theirs: empty, then added from a folder’s menu, then removed', async () => {
+test('the Files home starts as Chats does, Pinned starts empty, then pins from a folder’s menu and unpins', async () => {
   popTo('/files')
-  await until(() => all(root, 'fs-rootcard').length === 2)
+  await until(() => all(root, 'fs-place').length === 2)
   // The Chats header, class for class: no back row above it, no line under it.
   const head = find(root, 'fs-homehead')
   assert.match(head.getAttribute('class'), /\bhome-head\b/)
@@ -284,52 +284,53 @@ test('the Files home starts as Chats does, and its shortcuts are theirs: empty, 
     return { head: head.top - screen.top, pad: getComputedStyle(document.querySelector('.fs-homehead')).paddingTop, size: getComputedStyle(title).fontSize }
   })
   if (painted) assert.deepEqual(painted, { head: 0, pad: '22px', size: '34px' })
-  assert.deepEqual(all(root, 'fs-rootname').map(text), ['Vault', 'AI Spaces'])
-  assert.match(text(all(root, 'fs-rootdesc')[0]), /inbox, daily notes/, 'the page’s own description, not the host’s')
+  assert.deepEqual(all(root, 'fs-rootname').map(text), ['Your files', 'Agent files'])
+  assert.equal(text(all(root, 'fs-rootdesc')[0]), 'Written by you or your agents, for you.')
+  assert.equal(text(all(root, 'fs-rootdesc')[1]), 'What your agents keep for themselves.')
   assert.equal(find(root, 'fs-rootcount'), null, 'no count is invented')
-  // Not the host's shortcuts: theirs, and they have none yet.
-  assert.deepEqual(all(find(root, 'fs-shortcuts'), 'fs-name').map(text), ['System notes', 'App'])
-  assert.equal(find(root, 'fs-noshort'), null)
-  assert.ok(find(root, 'fs-newinbox') && find(root, 'fs-daily'), 'the two actions are at the top of the home')
-  // A folder's menu adds it.
-  click(all(root, 'fs-rootcard')[0])
+  // Nothing is seeded pinned: Pinned shows its empty state.
+  assert.ok(find(root, 'fs-pinned-empty'))
+  assert.match(text(find(root, 'fs-noshort')), /⋯ menu.*Pin/)
+  assert.ok(find(root, 'fs-newinbox') && find(root, 'fs-daily'), 'quick actions appear at the top when plugin is on')
+  assert.equal(text(find(root, 'fs-newinbox')), 'New note')
+  assert.equal(text(find(root, 'fs-daily')), 'Today’s note')
+  // A folder's ⋯ menu pins it.
+  click(all(root, 'fs-place')[0])
   await until(() => rowNamed('Notes'))
+  // Loam files folder (00_System) is hidden behind the quiet Loam files row.
+  assert.equal(rowNamed('00_System'), undefined)
+  assert.ok(find(root, 'fs-loam-entry'))
   click(rowNamed('Notes'))
   await until(() => text(find(root, 'fs-title')) === 'Notes' && rowNamed('plan.md'))
   click(find(root, 'fs-menu'))
   const toggle = await until(() => find(root, 'fs-shortcuttoggle'))
-  assert.match(text(toggle), /^Add to shortcuts/)
+  assert.match(text(toggle), /^Pin/)
   click(toggle)
   popTo('/files')
   await until(() => find(root, 'fs-shortcut'))
-  assert.deepEqual(all(find(root, 'fs-shortcuts'), 'fs-name').map(text), ['Notes', 'System notes', 'App'])
+  assert.deepEqual(all(find(root, 'fs-pinned'), 'fs-name').map(text), ['Notes'])
   assert.deepEqual(JSON.parse(globalThis.localStorage.getItem('loam-ui.files')).shortcuts, [{ root: 'vault', path: 'Notes' }])
-  // And its menu, opened from the shortcut, takes it off again.
-  click(find(root, 'fs-shortcut'))
-  await until(() => text(find(root, 'fs-title')) === 'Notes' && find(root, 'fs-menu'))
-  click(find(root, 'fs-menu'))
-  click(await until(() => find(root, 'fs-shortcuttoggle')))
-  popTo('/files')
-  await until(() => all(root, 'fs-shortcut').length === 0 && all(root, 'fs-host-shortcut').length === 2)
+  // And its ⋯ menu on Pinned unpins it back to the empty state.
+  click(find(root, 'fs-shortcutmenu'))
+  const unpin = await until(() => find(root, 'fs-shortcuttoggle'))
+  assert.match(text(unpin), /^Unpin/)
+  click(unpin)
+  await until(() => find(root, 'fs-pinned-empty'))
+  assert.deepEqual(JSON.parse(globalThis.localStorage.getItem('loam-ui.files')).shortcuts, [])
 })
 
-test('host-suggested folders use the personal shortcut menu and stay removed on the next home visit', async () => {
-  popTo('/files')
-  await until(() => all(root, 'fs-host-shortcut').length === 2)
-  click(all(root, 'fs-shortcutmenu')[0])
-  const toggle = await until(() => find(root, 'fs-shortcuttoggle'))
-  assert.match(text(toggle), /^Remove from shortcuts/)
-  click(toggle)
-  await until(() => all(root, 'fs-host-shortcut').length === 1)
-  assert.deepEqual(JSON.parse(localStorage.getItem('loam-ui.files')).hiddenShortcuts, [{ root: 'vault', path: '00_System' }])
+test('Loam files opens from the bottom of Your files and reaches machinery folders', async () => {
   popTo('/files/vault')
-  await until(() => rowNamed('Notes'))
-  popTo('/files')
-  await until(() => all(root, 'fs-host-shortcut').length === 1)
-  assert.equal(text(find(all(root, 'fs-host-shortcut')[0], 'fs-name')), 'App')
+  await until(() => find(root, 'fs-loam-entry'))
+  click(find(root, 'fs-loam-entry'))
+  await until(() => text(find(root, 'fs-title')) === 'Loam files')
+  assert.equal(all(root, 'fs-loam-row').length, 1)
+  assert.match(text(all(root, 'fs-loam-row')[0]), /00_System/)
+  click(all(root, 'fs-loam-row')[0])
+  await until(() => text(find(root, 'fs-title')) === '00_System')
 })
 
-test('Open daily note uses the enabled plugin’s folder and makes today’s YYYY-MM-DD.md and opens it; New inbox note makes one in 00_INBOX', async () => {
+test('Today’s note uses the quick-actions plugin’s daily_folder and New note uses its inbox_folder', async () => {
   popTo('/files')
   await until(() => find(root, 'fs-daily'))
   const before = host.creates.length
@@ -353,7 +354,7 @@ test('old System URLs return to Files home with a quiet notice and no system req
   const before = broker.seen.length
   for (const path of ['/files/system', '/files/system/Engineer/Role.md']) {
     popTo(path)
-    await until(() => all(root, 'fs-rootcard').length === 2 && text(find(root, 'inline')) === 'That location is no longer shown.')
+    await until(() => all(root, 'fs-place').length === 2 && text(find(root, 'inline')) === 'That location is no longer shown.')
     assert.equal(globalThis.location.pathname, '/files')
     assert.equal(find(root, 'fs-host-records'), null)
     assert.equal(all(root, 'inline').length, 1)
@@ -497,7 +498,7 @@ test('several files go one by one; each failure is drawn as its own, a retry sen
   await until(() => find(root, 'fs-uploaddone'))
   const sheet = find(root, 'fs-sheet')
   assert.equal(text(find(sheet, 'sheettitle')), '3 of 4 not uploaded')
-  assert.equal(text(find(sheet, 'fs-sub')), 'Into Vault / Notes')
+  assert.equal(text(find(sheet, 'fs-sub')), 'Into Your files / Notes')
   const line = (name) => all(sheet, 'sheetrow').find((r) => text(find(r, 'fs-name')) === name)
   assert.match(text(find(line('flaky.pdf'), 'fs-meta')), /could not be reached/)
   assert.match(text(find(line('tool.exe'), 'fs-meta')), /not a type Files takes/)
@@ -523,7 +524,7 @@ test('several files go one by one; each failure is drawn as its own, a retry sen
 
 test('a folder the host does not let you add to has no Upload anywhere', async () => {
   popTo('/files/spaces')
-  await until(() => text(find(root, 'fs-title')) === 'AI Spaces' && text(root).includes('Nothing here yet'))
+  await until(() => text(find(root, 'fs-title')) === 'Agent files' && text(root).includes('Nothing here yet'))
   assert.equal(find(root, 'fs-add'), null)
   assert.equal(find(root, 'fs-upload'), null)
   popTo('/files/vault/Notes')

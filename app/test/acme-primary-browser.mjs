@@ -17,7 +17,7 @@ try {
       const url = new URL(r.request().url())
       if (url.origin !== app.url) { external.push(url.href); return r.abort() }
       if (url.pathname === '/app.js') return r.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.__primary={goSettings,pluginLoader};' })
-      if (url.pathname === '/api/plugins/daily-notes') return r.fulfill({ json: { plugin: { on: false } } })
+      if (url.pathname === '/api/plugins/quick-actions') return r.fulfill({ json: { plugin: { on: false } } })
       if (url.pathname === '/api/files/roots') return r.fulfill({ json: { roots: [] } })
       return r.continue()
     })

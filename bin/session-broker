@@ -2686,6 +2686,7 @@ class Server:
         from urllib.parse import unquote_plus
         q = {k: unquote_plus(v) for k, v in params.items()}
         nocache = "Cache-Control: no-store\r\n"
+        import loam_recent  # noqa: PLC0415
         reads = {"roots": lambda: files_api.roots(),
                  "list": lambda: files_api.listing(q.get("root", ""), q.get("path"),
                                                q.get("cursor"), q.get("limit")),
@@ -2693,7 +2694,9 @@ class Server:
                                                      q.get("path")),
                  "read": lambda: files_api.read_text(q.get("root", ""), q.get("path")),
                  "resolve": lambda: files_api.resolve(q.get("ref"), q.get("from_root"),
-                                                  q.get("from_path"))}
+                                                  q.get("from_path")),
+                 "recent": lambda: loam_recent.recent_files(
+                     q.get("who", "all"), q.get("window", "default"))}
         writes = {("text", "PUT"): (200, files_api.save_text),
                   ("file", "POST"): (201, files_api.create_file),
                   ("folder", "POST"): (201, files_api.create_folder),
