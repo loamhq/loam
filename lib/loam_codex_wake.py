@@ -492,6 +492,11 @@ def ask(workspace: Path, instructions_text: str, model: str | None,
         server.close()
     if not out.ok:
         return out.error or "the Codex turn failed with no message"
+    if out.tool_calls or out.subagents:
+        return (
+            "identity probe used tools "
+            f"(tool_calls={out.tool_calls}, subagents={out.subagents})"
+        )
     return out.reply
 
 
