@@ -1265,7 +1265,7 @@ class Server:
                                    raw, content_type)
             return
 
-        # Thread and board routes
+        # Thread routes
         if parts[:2] == ["v1", "threads"]:
             await self.threads_route(method, parts[2:], params, payload, writer,
                                      raw, content_type)
@@ -2110,12 +2110,11 @@ class Server:
                 "turns": engine.live_turns(thread_id),
                 # Keep incomplete-turn markers separate from messages.
                 "marks": engine.marks_for(thread_id),
-                "pending_permissions": engine.pending(thread_id),
-                "board": threads_rec.board_snapshot(meta)}))
+                "pending_permissions": engine.pending(thread_id)}))
             await writer.drain()
             return
         if not rest and method == "DELETE":
-            # Deleting the thread and its board requires the owner's explicit request.
+            # Deleting the thread and its associated files requires the owner's explicit request.
             if engine.live_turns(thread_id):
                 raise BrokerError(409, "a turn is running in this thread; "
                                        "delete it when the turn has finished")
@@ -2310,23 +2309,6 @@ class Server:
             writer.write(response(200, body))
             await writer.drain()
             return
-        if rest == ["board"] and method in ("GET", "PUT"):
-            meta = threads_rec.read(thread_id)[0]
-            if method == "PUT":
-                by = author(payload)
-                board = threads_rec.write_board(meta, payload.get("markdown"), payload.get("base_revision"))
-                if by:
-                    print(f"threads: {thread_id} board written by {by}",
-                          file=sys.stderr, flush=True)
-            else:
-                board = threads_rec.board_snapshot(meta)
-            board["board_new"] = threads_rec.board_new(board["markdown"])
-            if method == "PUT":
-                engine.publish(thread_id, {"type": "board.changed",
-                                           "board_new": board["board_new"]})
-            writer.write(response(200, board))
-            await writer.drain()
-            return
         if rest == ["steps"] and method == "GET":
             # Read full recorded steps for one message or the whole thread.
             threads_rec.read(thread_id)          # 404 for a thread that isn't
@@ -2406,10 +2388,8 @@ class Server:
     async def thread_stream(self, thread_id: str, after: str | None,
                             writer: asyncio.StreamWriter, full: bool = False) -> None:
         """A thread's live events. The engine publishes its own; a post made
-        by ``bin/thread`` (an agent's wake) and an edit of the board in
-        Obsidian are seen by watching the two files, every two seconds."""
+        by ``bin/thread`` (an agent's wake) is seen by watching the record every two seconds."""
         meta, msgs, path = threads_rec.read(thread_id)
-        board = threads_rec.VAULT / meta["board"]
 
         def number(message):
             return threads_rec._num(message["id"])
@@ -2423,7 +2403,7 @@ class Server:
             except OSError:
                 return None
 
-        record_at, board_at = None, stamp(board)
+        record_at = None
         queue = self.threads.listen(thread_id)
         self._open_stream(writer)
         try:
@@ -2474,25 +2454,14 @@ class Server:
                     await send(event)
                     continue
                 quiet += 2
-                now_record, now_board = stamp(path), stamp(board)
+                now_record = stamp(path)
                 if now_record != record_at:
                     record_at = now_record
                     try:
                         meta, fresh, path = threads_rec.read(thread_id)
                     except threads_rec.ThreadError:
                         return
-                    # Follow a renamed board to its current path.
-                    board = threads_rec.VAULT / meta["board"]
                     await catch_up(fresh)
-                if now_board != board_at:
-                    board_at = now_board
-                    try:
-                        text = board.read_text("utf-8")
-                    except OSError:
-                        text = ""
-                    await self._send_event(writer, {
-                        "type": "board.changed", "thread": thread_id,
-                        "board_new": threads_rec.board_new(text)})
                 if quiet >= KEEPALIVE_S:
                     quiet = 0.0
                     await self._ping(writer)

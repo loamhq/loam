@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Drive thread creation, routing, snapshots, mentions and board updates through the broker with a fake harness."""
+"""Drive thread creation, routing, snapshots, mentions through the broker with a fake harness."""
 
 import asyncio
 import importlib.machinery
@@ -24,10 +24,6 @@ for who in ("ada", "iris", "juno"):
         json.dumps({"name": who.capitalize()}))
 (TMP / "vault" / "15_CONVERSATIONS").mkdir(parents=True)
 (TMP / "vault" / "00_INBOX" / "from-agents").mkdir(parents=True)
-(TMP / "vault" / "00_INBOX" / "from-agents" / "comms.md").write_text(
-    "# From agents\n\n## Urgent\n\n- 2026-11-01 · **ada** · old line\n"
-    "- [ ] expired item <!-- Ada · new · until 2026-11-01 -->\n"
-    "- [ ] lasting item <!-- Iris · new · until 2099-01-01 -->\n")
 
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_broker as cfg  # noqa: E402
@@ -204,8 +200,6 @@ async def main():
     check("What I did carries the step and the text before it",
           [d["label"] for d in msgs[-1]["did"]], ["Said: Looking.", "Read: soul.md"])
     check("the reply is the text after the last step", msgs[-1]["text"], "ada here")
-    check("the board was made on first use", got["board"]["path"],
-          "00_INBOX/boards/What should we plant this spring — board.md")
 
     status, _ = await call(server, "POST", f"/v1/threads/{tid}/messages",
                            {"text": "@Iris what do you think?"})
@@ -273,22 +267,6 @@ async def main():
           (50, True))
     check("and opens under a quarter second cold", cold < 0.25, True)
 
-    # Board: PUT whole, swept by until.
-    status, board = await call(server, "PUT", f"/v1/threads/{tid}/board",
-                               {"base_revision": got["board"]["revision"],
-                                "markdown": "# b\n\n- [ ] keep\n"
-                                            "- [ ] old <!-- Iris · new · until 2026-11-07 -->\n"
-                                            "  - child of old\n"})
-    check("PUT board counts the new item", (status, board["board_new"]), (200, 1))
-    out = subprocess.run([sys.executable, str(AGENTS / "bin" / "sweep-boards"),
-                          "--today", "2026-11-08"], capture_output=True, text=True,
-                         env=os.environ)
-    after = (threads.VAULT / meta["board"]).read_text()
-    check("the sweep removed the expired item and its child", after, "# b\n\n- [ ] keep\n")
-    comms = (threads.VAULT / threads.GENERAL_BOARD).read_text()
-    check("General's board: the expired item gone, the rest kept",
-          ("expired item" in comms, "lasting item" in comms, "old line" in comms),
-          (False, True, True))
 
     # An agent posts into General.
     out = subprocess.run([sys.executable, str(AGENTS / "bin" / "thread"), "post",
@@ -337,7 +315,7 @@ async def main():
           (snap["pending"], snap["turn"]), ([], None))
     fake.kind = FakeSession
 
-    # Only the pinned General board gets precedence. Its title alone confers none.
+    # Only the pinned General thread gets precedence. Its title alone confers none.
     def ordered(rows):
         saved = threads.index, threads.summary
         by_id = {r["id"]: r for r in rows}

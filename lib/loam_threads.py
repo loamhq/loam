@@ -1,7 +1,7 @@
-"""Read and write Markdown thread and board records. Opening a thread reads its
+"""Read and write Markdown thread records. Opening a thread reads its
 record. The member's provider session supplies a turn and can be resumed or replaced.
 
-A thread's frontmatter identifies its default, members, engines and board::
+A thread's frontmatter identifies its default, members and engines::
 
     default: agent-a
     members: [agent-a, agent-b]
@@ -14,8 +14,7 @@ Each message starts with a heading and a metadata comment on the next line::
 
     The message text.
 
-Its text runs to the next heading and metadata pair. A board item's metadata
-appears at the end of the item line. Runtime state holds file locations, member
+Its text runs to the next heading and metadata pair. Runtime state holds file locations, member
 sessions and read positions. Rebuild the index from the records. Keep this
 module usable by bin/thread without the broker's environment.
 """
@@ -30,13 +29,12 @@ import secrets
 import tempfile
 import time
 from contextlib import contextmanager
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import loam_config as lc
 
 import loam_clock
-import loam_file_revision
 import loam_thread_files as thread_files
 
 VAULT = Path(os.environ.get("LOAM_VAULT") or lc.VAULT)
@@ -44,10 +42,8 @@ AI_LABS = Path(os.environ.get("LOAM_AI_LABS") or lc.WORKSPACES)
 STATE = Path(os.environ.get("LOAM_THREADS_STATE") or lc.STATE / "threads")
 
 CONVERSATIONS = lc.vault_folder("conversations")
-BOARDS = lc.vault_folder("boards")
 GENERAL_ID = "general"
 GENERAL_TITLE = "General"
-GENERAL_BOARD = lc.vault_folder("general_board")
 
 # Limit chains of agent mentions between owner messages. Report the limit in the
 # thread.
@@ -63,8 +59,6 @@ is_owner = lc.is_owner
 KINDS = ("message", "system", "bulletin")
 
 META_RE = re.compile(r"^<!-- loam (\{.*\}) -->\s*$")
-UNTIL_RE = re.compile(r"\buntil (\d{4}-\d{2}-\d{2})\b")
-ITEM_META_RE = re.compile(r"<!--\s*(.*?)\s*-->\s*$")
 MENTION_RE = re.compile(r"(?<![\w@])@([A-Za-z][\w-]*)")
 UNSAFE_TITLE = re.compile(r'[\\/:*?"<>|#^\[\]\n\r\t]')
 
@@ -149,12 +143,6 @@ def safe_title(title: str) -> str:
     return line[:80].rstrip() or "Untitled thread"
 
 
-def board_rel(thread_id: str, title: str) -> str:
-    if thread_id == GENERAL_ID:
-        return GENERAL_BOARD
-    return f"{BOARDS}/{safe_title(title)} — board.md"
-
-
 # -- the record ---------------------------------------------------------------
 
 def _yaml_list(items: list[str]) -> str:
@@ -201,7 +189,6 @@ def render_front(meta: dict) -> str:
               if m and p in meta["members"]}
     if models:
         lines.append(f"models: {_yaml_map(models)}")
-    lines.append(f"board: {meta['board']}")
     if meta.get("pinned"):
         lines.append("pinned: true")
     if meta.get("archived"):
@@ -756,24 +743,6 @@ def _unique_path(title: str, own: Path | None = None) -> Path:
     return path
 
 
-def _rename_board(thread_id: str, old_rel: str, title: str) -> str:
-    """Move a renamed thread's board with it. If another board owns the name, choose a free
-    suffix such as (2).
-    """
-    new_rel = board_rel(thread_id, title)
-    if new_rel == old_rel:
-        return old_rel
-    stem = new_rel[:-len(" — board.md")]
-    n = 2
-    while (VAULT / new_rel).exists():
-        new_rel = f"{stem} ({n}) — board.md"
-        n += 1
-    old = VAULT / old_rel
-    if old.exists():
-        old.rename(VAULT / new_rel)
-    return new_rel
-
-
 # Thread members use the broker's available provider engines.
 ENGINES = ("claude-code", "codex", "antigravity")
 
@@ -821,7 +790,7 @@ def create(persona: str | None = None, title: str | None = None, *,
             "icon": None, "archived": False, "models": {},
             "members": members,
             "engines": {},
-            "board": board_rel(thread_id, title), "pinned": pinned,
+            "pinned": pinned,
             "created": now_iso(), **(extra or {})}
     with locked(VAULT):
         path = (VAULT / CONVERSATIONS / f"{GENERAL_TITLE}.md"
@@ -849,7 +818,6 @@ def write_imported(meta: dict, msgs: list[dict]) -> Path:
     """
     with locked(VAULT):
         path = _unique_path(meta["title"])
-        meta = {**meta, "board": board_rel(meta["id"], meta["title"])}
         text = render_front(meta) + "".join(
             render_message(m, find(msgs, m.get("reply_to"))) for m in msgs)
         _write_atomic(path, text)
@@ -1216,8 +1184,6 @@ def update(thread_id: str, *, title: str | None = None, default=_UNSET,
             new = clean_title(title)
             if new != meta["title"]:
                 meta["title"] = new
-                if "boards" not in load_state(thread_files.REGISTRY):
-                    meta["board"] = _rename_board(thread_id, meta["board"], new)
                 target = _unique_path(new, own=path)
                 _rewrite(path, meta)
                 if target != path:
@@ -1235,7 +1201,7 @@ def update(thread_id: str, *, title: str | None = None, default=_UNSET,
 
 
 def delete(thread_id: str, *, only_empty: bool = False) -> dict:
-    """Remove the thread, board and runtime state on the owner's confirmed action. Preserve
+    """Remove the thread, active contributed files and runtime state on the owner's confirmed action. Preserve
     General and report what was removed.
     """
     if thread_id == GENERAL_ID:
@@ -1247,13 +1213,9 @@ def delete(thread_id: str, *, only_empty: bool = False) -> dict:
                     or load_state("threads.json").get(thread_id, {}).get("draft")
                     or thread_files.has_content(meta)):
                 raise ThreadError(409, "This thread has content and was kept")
-        board = VAULT / meta["board"]
         removed = [str(path.relative_to(VAULT))]
         removed.extend(thread_files.removed(thread_id))
         path.unlink()
-        if "boards" not in load_state(thread_files.REGISTRY) and board.is_file() and board.parent == VAULT / BOARDS:
-            board.unlink()
-            removed.append(meta["board"])
         _CACHE.pop(str(path), None)
         idx = index()
         idx.pop(thread_id, None)
@@ -1519,106 +1481,6 @@ def unread(thread_id: str, msgs: list[dict]) -> int:
                and not lc.is_owner(m.get("author")))
 
 
-# -- boards --------------------------------------------------------------------
-
-def empty_board(meta: dict) -> str:
-    return f"# {meta['title']} — board\n\n"
-
-
-def board_text(meta: dict, create_missing: bool = True) -> str:
-    if "boards" in load_state(thread_files.REGISTRY):
-        if create_missing:
-            return thread_files.document("boards", meta["id"])["markdown"]
-        location = thread_files.locations(meta)["boards"]["path"]
-        try:
-            return Path(location).read_bytes().decode("utf-8")
-        except FileNotFoundError:
-            return ""
-    path = VAULT / meta["board"]
-    try:
-        return path.read_bytes().decode("utf-8")
-    except FileNotFoundError:
-        if not create_missing:
-            return ""
-        with locked(path):
-            if not path.exists():
-                _write_atomic(path, empty_board(meta))
-            return path.read_bytes().decode("utf-8")
-
-
-def board_snapshot(meta: dict, markdown: str | None = None) -> dict:
-    if "boards" in load_state(thread_files.REGISTRY):
-        return thread_files.document("boards", meta["id"])
-    if markdown is None:
-        markdown = board_text(meta)
-    return {"path": meta["board"], "markdown": markdown,
-            "revision": loam_file_revision.revision(markdown.encode("utf-8"))}
-
-
-def write_board(meta: dict, markdown: str, revision: str) -> dict:
-    if not isinstance(markdown, str) or not isinstance(revision, str) or not revision:
-        raise ThreadError(400, "A board save needs markdown and its base revision")
-    if "boards" in load_state(thread_files.REGISTRY):
-        return thread_files.document("boards", meta["id"], {"markdown": markdown, "base_revision": revision})
-    path = VAULT / meta["board"]
-    with locked(path):
-        try:
-            loam_file_revision.replace_text(path, markdown, revision)
-        except loam_file_revision.RevisionConflict as exc:
-            raise ThreadError(409, f"The board {exc}") from None
-        return board_snapshot(meta, markdown)
-
-
-def item_meta(line: str) -> list[str]:
-    match = ITEM_META_RE.search(line)
-    if not match or not line.lstrip().startswith(("- ", "* ")):
-        return []
-    return [part.strip() for part in match.group(1).split("·")]
-
-
-def board_new(markdown: str) -> int:
-    return sum(1 for line in markdown.splitlines() if "new" in item_meta(line))
-
-
-def sweep_board(markdown: str, today: date) -> tuple[str, list[str]]:
-    """Remove every item whose ``until`` day has passed. The ``until`` day is
-    the last day it stays, so an item until today is still here today."""
-    kept, gone = [], []
-    lines = markdown.split("\n")
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        expired = False
-        for part in item_meta(line):
-            match = UNTIL_RE.search(part)
-            if match:
-                try:
-                    expired = date.fromisoformat(match.group(1)) < today
-                except ValueError:
-                    expired = False
-        if expired:
-            gone.append(line)
-            indent = len(line) - len(line.lstrip())
-            i += 1
-            # An item's own continuation lines and children go with it.
-            while i < len(lines) and lines[i].strip() and (
-                    len(lines[i]) - len(lines[i].lstrip()) > indent):
-                gone.append(lines[i])
-                i += 1
-            continue
-        kept.append(line)
-        i += 1
-    return "\n".join(kept), gone
-
-
-def board_files() -> list[Path]:
-    files = sorted((VAULT / BOARDS).glob("*.md")) if (VAULT / BOARDS).is_dir() else []
-    general = VAULT / GENERAL_BOARD
-    if general.is_file():
-        files.append(general)
-    return files
-
-
 # -- the list -------------------------------------------------------------------
 
 def last_spoke(msgs: list[dict]) -> dict[str, str]:
@@ -1640,7 +1502,6 @@ def summary(thread_id: str, running=None) -> dict:
     live = {running} if isinstance(running, str) else set(running or ())
     shown = [m for m in msgs if m.get("kind") != "system"] or msgs
     last = shown[-1] if shown else None
-    board = board_text(meta, create_missing=False)
     spoke = last_spoke(msgs)
     opening = next((m for m in msgs if is_owner(m.get("author"))), {})
     source = opening.get("reply_source")
@@ -1658,8 +1519,6 @@ def summary(thread_id: str, running=None) -> dict:
         "last": ({"author": last["author"], "text": (last["text"] or "")[:200],
                   "at": last["at"]} if last else None),
         "unread": unread(thread_id, msgs),
-        "board_new": board_new(board),
-        "board": meta["board"],
         "pinned": meta["id"] == GENERAL_ID or bool(meta.get("pinned")),
         "archived": bool(meta.get("archived")) and meta["id"] != GENERAL_ID,
         "general": meta["id"] == GENERAL_ID,
@@ -1874,11 +1733,8 @@ def turn_prompt(meta: dict, persona: str, msgs: list[dict], fresh: bool,
     mine = summary_path(persona, meta["id"])
     files = thread_files.locations(meta)
     file_lines = [f"The {f['label']} is {f['path']}." for f in files.values()]
-    if "boards" not in files:
-        file_lines.append(f"The board is {VAULT / meta['board']}.")
     head = (f"[Loam thread \"{meta['title']}\" (id {meta['id']}). Members: {names}; "
-            f"{answers}. "
-            f"{' '.join(file_lines)}]\n"
+            f"{answers}.{' ' if file_lines else ''}{' '.join(file_lines)}]\n"
             f"[{clock_line(now)}]\n")
     if fresh:
         head += ("This turn opens a new session of yours in this thread. What it "

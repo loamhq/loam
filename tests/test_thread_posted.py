@@ -25,7 +25,6 @@ for who in ("ada", "cleo", "iris"):
     (TMP / "ai-labs" / who / "agent.json").write_text(json.dumps({"name": who.capitalize()}))
 (TMP / "vault" / "15_CONVERSATIONS").mkdir(parents=True)
 (TMP / "vault" / "00_INBOX" / "from-agents").mkdir(parents=True)
-(TMP / "vault" / "00_INBOX" / "from-agents" / "comms.md").write_text("# From agents\n")
 sys.path.insert(0, str(ROOT / "lib"))
 
 FAILURES = 0

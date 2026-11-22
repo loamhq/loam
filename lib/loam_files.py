@@ -353,12 +353,9 @@ def capabilities(root: str, parts: list[str], kind: str) -> dict:
 
 # Pin paths the runtime addresses by name, the folders containing them and all top-level folders.
 # A wildcard matches one whole path component.
-_INBOX, _BOARDS = lc.vault_folder("inbox"), lc.vault_folder("boards")
-_GENERAL = lc.vault_folder("general_board")
+_INBOX = lc.vault_folder("inbox")
 _PROJECTS, _SYSTEM = lc.vault_folder("projects"), lc.vault_folder("system")
 RENAME_PINNED = (
-    f"{_BOARDS}/*",
-    _GENERAL,
     loam_inbox.FAILURE_LOG,
     f"{_INBOX}/archive",
     f"{_PROJECTS}/*/receipts",
@@ -379,6 +376,10 @@ def pinned(root: str, parts: list[str], kind: str) -> str | None:
         return None
     if len(parts) == 1 and kind == "folder":
         return "a top-level vault folder is the vault's structure"
+    from loam_thread_files import owned_paths
+    rel = "/".join(parts)
+    if any(p == rel or p.startswith(rel + "/") for p in owned_paths()):
+        return "an extension manages a thread file here"
     for pattern in RENAME_PINNED:
         pat = pattern.split("/")
         if len(parts) > len(pat) or not all(

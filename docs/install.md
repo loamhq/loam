@@ -342,7 +342,7 @@ install had none, so the import was dropped silently (L11's surprise). Step
 6 writes a short one when it is absent: the pointer to the library page
 `loam-what-you-can-reach` (in `<vault>/System/Loam/skills/`) and this
 install's own names (the domain and its hosts, the workspaces, the vault,
-the thread records and boards, `bin/site`, `bin/thread`, `bin/settings`,
+the thread records, `bin/site`, `bin/thread`, `bin/settings`,
 `loam status`), rendered from `loam.toml` by `loam_install.reach_text`. It is
 the person's and the agents' file from then on: step 6 never rewrites one
 that exists, and an update never touches it.

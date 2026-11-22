@@ -79,7 +79,7 @@
   --face-sky:#345266; --face-cloud:#738D98; --face-body:#9EA99F; --face-edge:#5C7378;
   --face-light:#C9D4C8; --face-line:#526968; --face-moss:#63754D; --face-ink:#162731;
 }
-:root[data-look="yosemite"] :is(.card,.tt-board-item,.tt-row) {
+:root[data-look="yosemite"] :is(.card,.tt-row) {
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='113' height='107'%3E%3Cg fill='%23566C74' opacity='.025'%3E%3Ccircle cx='8' cy='17' r='.7'/%3E%3Ccircle cx='48' cy='71' r='1'/%3E%3Ccircle cx='82' cy='28' r='.8'/%3E%3Ccircle cx='96' cy='94' r='.6'/%3E%3Ccircle cx='33' cy='42' r='.5'/%3E%3C/g%3E%3C/svg%3E");
 }
 :root[data-look="deep-forest"] .display { font-weight:550; font-optical-sizing:auto; }
@@ -97,9 +97,9 @@
 :root[data-look="foundry"] .display { font-weight:800; letter-spacing:.025em; }
 :root[data-look="foundry"] .theme-preview[data-look="foundry"] :is(.theme-choice-name,.theme-miniature .primary) { font-weight:800; letter-spacing:.025em; }
 :root[data-look="foundry"] :is(.tt-section-heading,.tt-details-section h3,.theme-option h4) { text-transform:uppercase; letter-spacing:.12em; font-size:11px; }
-:root[data-look="foundry"] :is(.iconbtn,.pillbtn,.chip,.navbtn,.roundbtn,.plusbtn,.modelbtn,.roundsend,.roundmic,.thread-tile,.segmented,.segmented button,.appearance-modes,.appearance-modes button,.navrow,.railtab,.theme-preview,.theme-choice-check,.tt-board-item,.tt-list-item,.card,.fs-entry,.setrow) { border-radius:var(--radius-md); }
+:root[data-look="foundry"] :is(.iconbtn,.pillbtn,.chip,.navbtn,.roundbtn,.plusbtn,.modelbtn,.roundsend,.roundmic,.thread-tile,.segmented,.segmented button,.appearance-modes,.appearance-modes button,.navrow,.railtab,.theme-preview,.theme-choice-check,.tt-list-item,.card,.fs-entry,.setrow) { border-radius:var(--radius-md); }
 :root[data-look="foundry"] :is(.composer,.composer-box,.tt-compose,.navpill,.popover,.menu-surface,.theme-choice) { border-radius:var(--radius-lg); }
-:root[data-look="foundry"] :is(.pane,.tt-board,.tt-tasks-panel,.tt-configuration,.settings,.pinned-card,.rows,.card.card-group,.fs-rootcard,.fs-preview,.fs-field,.fs-media,.fs-pdf,.apps-desk > main) { border-radius:var(--radius-xl); }
+:root[data-look="foundry"] :is(.pane,.tt-tasks-panel,.tt-configuration,.settings,.pinned-card,.rows,.card.card-group,.fs-rootcard,.fs-preview,.fs-field,.fs-media,.fs-pdf,.apps-desk > main) { border-radius:var(--radius-xl); }
 :root[data-look="foundry"] [data-menu-surface] { border-radius:var(--radius-xl); }
 :root[data-look="foundry"] :is(.fold,.actions,.approve) { border-radius:var(--radius-lg); }
 :root[data-look="foundry"][data-theme="dark"] :is(.pane,.setbody,.sheet) { box-shadow:inset 1px 0 rgba(170,201,216,.12); }

@@ -194,7 +194,7 @@ leave a dated line under *Changes*. An update of Loam never touches it. Keep
 it short: it is paid for on every run.
 
 **What you can reach and use, and how** (your reach, your own subdomains,
-threads and boards, settings, the Market, the reviewer) is the shared skill
+threads, settings, the Market, the reviewer) is the shared skill
 `loam-what-you-can-reach`, at `{skill}`. Read it when you need to know
 whether or how you can do something.
 
@@ -208,8 +208,7 @@ whether or how you can do something.
   https://files.{domain}/, your own sites at `<site>.{domain}`
   (`mcp__engineer__site`, or `{root}/bin/site`).
 - Thread records are in `{vault / lc.vault_folder("conversations")}/` (never
-  edit one). Boards are in `{vault / lc.vault_folder("boards")}/`; General's is
-  `{vault / lc.vault_folder("general_board")}`. Post with `mcp__engineer__thread`
+  edit one). Post with `mcp__engineer__thread`
   or `{root}/bin/thread post general "…"`.
 - Settings: `mcp__engineer__settings`, or `{root}/bin/settings`.
 - Whether everything is running: `loam status` in a shell.

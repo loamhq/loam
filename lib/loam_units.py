@@ -131,7 +131,8 @@ def arm_timer(timer: str, unit_dir: Path | None = None,
 # without them does not leave them firing a command that is gone; check-drift
 # reports one still there. The provider follower went on 2026-11-19 (the
 # owner: the CLIs are pinned to each release, lib/loam_pins.py).
-RETIRED = ("loam-provider-follow.timer", "loam-provider-follow.service",
+RETIRED = ("loam-board-expiry.timer", "loam-board-expiry.service",
+           "loam-provider-follow.timer", "loam-provider-follow.service",
            # Remote Control, retired 2026-11-19: its recycle timer would fire
            # a script that is gone, and each agent's server would keep
            # running with no one to talk to (found walking 0.2.0 -> 0.2.12).

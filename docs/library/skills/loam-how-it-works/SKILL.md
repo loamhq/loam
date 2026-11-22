@@ -1,6 +1,6 @@
 ---
 name: loam-how-it-works
-description: How Loam works - agents, their loading files, threads and boards, wakes and crons, providers, the vault, the engineer and plugins. Use when someone asks how Loam works or how to use it well, or when you need to know which part of Loam does a thing.
+description: How Loam works - agents, their loading files, threads, wakes and crons, providers, the vault, the engineer and plugins. Use when someone asks how Loam works or how to use it well, or when you need to know which part of Loam does a thing.
 ---
 
 # How Loam works
@@ -66,18 +66,6 @@ agent wrote it. The image stays with the thread after the working file is
 removed. An unavailable image keeps its caption and shows **Image no
 longer available**.
 
-Each thread has a board, a Markdown file of items for the
-owner in the vault's inbox. Open **Board** in the thread header. Tap a card to edit its words, or use
-**Add a note** in any section. New cards show their date and author. Drag a
-card to reorder it (hold first on touch), or use its menu to move it, set an
-expiry or delete it. **Open in Files** opens the board with Files formatting
-and dictation. On a wide desktop it opens beside the chat. Use **Open as the
-main panel** in the side panel header for the full page. On a phone,
-**Back to board** returns to the thread's open board.
-Files keeps item dates, authors and expiry in the Markdown while you edit.
-If an agent edits the board during a Cards save, the app keeps the draft and
-shows the latest board with a button to reapply the edit.
-
 **Dictation and Read aloud.** These Market plugins work without a key in browsers that support speech recognition or speech synthesis, respectively. With a server key, they select Google first and OpenAI second. A provider error stays with that provider. Each plugin’s settings show the active provider. The Gemini key guide walks through creating, checking and saving a shared key. Dictation can suggest it once after a take that used browser recognition. Record first and Polish, spoken Briefs and generated table descriptions need a server key.
 
 From Dictation 1.2.3, Record first shows Polish, the recording limit, microphone selection and Names and terms. Create or open the terms note in Files from that card. Add one name or term per line. Record first reads it fresh for each take and sends the terms to the transcriber. As you speak uses browser recognition and keeps your Record first preferences for when you switch back.
@@ -122,8 +110,7 @@ Claiming starts the owner’s first day. General starts empty, and health notice
 
 On a fresh install, a phone opens Chats with an unread Hello. A wide screen
 opens Hello. Iris greets the owner by name and shows how Chats, Files and Apps
-fit together. Empty places explain their purpose until they fill. Board,
-Details, Branch, Activity, Settings and the desktop's Hide list show a
+fit together. Empty places explain their purpose until they fill. Details, Branch, Activity, Settings and the desktop's Hide list show a
 caption until the owner uses that control. Chats, Files and Apps keep
 their tab names.
 
@@ -136,7 +123,7 @@ When the owner starts designing an agent in Hello or any other thread, Iris
 asks one question about what they're looking for and hears the answer
 before drafting.
 
-Hello’s board starts empty. Iris helps with what the owner came for and
+Iris helps with what the owner came for and
 offers an idea when it fits. She can bring over context from another AI
 and show the owner their About me in Files.
 She can offer one small overnight job that fits what they told her, or

@@ -182,14 +182,14 @@ VAULT_PATH = re.compile(
 def _loam_folders() -> set[str]:
     """The vault's folders that are Loam's own (Inbox, Conversations,
     System/Loam, ...): their names say nothing about the person."""
-    names = {"Loam", "skills", "data", "boards"}
+    names = {"Loam", "skills", "data"}
     for value in lc.VAULT_FOLDERS.values():
         names.update(part for part in str(value).split("/") if part and not part.endswith(".md"))
     return names
 
 
 def _vault_path(m: re.Match) -> str:
-    """``<vault>/Inbox/boards/x.md`` keeps Loam's folders and loses the rest:
+    """``<vault>/Inbox/notes/x.md`` keeps Loam's folders and loses the rest:
     a note's name and its folders are the person's."""
     path = m.group(1)
     library = f"{lc.vault_folder('system')}/Loam/"

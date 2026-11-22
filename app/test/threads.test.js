@@ -3,37 +3,14 @@ setOwner({ id: 'you', name: 'Sam', accepts: ['you', 'owner', 'person'] })
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 import assert from 'node:assert/strict'
-import { boardLines, boardBlocks, reflowBoardQuotes, editBoard, markBoardSeen, addBoardItem, applyThreadEvent, readThreadRecord, readThreadSummary, readThreadList, readThreadBoard, readAcceptedMessage, compareThreads, recentMembers, messageSegments, firstMessageTitle, groupJoinNotices, messageRecipients } from '../public/thread-record.js'
+import { applyThreadEvent, readThreadRecord, readThreadSummary, readThreadList, readAcceptedMessage, compareThreads, recentMembers, messageSegments, firstMessageTitle, groupJoinNotices, messageRecipients } from '../public/thread-record.js'
 import { fakeBroker, appAgainst, closing, TOKEN } from './harness.js'
 
-const board = '# Notes\r\n\r\n- [ ] First <!-- Scout · new · until 2026-11-22 -->\r\n* [X] Second <!-- Quill · new · future field -->\r\n- A plain note\r\n\r\n```md\r\n- [ ] A fenced example <!-- Scout · new -->\r\n```\r\n'
-test('an incomplete or wrong thread reading cannot turn into a writable empty board', () => {
-  const record = { thread: { id: 'one', members: [] }, messages: [], has_more: false, turn: null, board: { path: 'boards/one.md', markdown: '' } }
+test('an incomplete or mismatched thread record is rejected', () => {
+  const record = { thread: { id: 'one', members: [] }, messages: [], has_more: false, turn: null }
   assert.equal(readThreadRecord(record, 'one'), record)
   assert.throws(() => readThreadRecord({ thread: record.thread, messages: [] }, 'one'), /could not be loaded/)
   assert.throws(() => readThreadRecord(record, 'another'), /could not be loaded/)
-})
-test('tick preserves every byte except the checkbox, including EOL metadata and fenced examples', () => {
-  assert.equal(editBoard(board, 2, 'tick'), board.replace('- [ ] First', '- [x] First'))
-  assert.equal(editBoard(board, 7, 'tick'), board)
-  assert.equal(editBoard(board, 4, 'tick'), board)
-  assert.equal(boardLines(board).filter((l) => l.item).length, 3)
-  assert.equal(boardBlocks(board).at(-1).text, '\r\n```md\r\n- [ ] A fenced example <!-- Scout · new -->\r\n```\r\n')
-})
-test('seen edits only new metadata, never removes or checks an item; remove is separate', () => {
-  const seen = markBoardSeen(board)
-  assert.equal(seen, board.replace('Scout · new · until', 'Scout · until').replace('Quill · new · future', 'Quill · future'))
-  assert.equal(boardLines(seen).filter((l) => l.item).length, 3)
-  assert.equal(editBoard(board, 2, 'remove'), board.replace('- [ ] First <!-- Scout · new · until 2026-11-22 -->\r\n', ''))
-  assert.equal(markBoardSeen(seen), seen)
-  const inline = '- [ ] An <!-- inline --> example <!-- Scout · new · until 2026-11-22 -->\n'
-  assert.equal(editBoard(inline, 0, 'seen'), inline.replace(' · new', ''))
-})
-test('quick add uses UTC durations and keeps prior markdown and CRLF intact', () => {
-  assert.equal(addBoardItem(board, ' Walk\n outside ', 7, new Date('2026-11-08T23:59:00Z')), board + '- [ ] 2026-11-08 · Walk  outside <!-- Sam · until 2026-11-15 -->\r\n')
-  assert.equal(addBoardItem('', 'Keep this'), `- [ ] ${new Date().toISOString().slice(0, 10)} · Keep this <!-- Sam -->\n`)
-  assert.equal(addBoardItem(board, '  '), board)
-  assert.equal(addBoardItem('A note', 'A task', 1, new Date('2026-12-31T23:59:00Z')), 'A note\n- [ ] 2026-12-31 · A task <!-- Sam · until 2027-01-01 -->\n')
 })
 function open() { return { thread: { members: [] }, messages: [], seq: 0, typing: new Set(), permissions: new Map() } }
 test('runtime drafts replace text, reset at tool steps and reconnect only from durable messages', () => {
@@ -83,28 +60,18 @@ test('members use durable system lines and classic permissions normalize by requ
   assert.equal(o.permissions.size, 1)
   assert.equal(o.after, 'm100', 'harness seq cannot become the thread cursor')
 })
-test('General Stays is dated for the comms sweep, timed adds carry until; ordinary boards retain task checkboxes', () => {
-  const date = new Date('2026-11-08T23:59:00Z'), path = '00_INBOX/from-agents/comms.md'
-  assert.equal(addBoardItem('', 'Keep close', 0, date, path), '- 2026-11-08 · Keep close <!-- Sam -->\n')
-  assert.equal(addBoardItem('', 'Read soon', 7, date, path), '- [ ] 2026-11-08 · Read soon <!-- Sam · until 2026-11-15 -->\n')
-  assert.equal(addBoardItem('', 'Keep close', 0, date, 'boards/one.md'), '- [ ] 2026-11-08 · Keep close <!-- Sam -->\n')
-})
-test('recorded runtime responses parse for list, create, detail, history, patch, send, both board methods and SSE', async () => {
+test('recorded runtime responses parse for list, create, detail, history, patch, send and SSE', async () => {
   const recorded = JSON.parse(await readFile(new URL('./fixtures/threads/runtime-34b5668.json', import.meta.url)))
   const r = recorded.responses
   assert.equal(recorded.runtime_commit, '34b5668')
-  assert.equal(Object.keys(r).length, 9)
+  assert.equal(Object.keys(r).length, 7)
   assert.equal(readThreadList(r.list.body), r.list.body)
   for (const row of [r.create.body, r.patch.body, ...r.list.body.threads]) {
-    assert.equal(readThreadSummary(row), row); assert.equal(typeof row.id, 'string'); assert.ok(Array.isArray(row.members)); assert.equal(typeof row.board, 'string'); assert.ok(row.created)
+    assert.equal(readThreadSummary(row), row); assert.equal(typeof row.id, 'string'); assert.ok(Array.isArray(row.members)); assert.ok(row.created)
   }
   for (const key of ['detail', 'history']) {
     const body = readThreadRecord(r[key].body, r.create.body.id)
     assert.equal(typeof body.has_more, 'boolean'); assert.ok(Object.hasOwn(body, 'turn'))
-  }
-  for (const key of ['board_get', 'board_put']) {
-    assert.equal(readThreadBoard(r[key].body), r[key].body); assert.equal(typeof r[key].body.path, 'string'); assert.equal(typeof r[key].body.markdown, 'string'); assert.equal(r[key].body.board_new, 1)
-    assert.equal(boardLines(r[key].body.markdown).filter((l) => l.unseen).length, 1)
   }
   const o = open(); o.thread = r.create.body
   assert.equal(r.message.body.accepted, true)
@@ -124,20 +91,20 @@ test('recorded runtime responses parse for list, create, detail, history, patch,
   assert.equal(r.history.body.has_more, false); assert.equal(r.detail.body.has_more, true)
 })
 test('all agreed thread operations reach runtime /v1/threads with bearer; statuses and markdown survive', async (t) => {
-  const seenBody = { markdown: board }
+  const seenBody = { markdown: '# Sample' }
   const routes = {}
   for (const [method, suffix, status, body] of [
     ['GET', '', 200, { threads: [] }], ['POST', '', 201, { id: 'a b' }],
-    ['GET', '/a b', 200, { thread: {}, messages: [], board: seenBody }],
+    ['GET', '/a b', 200, { thread: {}, messages: [] }],
     ['PATCH', '/a b', 200, { id: 'a b' }], ['POST', '/a b/messages', 429, { error: 'This engine is busy. Keep your message and try again.' }],
-    ['PUT', '/a b/board', 200, seenBody], ['GET', '/a b/board', 200, seenBody],
+    ['PUT', '/sample/files/notes', 200, seenBody], ['GET', '/sample/files/notes', 200, seenBody],
   ]) routes[`${method} /v1/threads${suffix}`] = (req, res) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)) }
   routes['GET /v1/threads/a b/events'] = (req, res) => { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.end('data: {"type":"turn.started","persona":"scout"}\n\n') }
   const broker = await fakeBroker(routes), app = await appAgainst(broker)
   t.after(closing(app, broker))
   for (const [method, suffix, body, status] of [
     ['GET', '', undefined, 200], ['POST', '', { persona: 'scout' }, 201], ['GET', '/a%20b?before=m&limit=30&seen=0&ignored=x', undefined, 200],
-    ['PATCH', '/a%20b', { engine: { scout: 'codex' } }, 200], ['POST', '/a%20b/messages', { text: '@scout A thought' }, 429], ['PUT', '/a%20b/board', seenBody, 200], ['GET', '/a%20b/board', undefined, 200],
+    ['PATCH', '/a%20b', { engine: { scout: 'codex' } }, 200], ['POST', '/a%20b/messages', { text: '@scout A thought' }, 429], ['PUT', '/sample/files/notes', seenBody, 200], ['GET', '/sample/files/notes', undefined, 200],
   ]) {
     const res = await fetch(`${app.url}/api/threads${suffix}`, { method, ...(body ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) })
     assert.equal(res.status, status)
@@ -151,7 +118,7 @@ test('all agreed thread operations reach runtime /v1/threads with bearer; status
   assert.equal(broker.seen.find((r) => r.method === 'PUT').body, JSON.stringify(seenBody))
   assert.equal(broker.seen.find((r) => r.path.endsWith('/events')).search, '?after=m7')
   assert.equal(broker.seen.find((r) => r.search.includes('before')).search, '?before=m&limit=30&seen=0')
-  assert.equal((await fetch(`${app.url}/api/threads/a/board`, { method: 'DELETE' })).status, 405)
+  assert.equal((await fetch(`${app.url}/api/threads/a/files/notes`, { method: 'DELETE' })).status, 405)
   assert.equal((await fetch(`${app.url}/api/threads/a/unknown`)).status, 404)
   assert.equal((await fetch(`${app.url}/api/threads`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{bad json' })).status, 400)
   assert.equal((await fetch(`${app.url}/api/threads`, { method: 'POST', headers: { 'sec-fetch-site': 'cross-site' }, body: '{}' })).status, 403)
@@ -223,10 +190,6 @@ test('thread management and uploads relay the extended contract without borrowin
   assert.ok(broker.seen.every((r) => !r.path.startsWith('/v1/sessions')))
 })
 
-test('board quotes retain their marker and reflow soft wraps without changing fenced examples', () => {
-  const source = '# Notes\n\n> A place for things worth keeping\n> beyond this conversation.\n\n```md\n> two\n> lines\n```\n\n> ```md\n> two\n> lines\n> ```\n'
-  assert.equal(reflowBoardQuotes(source), source.replace('keeping\n> beyond', 'keeping beyond'))
-})
 
 
 test('join notices group only the same human message, preserving durable records', () => {

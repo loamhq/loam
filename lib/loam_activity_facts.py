@@ -106,7 +106,9 @@ def collect(groups):
         out["projects"] = [{"name": p.name, "path": str(p.relative_to(vault)),
                             "files": count_files("vault", vault, p)} for p in folders]
     if "files" in groups:
-        excluded = {*folders, *(vault / config.vault_folder(k) for k in ("conversations", "system", "boards"))}
+        excluded = {*folders, *(vault / config.vault_folder(k) for k in ("conversations", "system"))}
+        from loam_thread_files import owned_paths
+        excluded.update(vault / p for p in owned_paths())
         out["files"] = count_files("vault", vault, vault, excluded)
     if "agents" in groups:
         root = agents.ai_labs()

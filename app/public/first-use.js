@@ -31,7 +31,6 @@ export async function firstThreadLesson() {
 export function firstUseActive() { return active }
 
 const captions = {
-  Board: 'Board',
   'Thread details': 'Details',
   'apps-details-button': 'Details',
   'Branch into a new thread': 'Branch',

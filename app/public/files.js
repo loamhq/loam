@@ -1,6 +1,5 @@
 import { firstUseActive } from './first-use.js'
 import { historyBackButton } from './panel-history.js'
-import { boardProjection } from './board-document.js'
 import { noteDateParts } from './time.js'
 import { fileShortcuts } from './store.js'
 import { createCoreRegistry } from './core-registrations.js'
@@ -795,7 +794,6 @@ export function createFiles({
     const projection = view === 'markdown'
       ? registry.draw('files.viewer', context).findLast(adapter =>
         typeof adapter?.show === 'function' && typeof adapter.write === 'function' && typeof adapter.offsets === 'function')
-        ?? boardProjection(root, path)
       : null
     closeFile({ remember: st.file?.root !== root || st.file.path !== path })
     const file = {
@@ -1877,7 +1875,7 @@ export function fileView(files, options) {
 }
 
 function builtinFileView(files, { close, closeLabel, historyBack = null, wide, side = false, htmlActionsInMenu = false, field, onLink = null, onTool = null, go = null, returnBack = null, embed = null, mic = null, take = null, notice = null, readAloud = null, audioBar = null, home = null, backToThread = null, openFolder = returnBack ? close : null }) {
-  const back = backToThread ? { label: 'Back to board', title: historyBack?.title ?? 'Back to board',
+  const back = backToThread ? { label: 'Back to thread', title: historyBack?.title ?? 'Back to thread',
     go: historyBack?.go ?? backToThread, shortcut: Boolean(historyBack) } : historyBack
   const context = { files, file: files.st.file, options: { close, closeLabel, wide, field, onLink, onTool, go, returnBack, embed, mic, take, notice, readAloud, audioBar, home }, slot: 'viewer' }
   const custom = files.registry.entries('files.viewer', context).findLast(entry => !entry.component && entry.slot === 'viewer')

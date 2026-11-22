@@ -7,7 +7,7 @@
 //
 // `object` is one of EMPTY_OBJECTS. `size` is 'large' (a whole window: the
 // empty Market), 'pane' (a pane or a list column, the default) or 'small' (a
-// narrow panel: a board, a profile's tab, the file picker).
+// narrow panel: a profile's tab, the file picker).
 //
 // **Every colour is a token and every paint is a class** (`empty-state.css`):
 // nothing here writes a colour, so the drawing is at home in every theme,
@@ -55,7 +55,7 @@ const OBJECTS = {
     path('es-accent-line es-accent-line-thin', 'M76 74c0-5 0-9 2-14'),
     path('es-accent', 'M77 66c-5 0-8-3-9-7 5 0 8 3 9 7z'),
   ],
-  // An empty board: a page with its corner turned, two lines to come.
+  // A page with its corner turned, two lines to come.
   page: () => [
     path('es-sheet', 'M62 44h30l12 12v42a4 4 0 0 1-4 4H62a4 4 0 0 1-4-4V48a4 4 0 0 1 4-4z'),
     path('es-line', 'M92 44v12h12'),

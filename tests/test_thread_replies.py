@@ -23,7 +23,6 @@ for who in ("ada", "iris", "cleo"):
     json.dumps({"name": "Iris", "provider": "codex"}))
 (TMP / "vault" / "15_CONVERSATIONS").mkdir(parents=True)
 (TMP / "vault" / "00_INBOX" / "from-agents").mkdir(parents=True)
-(TMP / "vault" / "00_INBOX" / "from-agents" / "comms.md").write_text("# From agents\n")
 
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_broker as cfg  # noqa: E402

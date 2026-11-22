@@ -12,7 +12,6 @@ export async function oneProductFixture(env = {}, overrides = {}) {
     return row
   }
   const record = decorate(await f.api('GET', '/threads/a-quieter-week'))
-  await f.api('PUT', '/threads/a-quieter-week/board', { markdown: record.board.markdown.replace('- [x] Gather the loose ends', '- [x] Gather the loose ends <!-- until 2026-11-22 -->') })
   // Opening a fixture record marks it read, as the runtime does. Build both
   // comparison listings from that same reading, so unread treatments agree.
   const threads = (await f.api('GET', '/threads')).threads
@@ -43,7 +42,7 @@ export async function oneProductFixture(env = {}, overrides = {}) {
     routes[`GET /v1/sessions/${r.session_id}/events`] = (req, res) => { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write(': open ping=15000\n\n'); for (const e of [{ type: 'broker.session', ...r, window_first_seq: 1, turns_before: 0 }, ...events]) res.write(`data: ${JSON.stringify(e)}\n\n`) }
   }
   function addThread(id) {
-    for (const [method, suffix] of [['GET', ''], ['PATCH', ''], ['DELETE', ''], ['POST', '/branch'], ['POST', '/messages'], ['PUT', '/messages'], ['GET', '/board'], ['PUT', '/board']]) routes[`${method} /v1/threads/${id}${suffix}`] = async (req, res, url, raw) => {
+    for (const [method, suffix] of [['GET', ''], ['PATCH', ''], ['DELETE', ''], ['POST', '/branch'], ['POST', '/messages'], ['PUT', '/messages']]) routes[`${method} /v1/threads/${id}${suffix}`] = async (req, res, url, raw) => {
       try {
         const body = await f.api(method, `/threads/${id}${suffix}${url.search}`, raw ? JSON.parse(raw) : undefined)
         if (suffix === '/branch') addThread(body.id)

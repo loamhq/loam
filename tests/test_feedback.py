@@ -94,8 +94,8 @@ try:
                  "<vault>/<note>", "/home/<user>/x.txt", "https://<domain>/t?<query>"):
         check(f"scrub keeps {kept!r}", kept in clean, True)
     check("Loam's own vault folders stay, the note's name goes",
-          fb.scrub(f"{HOME}/vault/Inbox/boards/Wedding plans.md and {HOME}/vault/System/Loam/README.md")[0],
-          "<vault>/Inbox/boards/<note> and <vault>/System/Loam/README.md")
+          fb.scrub(f"{HOME}/vault/Inbox/private/Wedding plans.md and {HOME}/vault/System/Loam/README.md")[0],
+          "<vault>/Inbox/<note> and <vault>/System/Loam/README.md")
     check("what was taken out is counted by kind",
           {k: removed.get(k) for k in ("your name", "an agent's name", "a key or a token",
                                        "an e-mail address", "an IP address",
@@ -130,7 +130,7 @@ try:
           (query["title"][0], query["body"][0], query["labels"][0]),
           (d["title"], d["body"], "bug"))
     check("a feature is labelled enhancement",
-          fb.draft("feature", "Dark mode for boards", "Please.")["label"], "enhancement")
+          fb.draft("feature", "Dark mode for files", "Please.")["label"], "enhancement")
     long = fb.draft("bug", "Long", "word " * 3000)
     check("a body too long for a link is pasted instead",
           (long["fits"], "pasted below" in urllib.parse.unquote(long["url"])), (False, True))
@@ -158,9 +158,9 @@ try:
           (False, True))
 
     # -- the command --------------------------------------------------------------
-    out = report("bug", "--title", "Sam's boards are empty", stdin="Nothing on the board.\n")
+    out = report("bug", "--title", "Sam's files are empty", stdin="Nothing in the folder.\n")
     check("loam report bug: exit 0", out.returncode, 0)
-    check("it shows the title as it would go", "Title: <name>'s boards are empty" in out.stdout,
+    check("it shows the title as it would go", "Title: <name>'s files are empty" in out.stdout,
           True)
     check("and the link", "https://github.com/loamhq/loam/issues/new?" in out.stdout, True)
     js = report("feature", "--title", "Calendar", "--body", "A calendar.", "--json")

@@ -1,5 +1,5 @@
 # loam-ui -- Loam's own web app: a browser-based, phone-installable page for
-# the agents on this box (threads, boards, Files, Apps, settings), answering
+# the agents on this box (threads, Files, Apps, settings), answering
 # `/api/*` from the session broker. Its code is Loam's `app/` folder.
 #
 #   sudo bin/deploy loam-ui up <commit>     unpack that commit's app/ and run it

@@ -62,7 +62,6 @@ export interface Data {
   agentSettings: { get(plugin: string, agent?: string): Promise<any>; patch(plugin: string, agent: string, values: Record<string, any>): Promise<any> }
   threads: { list(): Promise<any>; get(id: string): Promise<any>; create(body: any): Promise<any>; patch(id: string, body: any): Promise<any> }
   messages: { parts(message: any): any[]; list(id: string, query?: string): Promise<any>; send(id: string, body: any): Promise<any> }
-  boards: { get(id: string): Promise<any>; put(id: string, body: any): Promise<any> }
   files: { read(root: string, path: string): Promise<any>; write(body: any): Promise<any>; list(root: string, path?: string): Promise<any> }
 }
 export interface FieldActivity { active: boolean; phase?: string; level?: number }

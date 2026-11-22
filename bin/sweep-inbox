@@ -1,28 +1,6 @@
 #!/usr/bin/env python3
 """Daily expiry inside the owner's inbox. Runtime-independent.
 
-`vault/00_INBOX/` is a transit zone, not a store, and two things in it are
-declared temporary (phase-5 closing plan, decision 13). Without a sweep both
-silently become archives, and an inbox that never empties stops being read:
-
-  archive/          things he has moved out of the way and is done with.
-                    Deleted at 30 days. Git is the recovery floor.
-  from-agents/      one line per item, newest first, three sections. Lines
-    comms.md        older than 14 days are removed *per line*, so a section
-                    empties without ever disappearing.
-
-**Nothing else under 00_INBOX/ is touched, at any depth.** Not `artifacts/`,
-not the failure log beside `comms.md`, not one file the owner wrote. The two
-targets are named as literal paths below rather than discovered, so a folder
-added later cannot silently join them.
-
-Sibling of `bin/sweep-commons`, deliberately: same shape, same stdlib-only
-independence from any runtime, same "recoverable from git until the next
-autocommit" floor. Its unit pair is `loam-inbox-expiry.{service,timer}` at
-08:17 UTC -- the same daily cadence as the commons sweep at 08:07, offset ten
-minutes so two sweeps' journal entries never interleave, and both well clear
-of the wake grid.
-
 **Why `archive/` ages on ctime and the commons ages on mtime.** A commons
 note is written in place, so its mtime *is* its age. An archived file is not:
 The owner moves a note they wrote in March into `archive/` in September, and both
@@ -39,31 +17,21 @@ spuriously (a chmod, a re-download) over-retains, which is the safe direction.
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_config as lc  # noqa: E402
-import loam_threads as threads  # noqa: E402
 
 VAULT = lc.VAULT
-# The install's folders (`vault.inbox`, `vault.general_board`); on the first
-# install, 00_INBOX/archive and 00_INBOX/from-agents/comms.md.
 ARCHIVE = f"{lc.vault_folder('inbox')}/archive"
-COMMS = lc.vault_folder("general_board")
 
 ARCHIVE_WINDOW = timedelta(days=30)
-COMMS_WINDOW = timedelta(days=14)
 
 # Structure, never a swept item -- same role README.md plays in the commons.
 PRESERVED_NAMES = frozenset({"README.md", ".gitkeep"})
-
-# Comms entries start with a date and an optional bullet. Preserve headings and undated notes.
-DATED_LINE = re.compile(r"^\s*(?:[-*+]\s+)?(\d{4}-\d{2}-\d{2})(?=\s|$)")
-
 
 def is_sweepable(path: Path) -> bool:
     return (
@@ -106,66 +74,19 @@ def sweep_archive(root: Path, window: timedelta, now: float, dry_run: bool) -> i
     return removed
 
 
-def sweep_comms(path: Path, window: timedelta, today: date, dry_run: bool) -> int:
-    """Drop dated lines older than `window`. Everything else stands."""
-    if not path.exists():
-        print(f"comms sweep: {path} does not exist, nothing to do")
-        return 0
-    try:
-        lines = path.read_bytes().decode("utf-8").splitlines(keepends=True)
-    except OSError as exc:
-        print(f"comms sweep: cannot read {path} ({exc})", file=sys.stderr)
-        return 0
-
-    cutoff = today - window
-    kept, dropped = [], 0
-    for line in lines:
-        match = DATED_LINE.match(line)
-        if match:
-            try:
-                when = date.fromisoformat(match.group(1))
-            except ValueError:
-                # A date-shaped string that is not a date. Not ours to judge.
-                kept.append(line)
-                continue
-            # An explicit last day belongs to the board expiry sweep.
-            timed = any(threads.UNTIL_RE.fullmatch(part) for part in threads.item_meta(line.rstrip()))
-            if when < cutoff and not timed:
-                dropped += 1
-                print(f"  {'would drop' if dry_run else 'dropped'} "
-                      f"({(today - when).days}d) {line.strip()[:110]}")
-                continue
-        kept.append(line)
-
-    if dropped and not dry_run:
-        try:
-            threads._write_atomic(path, "".join(kept))
-        except OSError as exc:
-            print(f"comms sweep: cannot write {path} ({exc})", file=sys.stderr)
-            return 0
-    print(f"comms sweep: {dropped} line(s) dated before {cutoff.isoformat()} "
-          f"{'would be removed' if dry_run else 'removed'} from {path}")
-    return dropped
-
-
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--vault", type=Path, default=VAULT)
     ap.add_argument("--archive-days", type=int, default=ARCHIVE_WINDOW.days)
-    ap.add_argument("--comms-days", type=int, default=COMMS_WINDOW.days)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--now", type=float, default=None,
                     help="override the clock (unix ts); for verification")
     args = ap.parse_args()
 
     now = args.now if args.now is not None else time.time()
-    today = datetime.fromtimestamp(now, tz=timezone.utc).date()
 
     sweep_archive(args.vault / ARCHIVE, timedelta(days=args.archive_days),
                   now, args.dry_run)
-    with threads.locked(args.vault / COMMS):
-        sweep_comms(args.vault / COMMS, timedelta(days=args.comms_days),
-                    today, args.dry_run)
     return 0
 
 

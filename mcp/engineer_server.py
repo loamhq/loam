@@ -366,7 +366,7 @@ async def site(action: str = "list", name: str = "", by: str = "", root: str = "
         "an id the thread does not hold is refused.\n"
         "- action `rename` with `thread` (an id), `title` and `by`: renames "
         "the thread as the app's details page does (record, file names and "
-        f"board link together; General can't be), for when {lc.OWNER_NAME} asks or a "
+        f"contributed files together; General can't be), for when {lc.OWNER_NAME} asks or a "
         "thread's auto-title is clearly wrong.\n"
         "- action `branch` with `thread` (an id), `message` (the id of the "
         "message to branch from), `persona` (who the new thread is with; the "
@@ -376,8 +376,7 @@ async def site(action: str = "list", name: str = "", by: str = "", root: str = "
         "is optional and waits unsent. When the owner sends with the quote "
         "attached, the first turn carries the quoted message and the source "
         f"thread's record path. For when {lc.OWNER_NAME} asks for a branch.\n"
-        "- action `list`: the threads, their members and their board files. "
-        "A board is a markdown file you edit directly."
+        "- action `list`: the threads, their members and any contributed thread files."
     ),
 )
 async def thread(action: str = "list", thread: str = "general", text: str = "",

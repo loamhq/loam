@@ -15,15 +15,6 @@ export function mount(host, options = {}) {
     historyButton: (label, surface = host.panelId) => host.backButton(surface, label),
     messageState: options.messageState ?? createMessageState(),
     renderText: (text, extra = {}) => markdown(text, { ...extra, copy: host.copyButton, onLink: (ref, from, event) => host.openFileRef(ref, from, event, { chat: extra.chatLinks }) }),
-    openBoardFile: (path, id) => {
-      const item = { kind: 'file', root: 'vault', path, mode: 'edit' }
-      if (host.panels.available()) {
-        host.panels.openSide(item)
-      } else {
-        globalThis.history?.replaceState?.({ ...globalThis.history.state, board: id }, '')
-        host.panels.openMain({ ...item, boardThread: id })
-      }
-    },
     openRef: (ref, from, event) => host.openFileRef(ref, from, event),
     // A listing card in an agent's reply (page/market.js).
     marketCards: (refs, context) => host.marketCards?.(refs, context) ?? null,

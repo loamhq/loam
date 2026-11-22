@@ -396,7 +396,7 @@ export function createDocEditor(opts) {
     const changed = projection.write(base, visibleBase.slice(0, from) + replacement + visibleBase.slice(to))
     const source = posMap(base, false)
     // Preserve the original selection where possible, widening only when the
-    // proposed edit changes an adjacent marker or creates a new board item.
+    // proposed edit changes an adjacent marker or creates a new list item.
     const selectedStart = source.toEditor(start), selectedEnd = source.toEditor(end)
     let first = 0, tail = 0
     while (first < selectedStart && first < changed.length && base[first] === changed[first]) first++

@@ -55,7 +55,6 @@ for who, emoji in (("ada", "🧱"), ("iris", "🪻"), ("cleo", "🪐")):
 (TMP / "vault" / "20_ATLAS" / "Ada.md").write_text("---\nemoji: 🧱\n---\n")
 (TMP / "vault" / "15_CONVERSATIONS").mkdir(parents=True)
 (TMP / "vault" / "00_INBOX" / "from-agents").mkdir(parents=True)
-(TMP / "vault" / "00_INBOX" / "from-agents" / "comms.md").write_text("# From agents\n")
 
 # Two plugins in Yours: one that declares a voice for each agent and fills
 # the profile, one that declares nothing.

@@ -1362,11 +1362,9 @@ def test_rename(c: Client, t: dict) -> None:
               (403, want))
     check("...soul.md where it was", (t["labs"] / "alpha" / "soul.md").exists(),
           True)
-    (v / "00_INBOX" / "boards").mkdir(parents=True)
-    (v / "00_INBOX" / "boards" / "t-1.md").write_text("- [ ] x\n")
     (v / "40_PROJECTS" / "Proj" / "receipts").mkdir(parents=True)
     (v / "40_PROJECTS" / "Other").mkdir()
-    for p in ("40_PROJECTS", "00_INBOX/boards", "00_INBOX/boards/t-1.md",
+    for p in ("40_PROJECTS",
               "40_PROJECTS/Proj/receipts", "40_PROJECTS/Proj",
               "40_PROJECTS/Loam", "40_PROJECTS/Loam/engineer/role.md"):
         status, row, _ = post({"root": "vault", "path": p, "name": "renamed"})
@@ -1418,7 +1416,6 @@ def test_trash(c: Client, t: dict) -> None:
             ("vault", "20_ATLAS", 400), ("vault", "../outside/passwd", 400),
             ("vault", "link-to-passwd.md", 404), ("vault", "deploy.env", 404),
             ("vault", "15_CONVERSATIONS/2026-10-02 chat.md", 403),
-            ("vault", "00_INBOX/from-agents/comms.md", 403),
             ("spaces", "ada/soul.md", 403), ("system", "Deployment.md", 403)):
         check(f"delete refuses {root}/{refused}",
               post("delete", {"root": root, "path": refused})[0], want)

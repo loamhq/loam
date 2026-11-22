@@ -64,15 +64,15 @@ test('a chip goes sending → so far → stored, and the message carries the hos
 
 test('the name a chip carries is the name the host stored, not the one on the disk', () => {
   const state = createAttachments()
-  const item = addFile(state, file('Board notes (final).md', 900, 'text/markdown'))
+  const item = addFile(state, file('Team notes (final).md', 900, 'text/markdown'))
   // The host sanitises the name and makes it unique in the day's folder, so the
-  // chip that goes on saying 'Board notes (final).md' is naming a file that is
+  // chip that goes on saying 'Team notes (final).md' is naming a file that is
   // not there.
   markStored(state, item, {
-    attachments: [{ path: '/store/2026-09-21/Board-notes--final-.md', name: 'Board-notes--final-.md', size: 900, type: 'text/markdown' }],
+    attachments: [{ path: '/store/2026-09-21/Team-notes--final-.md', name: 'Team-notes--final-.md', size: 900, type: 'text/markdown' }],
   })
-  assert.equal(item.name, 'Board-notes--final-.md')
-  assert.equal(stored(state)[0].path, '/store/2026-09-21/Board-notes--final-.md')
+  assert.equal(item.name, 'Team-notes--final-.md')
+  assert.equal(stored(state)[0].path, '/store/2026-09-21/Team-notes--final-.md')
 })
 
 test('a refusal is the host’s sentence, and nothing of that file is sent', () => {

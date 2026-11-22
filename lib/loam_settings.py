@@ -95,12 +95,6 @@ class Entry:
     timeout: int = 60               # seconds the route may take (an install fetches)
 
 
-def _board_edit(value, member):
-    if not isinstance(value, dict) or not isinstance(value.get("markdown"), str) or not value.get("base_revision"):
-        raise SettingsError("Read thread.board first, then set its markdown and base_revision together")
-    return {"markdown": value["markdown"], "base_revision": value["base_revision"]}
-
-
 def _member_row(summary: dict, member: str) -> dict:
     for row in summary.get("members") or []:
         if row.get("persona") == member:
@@ -183,18 +177,11 @@ ENTRIES: list[Entry] = [
           body=lambda v, m: {"seen": True},
           note="The page marks a thread read by opening it; there is no unread "
                "for a thread."),
-    Entry("thread.board", "setting", "A thread's board (its markdown)",
-          "PUT /api/threads/{thread}/board", route="PUT /v1/threads/{thread}/board",
-          target="thread id", values="an object with markdown and base_revision from the last read",
-          body=_board_edit, read="GET /v1/threads/{thread}/board",
-          pick=lambda a, m: {"markdown": a["markdown"], "base_revision": a["revision"]},
-          note="Editing the board's file directly is the same thing; it is "
-               "here because the page does it too."),
     Entry("thread.create", "action", "Start a thread",
           "POST /api/threads", route="POST /v1/threads",
           values='{"title": ..., "persona": <default or null>}, or a title',
           body=lambda v, m: (v if isinstance(v, dict) else {"title": v})),
-    Entry("thread.delete", "action", "Delete a thread, its record and its board",
+    Entry("thread.delete", "action", "Delete a thread and its files",
           "DELETE /api/threads/{thread}", route="DELETE /v1/threads/{thread}",
           target="thread id", values="true", unattended=False,
           body=lambda v, m: {},
@@ -761,10 +748,10 @@ def entries() -> list[Entry]:
 # `api()` allowlist), exactly as written there, and what it carries. A list
 # is the entries above; a string is why it carries no setting.
 PAGE_RELAY: dict[str, list[str] | str] = {
-    "/^\\/threads(?:\\/([^/]+)(?:\\/(messages|events|board|attachments|steps|answer))?)?$/": [
+    "/^\\/threads(?:\\/([^/]+)(?:\\/(messages|events|attachments|steps|answer))?)?$/": [
         "thread.title", "thread.icon", "thread.default", "thread.members.add",
         "thread.members.remove", "thread.engine", "thread.model",
-        "thread.pinned", "thread.archived", "thread.seen", "thread.board",
+        "thread.pinned", "thread.archived", "thread.seen",
         "thread.create", "thread.delete"],
     r"/^\/threads\/([a-zA-Z0-9_-]+)\/files\/([a-z0-9-]+)$/": "read or edit a contributed Markdown document",
     "rest === '/threads/events'": "a stream",
@@ -1135,7 +1122,7 @@ def change(key: str, value: Any, by: str, target: str = "", member: str = "",
 
 # What a tool result keeps whole: a schedule's change, and a plugin's
 # declaration, source and row, which are what a persona's yes is asked for.
-KEEP = ("last", "board_new", "event", "schedule", "declaration", "added",
+KEEP = ("last", "event", "schedule", "declaration", "added",
         "replaces", "replaced", "source", "shadows", "warnings", "plugin",
         "was", "appearance_reset", "kind", "places",
         # A draft is what the person's yes is asked for (2026-11-14).
@@ -1144,7 +1131,7 @@ KEEP = ("last", "board_new", "event", "schedule", "declaration", "added",
 
 def _brief(answer: dict) -> dict:
     """The route's answer without the bulk (a thread's members' background
-    task lists, a whole board) a tool result does not need."""
+    task lists, a whole document) a tool result does not need."""
     keep = {}
     for k, v in (answer or {}).items():
         if k in ("members",) and isinstance(v, list):

@@ -44,7 +44,6 @@ for who, emoji in (("ada", "🧱"), ("iris", "🪻")):
     "reason: the test's fixture\n---\n# Cron\nWatch.\n")
 (TMP / "vault" / "15_CONVERSATIONS").mkdir(parents=True)
 (TMP / "vault" / "00_INBOX" / "from-agents").mkdir(parents=True)
-(TMP / "vault" / "00_INBOX" / "from-agents" / "comms.md").write_text("# From agents\n")
 (TMP / "shipped").mkdir()
 (TMP / "yours").mkdir()
 

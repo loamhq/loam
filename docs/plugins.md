@@ -1576,7 +1576,7 @@ reader off the request thread or cache its result.
 |---|---|
 | agents | Rows with id, name, archived and visible workspace file count |
 | projects | Visible direct folders in the configured projects folder, with name, vault-relative path and recursive file count |
-| files | Regular visible vault files outside project folders, boards, system and conversation records. Links are skipped |
+| files | Regular visible vault files outside project folders, active contributed thread files, system and conversation records. Links are skipped |
 | chats | Rows with id, name, messages and updated, newest activity first. Counts exclude system records |
 | apps | Apps made here, with name, url and opens, its cumulative number of recorded selections in Apps. Existing installations start from every retained daily count |
 | local-plugins | Effective non-app plugins built here, with id and name |
@@ -1616,5 +1616,5 @@ be switched off, updated and removed in Settings. The list is empty for now.
 
 These API 0 slots are new and may change.
 
-- Register a `thread.header.action` with `slot: 'control'` to draw a button in the thread header. A side panel gives it `placement: 'menu'` in the thread actions menu. Call `closeMenu()` when choosing that item. Both placements receive the current `thread`. A control can open an existing `panel.item`. Omitting the slot keeps an action below the header.
+- Register a `thread.header.action` with `slot: 'control'` to draw a button in the thread header. A side panel gives it `placement: 'menu'` in the thread actions menu. Call `closeMenu()` when choosing that item. Both placements receive the current `thread`. A control can open an existing `panel.item` or call `selectView(name)`. A view can supply `dirty(context)` to protect a pending edit when its thread closes. Omitting the slot keeps an action below the header.
 - Register a `files.viewer` with `slot: 'projection'` to edit a Markdown file through a different text view. Match `{root, path, row}` with `when`. Return `{show(raw), write(raw, edited), offsets(raw)}`. The offset map supplies `toSource(offset, assoc)` and `fromSource(offset)` for annotations. The last matching projection is selected when the file opens and stays with that edit. Preserve hidden bytes, line endings and unedited text. Files continues to own the revision check and conflict handling.

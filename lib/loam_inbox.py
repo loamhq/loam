@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 import loam_config as lc
 
@@ -15,18 +15,12 @@ import loam_config as lc
 # vault: bin/wake and bin/lane-check both read it out of agent.json, so a
 # test tree and the live tree take the same path through here.
 #
-# The folder is the install's, not the first install's (2026-11-16, the
-# first-day walk): comms.md is General's board (`vault.general_board`), and
-# the failure log sits beside it -- on the first install in
-# 00_INBOX/from-agents/, as it always was. Unless General's board sits in the
-# boards folder itself, as on an install made by install.sh
-# (Inbox/boards/general.md): every note there is read as a board
-# (loam_threads.board_files), so the log goes in the inbox folder instead.
-COMMS = lc.vault_folder("general_board")
-FROM_AGENTS = str(PurePosixPath(COMMS).parent)
-if PurePosixPath(FROM_AGENTS) == PurePosixPath(lc.vault_folder("boards")):
-    FROM_AGENTS = lc.vault_folder("inbox")
-FAILURE_LOG = f"{FROM_AGENTS}/loam-wake-failures.md"
+# Keep the existing ledger beside incoming agent notes on older installs.
+_inbox = Path(lc.vault_folder("inbox"))
+_old_log = _inbox / "from-agents" / "loam-wake-failures.md"
+FAILURE_LOG = str(lc.get("vault.failure_log") or
+                  (_old_log if (lc.VAULT / _old_log).is_file()
+                   else _inbox / "loam-wake-failures.md"))
 
 # The failure log's wiki-link. Obsidian resolves by basename, so
 # this keeps working if the file moves again.

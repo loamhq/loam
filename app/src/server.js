@@ -352,14 +352,13 @@ export function createApp({
       if (body instanceof Error) return sendJson(res, body.tooLarge ? 413 : 400, { error: body.tooLarge ? 'This text is over what this request carries here.' : body.message })
       return await relayJson(res, method, target, body)
     }
-    const threadRoute = /^\/threads(?:\/([^/]+)(?:\/(messages|events|board|attachments|steps|answer))?)?$/.exec(rest)
+    const threadRoute = /^\/threads(?:\/([^/]+)(?:\/(messages|events|attachments|steps|answer))?)?$/.exec(rest)
     if (threadRoute) {
       const [, id, action] = threadRoute
       const allowed = !id ? ['GET', 'POST'].includes(method)
         : ['events', 'steps'].includes(action) ? method === 'GET'
         : ['attachments', 'messages'].includes(action) ? ['POST', 'PUT'].includes(method)
         : action === 'answer' ? method === 'POST'
-        : action === 'board' ? ['GET', 'PUT'].includes(method)
         : ['GET', 'PATCH', 'DELETE'].includes(method)
       if (!allowed) return sendJson(res, 405, { error: 'This operation is not available for threads.' })
       const query = new URLSearchParams()
@@ -397,7 +396,7 @@ export function createApp({
       }
       let body
       if (['POST', 'PATCH', 'PUT'].includes(method)) {
-        body = await readBody(req, action === 'board' ? FILES_TEXT_BODY : MAX_BODY).catch((err) => err)
+        body = await readBody(req, MAX_BODY).catch((err) => err)
         if (body instanceof Error) return sendJson(res, body.tooLarge ? 413 : 400, { error: body.tooLarge ? 'This text is over what this request carries here.' : body.message })
       }
       return await relayJson(res, method, target, body)

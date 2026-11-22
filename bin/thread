@@ -14,10 +14,9 @@ something worth saying. A post is appended to the thread's record in the
 vault, then told to the broker (0.2.1): it shows in an open page at once,
 and an @mention wakes the member it names as a reply's would, under the
 same cap on turns between agents (until 0.2.1 a post gave nobody a turn).
-A bulletin gives no turn. Boards are edited
-as files. ``rename`` (2026-11-10) is the app's own rename -- the
+A bulletin gives no turn. ``rename`` (2026-11-10) is the app's own rename -- the
 details page's PATCH -- through ``loam_threads.update``: the record's
-``title:``, its file name, and the board's file and ``board:`` key move
+``title:``, its file name and active contributed files move
 together, General refuses, and the open app sees it on its list stream's
 two-second look at the records. Like the app's, it leaves no line in the
 thread. ``--reply-to m12`` (2026-11-11) makes the post a reply to message
@@ -98,7 +97,6 @@ def main() -> int:
         if args.action == "list":
             rows = [{"id": r["id"], "title": r["title"],
                      "members": [m["persona"] for m in r["members"]],
-                     "board": str(threads.VAULT / r["board"]),
                      "files": threads.thread_files.locations(r)}
                     for r in threads.listing()]
             print(json.dumps({"ok": True, "threads": rows}))
@@ -132,7 +130,7 @@ def main() -> int:
             print(json.dumps({"ok": True, "thread": args.thread,
                               "title": meta["title"], "was": before,
                               "record": str(path),
-                              "board": str(threads.VAULT / meta["board"])}))
+                              "files": threads.thread_files.locations(meta)}))
             return 0
         if not args.text.strip():
             raise threads.ThreadError(400, "the text is empty")

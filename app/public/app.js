@@ -1055,11 +1055,11 @@ const mainPanel = {
     if (item.push !== false) recordMain(item)
     if (item.kind === 'thread') {
       files.closeFile(); apps.st.selected = null
-      const pending = threads.open(item.id, { routed: true, push: false, listing: item.listing, board: item.board, message: item.message, focusMessage: item.focusMessage })
+      const pending = threads.open(item.id, { routed: true, push: false, listing: item.listing, message: item.message, focusMessage: item.focusMessage })
       if (item.view) threads.setView(item.view)
       return pending
     }
-    if (item.kind === 'file') return page.goFiles(item.root, item.path, { isFile: true, row: item.row, fragment: item.fragment, mode: item.mode, routed: true, push: item.push !== false, list: item.list, boardThread: item.boardThread })
+    if (item.kind === 'file') return page.goFiles(item.root, item.path, { isFile: true, row: item.row, fragment: item.fragment, mode: item.mode, routed: true, push: item.push !== false, list: item.list, returnThread: item.returnThread })
     if (item.kind === 'profile') return goProfile(item.id, { push: item.push !== false, routed: true })
     const ticket = ++importRequest
     threads.close({ navigate: false }); files.closeFile(); closeThread(); page.closeSheet()
@@ -1085,7 +1085,7 @@ function recordMain(item) {
   if (item.view) url.searchParams.set('view', item.view)
   if (item.message) url.searchParams.set('message', item.message)
   if (item.fragment) url.hash = item.fragment
-  pushAddress({ item: itemDescriptor(item), returnToList: item.returnToList, returnModal: item.returnModal, boardThread: item.boardThread, threadView: Boolean(item.view) }, '', url, item.fromOverlay)
+  pushAddress({ item: itemDescriptor(item), returnToList: item.returnToList, returnModal: item.returnModal, returnThread: item.returnThread, threadView: Boolean(item.view) }, '', url, item.fromOverlay)
 }
 function sideItem() {
   return workspaceHistory.current('side')?.data.item ?? null
@@ -1221,7 +1221,7 @@ function restoreSurface(surface) {
   if (!item) return
   let fragment = url.hash.slice(1) || null
   if (fragment) { try { fragment = decodeURIComponent(fragment) } catch { /* literal legacy fragment */ } }
-  panels.openMain({ ...item, push: false, list: listFromURL(url.href), boardThread: visit.data.boardThread,
+  panels.openMain({ ...item, push: false, list: listFromURL(url.href), returnThread: visit.data.returnThread,
     fragment, message: url.searchParams.get('message') })
   if (item.kind === 'thread') threads.setView(url.searchParams.get('view'))
 }

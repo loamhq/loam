@@ -22,8 +22,6 @@
             ],
             "last": null,
             "unread": 0,
-            "board_new": 0,
-            "board": "00_INBOX/from-agents/comms.md",
             "pinned": true,
             "created": "2026-11-08T18:34:41Z"
           }
@@ -56,8 +54,6 @@
         ],
         "last": null,
         "unread": 0,
-        "board_new": 0,
-        "board": "00_INBOX/boards/A little room — board.md",
         "pinned": false,
         "created": "2026-11-08T18:34:41Z"
       }
@@ -95,8 +91,6 @@
             "at": "2026-11-08T18:34:41Z"
           },
           "unread": 0,
-          "board_new": 0,
-          "board": "00_INBOX/boards/A little room — board.md",
           "pinned": false,
           "created": "2026-11-08T18:34:41Z"
         },
@@ -125,10 +119,6 @@
         "turn": {
           "persona": "sprout",
           "engine": "claude-code"
-        },
-        "board": {
-          "path": "00_INBOX/boards/A little room — board.md",
-          "markdown": "# A little room — board\n\n"
         }
       }
     },
@@ -151,8 +141,6 @@
             "at": "2026-11-08T18:34:41Z"
           },
           "unread": 0,
-          "board_new": 0,
-          "board": "00_INBOX/boards/A little room — board.md",
           "pinned": false,
           "created": "2026-11-08T18:34:41Z"
         },
@@ -170,10 +158,6 @@
         "turn": {
           "persona": "sprout",
           "engine": "claude-code"
-        },
-        "board": {
-          "path": "00_INBOX/boards/A little room — board.md",
-          "markdown": "# A little room — board\n\n"
         }
       }
     },
@@ -195,26 +179,8 @@
           "at": "2026-11-08T18:34:41Z"
         },
         "unread": 0,
-        "board_new": 0,
-        "board": "00_INBOX/boards/A little room — board.md",
         "pinned": false,
         "created": "2026-11-08T18:34:41Z"
-      }
-    },
-    "board_put": {
-      "status": 200,
-      "body": {
-        "path": "00_INBOX/boards/A little room — board.md",
-        "markdown": "# A little room\n\n## Next\n\n- [ ] A small step <!-- Sprout · new -->\n",
-        "board_new": 1
-      }
-    },
-    "board_get": {
-      "status": 200,
-      "body": {
-        "path": "00_INBOX/boards/A little room — board.md",
-        "markdown": "# A little room\n\n## Next\n\n- [ ] A small step <!-- Sprout · new -->\n",
-        "board_new": 1
       }
     },
     "events": {

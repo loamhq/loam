@@ -132,9 +132,7 @@ read only, the repository has other history, the host or account is out of
 space, a file too large, the host's key changed, the host cannot be reached.
 `backup_status` says the same to an agent. **A failing backup is not
 silent**: at its second failed attempt in a row (a network failure after two
-hours; a public repository at once) one line reaches the owner's General
-board under Urgent, as Loam's other warnings do (`lib/loam_inbox.py`), and
-one under Important when it works again.
+hours; a public repository at once) the selected attention agent receives a failure fact and then a recovery fact when backup works again.
 
 Where things are: the keys and `known_hosts` (first contact is trusted and
 remembered) in `<state>/plugins/private/git-backup/`, with `state.json`
@@ -171,8 +169,7 @@ anything outside the two trees (the plugins' Yours layer, the keys in
 with its own `LOAM_CONFIG`, two private GitHub repositories, deploy keys
 added through the API in place of the three clicks. Connect, a read-only
 key refused, the first and the routine push arriving, the key deleted on
-GitHub and the failure reaching the General board at the second attempt (since
-2026-11-19 it reaches the agent that hears of Loam's problems instead),
+GitHub and a failure notification on the second attempt,
 the recovery line, a public repository refused, and both trees restored
 onto the second install, the vault byte for byte.
 

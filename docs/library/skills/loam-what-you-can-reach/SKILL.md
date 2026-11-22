@@ -1,6 +1,6 @@
 ---
 name: loam-what-you-can-reach
-description: What an agent can reach and use on its Loam server - its workspace, the vault, the shell, the browser, its own subdomains, threads and boards, settings, the Market, the reviewer, and the limits on runs. Use when you need to know whether you can do something, where something is, or which tool does it.
+description: What an agent can reach and use on its Loam server - its workspace, the vault, the shell, the browser, its own subdomains, threads, settings, the Market, the reviewer, and the limits on runs. Use when you need to know whether you can do something, where something is, or which tool does it.
 ---
 
 # What you can reach
@@ -48,15 +48,12 @@ A server you start on a port of your own is not reachable from outside:
 the server's firewall lets in only SSH, 80 and 443, so a site is the way
 to show it to someone.
 
-**Threads and boards.** To post from a wake or a cron, use
+**Threads.** To post from a wake or a cron, use
 `mcp__engineer__thread` (`post`, the thread `general` or an id, `by` your
 name); keep General short. Loam posts nothing there itself: if you are the
 agent that hears when something in Loam needs attention (Settings ›
 Agents), a problem reaches you as the input of a run, a fact told once with
-where its evidence is; what you do, and whether the owner hears of it in
-General, is yours to judge. A board is a Markdown file you edit: add an item
-as `- [ ] text <!-- YourName · new · until YYYY-MM-DD -->`, with `until`
-only when it is time-bound. `new` stays until the owner marks it seen.
+where its evidence is. You decide whether to act on it, tell the owner, or record it in a thread, your memory or elsewhere.
 Mention a peer with `@Name` only when it adds a lot.
 
 **Settings.** What the owner can change in the app, you can change when

@@ -9,13 +9,13 @@ import { readPreviewRoute } from './app-preview-route.js'
 export function readConfig(env = process.env) {
   const previewRoute = readPreviewRoute({ base: env.APPS_PREVIEW_BASE, addr: env.APPS_PREVIEW_ADDR })
   const installation = { ...INSTALLATION_DEFAULTS }
-  for (const [key, variable] of Object.entries({ appsDomain: 'APPS_DOMAIN', timeZone: 'APP_TIME_ZONE', inbox: 'VAULT_INBOX_FOLDER', boards: 'VAULT_BOARDS_FOLDER', generalBoard: 'VAULT_GENERAL_BOARD', attachments: 'VAULT_ATTACHMENTS_FOLDER' })) {
+  for (const [key, variable] of Object.entries({ appsDomain: 'APPS_DOMAIN', timeZone: 'APP_TIME_ZONE', inbox: 'VAULT_INBOX_FOLDER', attachments: 'VAULT_ATTACHMENTS_FOLDER' })) {
     installation[key] = (env[variable] ?? '').trim() || installation[key]
   }
   installation.appsDomain = installation.appsDomain.toLowerCase()
   if (!/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(installation.appsDomain)) throw new Error('APPS_DOMAIN must be a domain without a scheme, port or path.')
   try { new Intl.DateTimeFormat('en', { timeZone: installation.timeZone }) } catch { throw new Error('APP_TIME_ZONE must be an IANA time zone.') }
-  for (const key of ['inbox', 'boards', 'generalBoard', 'attachments']) {
+  for (const key of ['inbox', 'attachments']) {
     if (installation[key].split('/').some(part => !part || part === '.' || part === '..') || /[\\\u0000-\u001f\u007f]/.test(installation[key])) throw new Error(`Invalid vault-relative path: ${key}`)
   }
   const port = Number.parseInt(env.APP_PORT ?? '8080', 10)

@@ -382,7 +382,7 @@ there keeps working.
 | File or folder | What it is for |
 |---|---|
 | `{ABOUT_ME}` | What your agents know about you. They add to it as they learn; read it and edit it whenever you like. |
-| `{f['inbox']}/` | What needs you. Each thread's board is a file in `{f['boards']}/`; the General board is `{f['general_board']}`. |
+| `{f['inbox']}/` | What needs you. |
 | `{f['conversations']}/` | The record of every thread, written by Loam as you talk. Read it; do not edit it. |
 | `{f['projects']}/` | Your projects and their notes. |
 | `{f['attachments']}/` | Images and files you add to a thread. |
@@ -433,7 +433,7 @@ def seed_vault(vault: Path, folders: dict[str, str] | None = None,
     # A new vault's (no README yet): an existing one, the first install's
     # included, is never handed an About me it did not have.
     fresh = not readme.exists()
-    for key in ("inbox", "boards", "conversations", "projects", "attachments", "system"):
+    for key in ("inbox", "conversations", "projects", "attachments", "system"):
         path = vault / f[key]
         if not path.is_dir():
             path.mkdir(parents=True)

@@ -217,14 +217,14 @@ function builtinFileFieldFor(f, { readOnly, mono }) {
 // Go to a folder or a file. `push: false` is for an address the browser has
 // already moved to — a load, or Back.
 let fileDestination = 0
-function goFiles(root, path = '', { isFile = null, row = null, push = true, fragment = null, routed = false, mode = null, list = null, boardThread = null, panelLink = false, returnToSettings = false } = {}) {
+function goFiles(root, path = '', { isFile = null, row = null, push = true, fragment = null, routed = false, mode = null, list = null, returnThread = null, panelLink = false, returnToSettings = false } = {}) {
   const destination = ++fileDestination
   if (isFile === null && path && root?.startsWith('@')) isFile = true
   if (isFile === null && path && root && root !== 'system') {
     const request = host.importRequest
     const open = (isFile, row) => {
       if (destination === fileDestination && request === host.importRequest)
-        goFiles(root, path, { isFile, row, push, fragment, mode, list, boardThread, panelLink, returnToSettings })
+        goFiles(root, path, { isFile, row, push, fragment, mode, list, returnThread, panelLink, returnToSettings })
     }
     files.stat(root, path).then(row => open(!isFolder(row), row), () => open(false, null))
     return true
@@ -235,13 +235,13 @@ function goFiles(root, path = '', { isFile = null, row = null, push = true, frag
     host.browseFiles(root === 'system' ? null : root, root === 'system' ? '' : path, { push, hidden: root === 'system' })
     return true
   }
-  const item = { kind: 'file', root, path, row, fragment, mode, push, list, boardThread }
+  const item = { kind: 'file', root, path, row, fragment, mode, push, list, returnThread }
   const sheet = host.state.sheet
   if (returnToSettings && sheet?.kind === 'settings') {
     item.returnModal = { kind: 'settings', page: sheet.page, provider: sheet.provider }
   }
   if (!routed) return host.panels[host.panelId === 'side' ? 'openSide' : 'openMain'](item)
-  files.st.chatFile = Boolean(boardThread || host.activeThread() || (host.state.screen === 'files' && files.st.chatFile))
+  files.st.chatFile = Boolean(returnThread || host.activeThread() || (host.state.screen === 'files' && files.st.chatFile))
   if (host.state.screen !== 'files') {
     host.importRequest++
     host.threads.close({ navigate: false })
@@ -484,7 +484,7 @@ function filesScreen({ list = false } = {}) {
       { class: 'screen files', key: 'screen:files:file' },
       fileView(files, {
         openFolder: files.st.chatFile ? () => goFiles(f.root, parentOf(f.path), { isFile: false }) : null,
-        historyBack: host.backAction('main', globalThis.history?.state?.boardThread ? 'Back to board' : undefined),
+        historyBack: host.backAction('main', globalThis.history?.state?.returnThread ? 'Back to thread' : undefined),
         closeLabel: files.pluginRoot(f.root)?.name ?? (parentOf(f.path) ? fileNameOf(parentOf(f.path)) : ROOT_LOOK[f.root]?.name ?? f.root),
         wide: false,
         htmlActionsInMenu: files.st.chatFile,

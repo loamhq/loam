@@ -7,7 +7,7 @@ itself is `docs/library/`.*
 ## What was decided
 
 - **A blank install's vault starts small** (decision 2a): `Inbox/` with
-  `boards/`, `Conversations/`, `Projects/`, `Attachments/`, `System/`, and a
+  `Conversations/`, `Projects/`, `Attachments/`, `System/`, and a
   `README.md` saying what each is for. Plain names; every one is read from
   `[vault]` in the configuration (`docs/config.md`), so a vault with other
   names (numbered ones, say) keeps them.

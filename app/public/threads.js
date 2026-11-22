@@ -1,5 +1,4 @@
-import { firstUseActive, firstThreadLesson } from './first-use.js'
-import { cardText, applyCardText, setBoardExpiry, recoverBoard } from './board-document.js'
+import { firstThreadLesson } from './first-use.js'
 import { threadOutbox } from './thread-outbox.js'
 import { createAgentDrafts } from './agent-drafts.js'
 import { owner, isOwner } from './owner.js'
@@ -10,7 +9,6 @@ import { threadSelection } from './thread-selection.js'
 import { threadIcons, threadGlyph, threadPersona, threadSubtitle, threadActivity, threadIconState, listeningPulse, listeningRecipients, paintMention, LISTENING_INSET, listeningInset } from './thread-identity.js'
 import { threadWaiting, replyChip, replyTimestamp, composerModel, mentionChoices as choicesForMention, backgroundCount, threadBackground, memberGenerating, replyHasContent, showReply, taskTitle, taskElapsed, jobStatus, jobActivity, jobElapsed, failedTurnInfo, formatSystemLine } from './thread-experience.js'
 import { createReplySteps, memberTakingTurn } from './thread-steps.js'
-import { boardDrag } from './board-drag.js'
 import { authorMarkers } from './thread-authors.js'
 import { canReply, quoteLine, replyQuotes, replyGesture } from './thread-replies.js'
 import { OPENING_MESSAGES, HISTORY_MESSAGES, openingContext, readingAnchor, restoreAnchor, mergeHistory, progressiveProse } from './thread-opening.js'
@@ -30,11 +28,10 @@ import { providerMark } from './marks.js'
 import { readEvents } from './sse.js'
 import { createLink } from './link.js'
 import { readField, caretPoint, setMarkdown } from './compose.js'
-import { boardLines, boardSections, boardItemEnd, moveBoardItem, reflowBoardQuotes, editBoard, markBoardSeen, addBoardItem, applyThreadEvent, threadTurns, readThreadRecord, readThreadSummary, readThreadList, readThreadBoard, readAcceptedMessage, compareThreads, messageSegments, firstMessageTitle, groupJoinNotices, withPending, withMarks } from './thread-record.js'
+import { applyThreadEvent, threadTurns, readThreadRecord, readThreadSummary, readThreadList, readAcceptedMessage, compareThreads, messageSegments, firstMessageTitle, groupJoinNotices, withPending, withMarks } from './thread-record.js'
 
 const button = (text, onclick, props = {}) => h('button', { class: 'pillbtn', type: 'button', onclick, ...props }, text)
-const boardListName = (section) => section.name.replace(/:\s*$/, '').trim() || section.name
-export function createThreads({ registry = createCoreRegistry(), linePending = () => false, api, redraw, agents, changedAgent = () => {}, agentsReady = () => false, providers = () => [], rail, nav, enter, leave, compose, openProfile, openSettings = null, openRef, openBoardFile, address = () => {}, viewAddress = () => {}, archiveAddress = () => false, historyButton = () => null, visitId = () => null, messageState = createMessageState(), sidebar = null, renderText = markdown, marketCards = null, fixture = false, running = null, stepUI = null, dom = document, navigate = null, side = () => null, sidePanel = false, visible = () => true, listIsMain = () => true, missing = () => {} }) {
+export function createThreads({ registry = createCoreRegistry(), linePending = () => false, api, redraw, agents, changedAgent = () => {}, agentsReady = () => false, providers = () => [], rail, nav, enter, leave, compose, openProfile, openSettings = null, openRef, address = () => {}, viewAddress = () => {}, archiveAddress = () => false, historyButton = () => null, visitId = () => null, messageState = createMessageState(), sidebar = null, renderText = markdown, marketCards = null, fixture = false, running = null, stepUI = null, dom = document, navigate = null, side = () => null, sidePanel = false, visible = () => true, listIsMain = () => true, missing = () => {} }) {
 
   const follow = follower()
   const elementId = id => sidePanel ? `side-${id}` : id
@@ -44,7 +41,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
   const longMessages = messageState.long, openMessages = messageState.open
   const longSystemLines = new Set()
   const st = { available: false, checked: false, threads: [], open: null, error: '', loading: false, creating: false, query: '', fixture, manage: false,
-    drafts: new Map(), boardDrafts: new Map(), quickDrafts: new Map(), refreshed: 0 }
+    drafts: new Map(), refreshed: 0 }
   let transport = api, fixtureStream = null, fixtureAgents = null, fixtureProviders = null, runtimeAgents = null
   let outbox
   function connectOutbox() {
@@ -165,56 +162,6 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     if (st.mention && e.target === compose.field() && !e.relatedTarget?.closest?.('.tt-mentions, .tt-mention-button')) { st.mention = null; redraw() }
   })
   document.addEventListener?.('selectionchange', () => { if (st.open && document.activeElement === compose.field()) leanFaces() })
-  const quick = h('input', { class: 'tt-quick', onkeydown: (e) => {
-    if (e.isComposing) return
-    if (e.key === 'Enter') { e.preventDefault(); addItem() }
-    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeQuick(true) }
-  } })
-  const drag = boardDrag({ drop: moveItem, announce: (text) => { if (st.open) { st.open.boardNotice = text; const status = dom.querySelector('.tt-board-status'); if (status) status.textContent = text } } })
-  function closeQuick(focus = false) {
-    const o = st.open
-    if (!o) return
-    if (focus) o.focusBoardAdd = o.addSection
-    o.addSection = null; redraw()
-  }
-  function rememberBoard(o, record) {
-    const id = o.thread.id
-    if (record) st.boardDrafts.set(id, record)
-    else st.boardDrafts.delete(id)
-    try {
-      if (record) sessionStorage.setItem('loam.board.draft.' + id, JSON.stringify(record))
-      else sessionStorage.removeItem('loam.board.draft.' + id)
-    } catch {}
-  }
-  function storedBoard(id) {
-    try { return st.boardDrafts.get(id) ?? JSON.parse(sessionStorage.getItem('loam.board.draft.' + id)) } catch { return st.boardDrafts.get(id) }
-  }
-  const writeBoard = async (o, text, revision) => readThreadBoard(await transport('PUT', `${path(o.thread.id)}/board`, { markdown: text, base_revision: revision }))
-  function inputBoard(value) {
-    const o = st.open
-    if (!o?.editing) return
-    o.editText = applyCardText(o.editText, o.inlineIndex, value)
-    rememberBoard(o, o.editText === o.editBase ? null : { base: o.editBase, text: o.editText })
-  }
-  function finishBoardEdit() {
-    const o = st.open
-    if (!o?.editing || o.boardBusy) return
-    if (o.editText !== o.editBase) return saveBoard(o.editText)
-    o.editing = false; o.inlineIndex = null
-    if (o.boardChanged) { o.boardChanged = false; refreshBoard(o) }
-    redraw()
-  }
-  const inlineField = h('textarea', { class: 'tt-inline-field', rows: '1', 'aria-label': 'Edit item',
-    oninput: () => inputBoard(inlineField.value), onblur: finishBoardEdit,
-    onkeydown: e => {
-      if (!e.isComposing && e.key === 'Enter') { e.preventDefault(); finishBoardEdit() }
-    } })
-  function beginBoardEdit(o, line) {
-    if (o.editing || o.boardBusy || o.boardRefreshing || !o.board.revision || o.recovery) return
-    o.editing = true; o.editBase = o.board.markdown; o.editText = o.editBase; o.inlineIndex = line.index
-    inlineField.value = cardText(line.text)
-    o.focusEditor = true; o.boardMenu = null; redraw()
-  }
   const title = h('input', { class: 'tt-rename', 'aria-label': 'Thread title', onblur: () => finishRename(), onkeydown: (e) => {
     if (e.key === 'Escape') { e.preventDefault(); st.open.renaming = false; st.open.focusRename = false; redraw() }
     if (e.key === 'Enter') { e.preventDefault(); finishRename() }
@@ -334,13 +281,13 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     const { createThreadFixture } = await import('./threads-fixture.js')
     const f = createThreadFixture()
     transport = f.api; fixtureStream = f.subscribe; fixtureListStream = f.subscribeList; fixtureAgents = f.agents; fixtureProviders = f.providers
-    st.fixture = true; st.available = false; st.threads = []; st.error = ''; st.boardDrafts.clear(); st.quickDrafts.clear(); st.drafts.clear()
+    st.fixture = true; st.available = false; st.threads = []; st.error = ''; st.drafts.clear()
     visits.clear()
     enter(); await load()
   }
   function exitPreview() {
     close(); stopList(); transport = api; fixtureStream = null; fixtureListStream = null; fixtureAgents = null; fixtureProviders = null
-    st.fixture = false; st.available = false; st.threads = []; st.drafts.clear(); st.boardDrafts.clear(); st.quickDrafts.clear()
+    st.fixture = false; st.available = false; st.threads = []; st.drafts.clear()
     visits.clear(); readingPlaces.clear()
     leave(); load()
   }
@@ -363,25 +310,22 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       const place = { anchor: readingAnchor(pane) ?? o.readingPosition, atEnd: o.atEnd !== false }
       if (o.visitId != null) readingPlaces.set(o.visitId, { id, ...place })
       visits.delete(id)
-      visits.set(id, { messages: o.messages.filter((m) => !m.streaming).map(({ steps, ...message }) => message), has_more: o.has_more, thread: o.thread, board: o.board,
+      visits.set(id, { messages: o.messages.filter((m) => !m.streaming).map(({ steps, ...message }) => message), has_more: o.has_more, thread: o.thread,
         ...place, unread: o.openingUnread, firstUnseen: o.firstUnseen, proseCache: o.prose?.cache })
     } else if (!o.readFailed && !o.loading) visits.delete(id)
     o.replySteps?.stop()
     o.readingObserver?.disconnect()
     o.prose?.stop()
     saveCompose()
-    st.quickDrafts.set(id, quick.value)
-    if (o.editing && o.editText !== o.board.markdown) st.boardDrafts.set(id, { text: o.editText, base: o.editBase })
     if (transferred === id) {
-      for (const drafts of [st.drafts, st.boardDrafts, st.quickDrafts, visits]) drafts.delete(id)
+      for (const drafts of [st.drafts, visits]) drafts.delete(id)
       transferred = null
     }
     compose.field().__paintMention = null
     compose.leave()
     generation++; controller?.abort(); controller = null; clearTimeout(retry)
     cards.questionDrafts.clear()
-    drag.cancel()
-    st.open = null; st.manage = false; st.mention = null; draft.value = ''; quick.value = ''
+    st.open = null; st.manage = false; st.mention = null; draft.value = ''
     clearReturn()
     if (!st.wide) {
       st.returning = id
@@ -390,24 +334,22 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     if (navigate && !st.fixture) address(null)
     if (drop) dropUnsent(id)
   }
-  // On leaving a new thread, discard it only if its messages, draft, files and board are all empty.
+  // On leaving a new thread, discard it only if its messages, draft, attachments and extension drafts are empty.
   function unsentHere(o) {
     return Boolean(o?.madeHere && !o.creating && !o.createFailed && !o.sending && !o.readFailed && !pendingRows(o).length
-      && !o.messages.some((m) => m.kind !== 'system') && !draft.value.trim() && !compose.files().length
-      && !o.recovery && !o.boardBusy && !storedBoard(o.thread.id)
-      && (!String(o.board?.markdown ?? '').trim() || o.board.markdown === `# ${o.thread.title} — board\n\n`) && !(o.editing && String(o.editText ?? '').trim()))
+      && !o.messages.some((m) => m.kind !== 'system') && !draft.value.trim() && !compose.files().length && !dirty())
   }
   function dropUnsent(id) {
     st.threads = st.threads.filter((t) => t.id !== id); listingRequest++
-    for (const kept of [st.drafts, st.quickDrafts, st.boardDrafts, visits]) kept.delete(id)
+    for (const kept of [st.drafts, visits]) kept.delete(id)
     transport('DELETE', path(id) + '?empty=1').catch(() => refreshList())
   }
   if (!fixture && !sidePanel) globalThis.addEventListener?.('pagehide', () => {
     const o = st.open
     if (unsentHere(o)) globalThis.fetch?.(`/api${path(o.thread.id)}?empty=1`, { method: 'DELETE', keepalive: true, credentials: 'same-origin' })?.catch?.(() => {})
   })
-  async function open(id, { push = true, listing = null, routed = false, board = false, message = null, focusMessage = false } = {}) {
-    if (navigate && !routed) return navigate({ kind: 'thread', id, push, listing, board, message, focusMessage })
+  async function open(id, { push = true, listing = null, routed = false, message = null, focusMessage = false } = {}) {
+    if (navigate && !routed) return navigate({ kind: 'thread', id, push, listing, message, focusMessage })
     close({ navigate: false }); enter({ kind: 'thread', id })
     clearReturn()
     const ticket = generation
@@ -417,7 +359,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       savedAnchor: savedVisit?.atEnd === false ? savedVisit.anchor : null, landing: !savedVisit,
       atEnd: savedVisit ? savedVisit.atEnd : !(summary?.unread > 0), refreshing: true,
       typing: new Set(), permissions: new Map(), after: null, steps: new Map(), has_more: savedVisit?.has_more ?? false,
-      board: savedVisit?.board ?? { markdown: '', path: '' }, boardBusy: false, boardOpen: board, focusBoard: board }
+    }
     const o = st.open
     if (message) Object.assign(o, { replyJump: message, replyJumpFocus: focusMessage, jumpKind: 'quote', savedAnchor: null, landing: false, atEnd: false })
     if (push && !st.fixture) address(id)
@@ -427,7 +369,6 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     o.replyTo = st.drafts.get(id)?.replyTo ?? null
     draft.value = st.drafts.get(id)?.text ?? summary?.draft ?? ''
     compose.restore(st.drafts.get(id)?.attachments ?? [])
-    quick.value = st.quickDrafts.get(id) ?? ''
     redraw()
     if (!st.fixture) agentDraftController.load(id)
     await readOpening(id, ticket, o, { savedVisit, summary, listing })
@@ -480,10 +421,6 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       updateOpening(o)
       if (st.open.latestSummary) { st.open.thread = st.open.latestSummary; delete st.open.latestSummary }
       applyThreadEvent(o, { type: 'thread.snapshot', turns: threadTurns(body) })
-      const saved = storedBoard(id)
-      if (saved && saved.text !== body.board.markdown) {
-        o.recovery = saved; o.boardOpen = true
-      } else if (saved) rememberBoard(o, null)
       for (const p of body.pending_permissions ?? []) applyThreadEvent(st.open, { ...p, type: 'broker.permission_request' })
       // The broker replays completions after this ID, including a reply that
       // arrived between the page read and stream attachment.
@@ -577,15 +514,8 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     if (['thread.snapshot', 'members', 'turn.started', 'turn.step', 'turn.waiting', 'turn.mark', 'turn.finished', 'message.delta', 'message.done', 'broker.user_message'].includes(e.type)) cancelRemoval(o.thread.id)
     if (e.type === 'turn.started') awaitingSince.delete(e.persona)
     if (['thread.snapshot', 'members', 'turn.started', 'turn.step', 'turn.waiting', 'turn.mark', 'turn.finished', 'message.delta', 'message.done'].includes(e.type)) o.eventVersion = (o.eventVersion ?? 0) + 1
-    if (e.type === 'board.changed') {
-      if (o.boardBusy || o.boardRefreshing) o.boardRefreshAfter = true
-      else if (o.editing) o.boardChanged = true
-      else if (e.board) { o.board = e.board; o.boardUnavailable = false }
-      else refreshBoard(o)
-    }
     if (e.type !== 'thread.changed') applyThreadEvent(o, e)
     else if (!st.listLive && e.summary?.id === o.thread.id) updateRow(e.summary)
-    if (e.type === 'board.changed' && Number.isInteger(e.board_new)) o.thread.board_new = e.board_new
     registry.emit('thread.event', { thread: o.thread, event: e })
     if (e.type === 'message.done' || e.type === 'broker.user_message') registry.emit('message.arrived', { thread: o.thread, event: e })
     if (e.type === 'turn.finished') { registry.emit('turn.ended', { thread: o.thread, event: e }); if (!st.fixture) agentDraftController.load(o.thread.id) }
@@ -610,38 +540,21 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       redraw()
     } catch { /* Keep the known turn until a later snapshot can settle it. */ }
   }
-  async function refreshBoard(o) {
-    if (o.boardRefreshing) return
-    o.boardRefreshing = true; redraw()
-    try {
-      const body = readThreadBoard(await transport('GET', `${path(o.thread.id)}/board`))
-      if (st.open === o && !o.editing && !o.boardBusy) {
-        if (body.revision !== o.board.revision) o.boardMenu = null
-        o.board = body; o.boardUnavailable = false
-      }
-    } catch (e) { o.boardError = e.message; o.boardUnavailable = true }
-    finally {
-      o.boardRefreshing = false
-      if (o.boardRefreshAfter) { o.boardRefreshAfter = false; refreshBoard(o) }
-    }
-    redraw()
-  }
   function saveCompose() {
     if (st.open) st.drafts.set(st.open.thread.id, { text: draft.value, attachments: compose.files(), replyTo: st.open.replyTo })
   }
   function transferTo(target, id) {
     const o = st.open
     if (o?.thread.id === id) {
-      saveCompose(); st.quickDrafts.set(id, quick.value)
-      if (o.editing && o.editText !== o.board.markdown) st.boardDrafts.set(id, { text: o.editText, base: o.editBase })
+      saveCompose()
       if (!o.readFailed && o.messages.length) target.receiveVisit(id, {
         messages: o.messages.filter(message => !message.streaming).map(({ steps, ...message }) => message),
-        has_more: o.has_more, thread: o.thread, board: o.board, anchor: readingAnchor(dom.querySelector('.tt-stream')) ?? o.readingPosition,
+        has_more: o.has_more, thread: o.thread, anchor: readingAnchor(dom.querySelector('.tt-stream')) ?? o.readingPosition,
         atEnd: o.atEnd !== false, unread: o.openingUnread, firstUnseen: o.firstUnseen,
       })
       transferred = id
     }
-    for (const key of ['drafts', 'boardDrafts', 'quickDrafts']) if (st[key].has(id)) target.st[key].set(id, st[key].get(id))
+    if (st.drafts.has(id)) target.st.drafts.set(id, st.drafts.get(id))
   }
   function beginBranch(message) {
     if (!st.open || !canReply(message) || st.open.branch) return
@@ -679,7 +592,6 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     const ticket = generation
     const o = st.open = { thread: { id: 'new-thread', title: 'New thread', default: persona, members: persona ? [{ persona, engine: null }] : [] },
       messages: [], loading: false, creating: true, typing: new Set(), permissions: new Map(), steps: new Map(),
-      board: { markdown: '', path: '' }, boardBusy: false, boardOpen: false,
       replyTo: options.source ?? null,
       promptTitle: options.promptTitle ?? null, promptBody: options.promptBody ?? null, promptPlaceholder: options.placeholder ?? null }
     // Pre-fill the composer and leave sending to the person.
@@ -693,9 +605,8 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       if (ticket !== generation) { transport('DELETE', path(thread.id)).catch(() => {}).finally(() => refreshList()); return }
       if (source && !body.draft_reply) throw new Error('The runtime hasn’t opened a branch composer. Try again after it updates.')
       if (source && o.replyTo) o.replyTo = body.draft_reply
-      o.thread = thread; o.board.path = thread.board ?? ''; o.creating = false; o.madeHere = true; o.ordered_submissions = thread.ordered_submissions
+      o.thread = thread; o.creating = false; o.madeHere = true; o.ordered_submissions = thread.ordered_submissions
       attachReplySteps(o)
-      o.needsInitialBoard = true
       attachProse(o); if (!st.fixture) address(thread.id)
       attachQuotes(o)
       st.threads = [thread, ...st.threads.filter((t) => t.id !== thread.id)]
@@ -824,73 +735,6 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     // deferred rewrite can race the next keystrokes and discard/reorder them.
     draft.focus(); draft.setSelectionRange(m.start + tag.length)
     st.mention = null; compose.changed(); saveCompose(); redraw()
-  }
-  async function saveBoard(text, after = null) {
-    const o = st.open
-    if (!o || o.loading || o.refreshing || o.readFailed || o.creating || o.createFailed || o.boardBusy || o.boardRefreshing || o.boardUnavailable) return
-    if (!o.board.revision) return
-    const base = o.board.markdown
-    const pending = { base, text }
-    rememberBoard(o, pending)
-    o.boardBusy = true; o.boardError = ''; redraw()
-    try {
-      const answer = await writeBoard(o, text, o.board.revision)
-      if (storedBoard(o.thread.id)?.text === text) rememberBoard(o, null)
-      if (st.open !== o) return
-      o.board = answer; o.recovery = null; o.editing = false; o.inlineIndex = null
-      o.boardChanged = false; (after ?? o.recoveredAction)?.(); o.recoveredAction = null; refreshList()
-    } catch (e) {
-      o.recovery = pending; o.recoveredAction = after ?? o.recoveredAction; o.editing = false; o.inlineIndex = null
-      o.boardError = e.status === 409 ? '' : e.message
-      o.boardRefreshAfter = true
-    } finally {
-      o.boardBusy = false
-      if (o.boardRefreshAfter && st.open === o) {
-        o.boardRefreshAfter = false; o.boardChanged = false
-        await refreshBoard(o)
-      }
-      redraw()
-    }
-  }
-  async function removeItem(index) {
-    const o = st.open
-    if (!o || o.loading || o.refreshing || o.readFailed || o.boardBusy || o.boardRefreshing || o.boardUnavailable) return
-    o.removing = index; o.boardBusy = true; redraw()
-    await new Promise((resolve) => setTimeout(resolve, 180))
-    if (st.open !== o) return
-    o.boardBusy = false
-    await saveBoard(editBoard(o.board.markdown, index, 'remove'))
-    o.removing = null; redraw()
-  }
-  async function tickItem(line) {
-    const o = st.open
-    if (!o || o.boardBusy || o.boardRefreshing || o.boardUnavailable) return
-    o.pendingTick = { index: line.index, checked: !line.checked }
-    await saveBoard(editBoard(o.board.markdown, line.index, 'tick'))
-    o.pendingTick = null; redraw()
-  }
-  function addItem() {
-    const o = st.open
-    if (!o || o.addSection == null || !quick.value.trim()) return
-    const next = addBoardItem(o.board.markdown, quick.value, o.duration ?? 0, new Date(), o.board.path, o.addSection)
-    if (next === o.board.markdown) { o.boardError = 'This list changed. Choose a list again.'; redraw(); return }
-    const submitted = quick.value, section = o.addSection
-    saveBoard(next, () => { if (quick.value === submitted) quick.value = ''; if (o.addSection === section) o.focusQuick = true })
-  }
-  async function moveItem(index, section, before = null, base = st.open?.board.markdown) {
-    const o = st.open
-    if (!o || o.editing) return
-    if (o.boardBusy || o.boardRefreshing || o.boardUnavailable) { o.boardNotice = 'The board is updating. Please try the move again.'; redraw(); return }
-    if (base !== o.board.markdown) { o.boardError = 'The board changed during this move. Please try again.'; redraw(); return }
-    const next = moveBoardItem(base, index, section, before)
-    o.boardMenu = null
-    if (next === base) { o.focusBoardItem = index; redraw(); return }
-    const target = before ?? boardItemEnd(boardSections(base).find((s) => s.key === section))
-    await saveBoard(next, () => {
-      o.addSection = null
-      o.settleBoardItem = target - (index < target ? 1 : 0)
-      o.boardNotice = `Moved to ${boardListName(boardSections(next).find((s) => s.key === section) ?? { name: 'Board' })}.`
-    })
   }
   const answering = new Set()
   const cards = createPermissionCards({ schedule: redraw, answering, answerPermission: async (requestId, behavior, extra, { onCard = false } = {}) => {
@@ -1694,20 +1538,17 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
   function hasExtensionView(view) {
     return registry.entries('thread.header.action', { slot: 'below', thread: st.open?.thread, state: st.open }).some(entry => entry.view === view)
   }
-  function currentView() { return st.manage ? 'details' : st.open?.boardOpen ? 'board' : st.open?.extensionView || null }
+  function currentView() { return st.manage ? 'details' : st.open?.extensionView || null }
   function setView(view) {
     const o = st.open
     if (!o || (currentView() === (view || null))) return
-    if (o.boardOpen) { finishBoardEdit(); drag.cancel() }
     if (st.manage && o.atEnd === false) o.restoreTop = o.readingTop
     if (view === 'details') {
       const pane = dom.querySelector('.tt-stream')
       o.readingTop = pane?.scrollTop; o.readingPosition = readingAnchor(pane); o.focusDetails = true
-    } else if (view === 'board' && !hasExtensionView(view)) o.focusBoard = true
-    else o.focusChat = true
+    } else o.focusChat = true
     st.manage = view === 'details'
     o.extensionView = view && view !== 'details' ? view : null
-    o.boardOpen = view === 'board' && !hasExtensionView(view)
     o.choice = null
     redraw()
   }
@@ -1747,139 +1588,11 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
           !Object.hasOwn(m, 'model') ? h('p', { class: 'tt-configuration-note', text: 'Model settings need a runtime update.' }) : null)),
           h('h4', { class: 'kicker', text: 'Bring someone in' }), h('div', { class: 'tt-add-members' }, ...catalog().filter((a) => !o.thread.members.some((m) => m.persona === a.id)).map((a) => button([icon.plus(12), ` ${a.name}`], () => patch({ add: [a.id] }), { class: 'pillbtn', 'aria-label': `Add ${a.name}`, disabled: busy })))),
         h('section', { class: 'tt-details-section tt-details-actions', id: elementId('tt-manage') },
-          settingsRow({ title: 'Open board', lead: h('span', { class: 'icon-tile' }, icon.list(18)), onclick: () => chooseView('board') }),
           settingsRow({ title: o.thread.pinned ? 'Unpin thread' : 'Pin thread', lead: h('span', { class: 'icon-tile' }, icon.pin(18)), onclick: () => patch({ pinned: !o.thread.pinned }), props: { disabled: busy || general } }),
           !general ? settingsRow({ title: o.thread.archived ? 'Unarchive thread' : 'Archive thread', lead: h('span', { class: 'icon-tile' }, icon.folder(18)), onclick: () => patch({ archived: !o.thread.archived }), props: { disabled: busy } }) : null,
           !general ? settingsRow({ title: 'Delete thread', lead: h('span', { class: 'icon-tile' }, icon.close(14)), onclick: () => { o.confirmDelete = true; o.focusDelete = true; redraw() }, props: { class: 'setrow tt-danger', disabled: busy } }) : null,
           o.confirmDelete && o.confirmDelete !== 'header' ? h('div', { class: 'tt-delete-confirm', role: 'group', 'aria-label': 'Confirm delete' }, h('p', { text: 'Delete this thread and its conversation? This cannot be undone.' }), button('Keep thread', () => { o.confirmDelete = false; redraw() }), button('Delete permanently', deleteThread, { class: 'pillbtn tt-danger', disabled: busy })) : null),
         o.error ? h('p', { class: 'banner', role: 'alert', text: failureSentence(o.error) }) : null)))
-  }
-  function board() {
-    const o = st.open
-    if (!o.boardOpen) return null
-    const lines = boardLines(o.board.markdown), all = boardSections(o.board.markdown)
-    const sections = all.map((section, i) => {
-      const items = section.lines.filter(line => line.item).length
-      const title = section.lines.find(line => line.title)?.titleText
-      const level = section.level ?? (title ? 1 : 0)
-      // The following heading starts a subsection only when its level is deeper.
-      const group = !items && level > 0 && all[i + 1]?.level > level
-      return { ...section, name: group && title ? title : section.name, level, items, group }
-    }).filter(s => s.key !== 'top' || s.group || all.length === 1 || s.blocks.some(b => b.item || b.text.trim()))
-    const lists = sections.filter(s => !s.group)
-    const count = lines.filter(l => l.unseen).length
-    const closeBoard = () => chooseView(null)
-    const busy = o.boardBusy || o.boardRefreshing || !o.board.revision || Boolean(o.recovery)
-    const closeMenu = () => { o.boardMenu = null; o.menuPage = null; redraw() }
-    const dateLabel = day => formatCalendarDate(day, { month: 'short', day: 'numeric' })
-    const taskCheck = (line) => {
-      const checked = o.pendingTick?.index === line.index ? o.pendingTick.checked : line.checked
-      return h('label', { class: 'tt-tick' }, h('input', { type: 'checkbox', checked, disabled: busy, 'aria-label': `Complete ${line.text}`, onchange: () => tickItem(line) }), selectionMark({ chosen: checked }))
-    }
-    const item = (l) => {
-      const editing = o.editing && o.inlineIndex === l.index
-      const mine = l.author && (isOwner(l.author) || l.author.toLocaleLowerCase() === owner().name.toLocaleLowerCase())
-      const meta = [l.date && dateLabel(l.date), l.author && (mine ? 'You' : name(l.author)), l.until && 'expires ' + dateLabel(l.until)].filter(Boolean)
-      const edit = () => { if (!busy) beginBoardEdit(o, l) }
-      const setExpiry = day => { closeMenu(); saveBoard(setBoardExpiry(o.board.markdown, l.index, day)) }
-      return h('div', { class: `tt-board-item${l.unseen ? ' is-new' : ''}${l.checked ? ' done' : ''}${editing ? ' is-editing' : ''}${o.removing === l.index ? ' removing' : ''}`, key: l.key,
-        'data-board-index': l.index, onpointerdown: e => {
-          if (!busy && !o.editing && !e.target.closest('button,input,label,a,textarea')) drag.start(e, l.index, o.board.markdown)
-        } },
-        l.checked !== null ? taskCheck(l) : null,
-        h('div', { class: 'tt-item-body' },
-          editing ? kept(inlineField) : h('div', { class: 'tt-item-copy', tabindex: '0', role: 'group', 'aria-label': 'Edit ' + cardText(l.text),
-            onclick: e => { if (!e.target.closest('a,button')) edit() },
-            onkeydown: e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); edit() } } }, h('div', { class: 'md' }, ...renderText(l.text, { from: { root: 'vault', path: o.board.path } }))),
-          h('div', { class: `tt-item-meta${mine ? ' is-owner' : ''}` }, meta.join(' · '),
-            l.unseen ? button('New', () => saveBoard(editBoard(o.board.markdown, l.index, 'seen')), { class: 'quietlink tt-newtag', disabled: busy, 'aria-label': `Mark ${l.text} seen` }) : null)),
-        h('div', { class: 'tt-item-actions' }, round(`Actions for ${l.text}`, icon.dots(16), () => {
-          o.boardMenu = o.boardMenu === l.index ? null : l.index; o.menuPage = null; redraw()
-        }, { class: 'iconbtn content-mark tt-card-menu', disabled: busy, 'aria-expanded': String(o.boardMenu === l.index) }),
-        o.boardMenu === l.index ? menuSurface(h('div', { class: 'tt-item-menu' },
-          o.menuPage === 'move' ? lists.map(s => button(boardListName(s), () => moveItem(l.index, s.key), { class: 'pillbtn content-mark' })) :
-          o.menuPage === 'expiry' ? h('label', { class: 'tt-expiry' }, 'Expires on', h('input', { type: 'date', value: l.until, onchange: e => setExpiry(e.target.value) })) :
-          [button(l.until ? 'Change expiry' : 'Set expiry', () => { o.menuPage = 'expiry'; redraw() }),
-            l.until ? button('Clear expiry', () => setExpiry('')) : null,
-            button('Move to…', () => { o.menuPage = 'move'; redraw() }),
-            button('Delete item', () => { closeMenu(); removeItem(l.index) }, { class: 'pillbtn tt-danger' })]),
-          { title: o.menuPage === 'move' ? 'Move to section' : o.menuPage === 'expiry' ? 'Set expiry' : 'Item actions', width: 280, close: closeMenu }) : null))
-    }
-    const quickForm = () => h('form', { class: 'tt-board-add', key: 'board-add', onsubmit: (e) => { e.preventDefault(); addItem() }, onfocusout: (e) => {
-      if (!e.currentTarget.contains(e.relatedTarget)) closeQuick()
-    } }, kept(quick), h('div', { class: 'tt-board-add-foot' },
-      h('div', { class: 'tt-durations', role: 'group', 'aria-label': 'Keep board item for' }, ...[[0, 'Stays'], [1, '1 day'], [7, '1 week'], [14, '2 weeks']].map(([n, label]) => button(label, () => { o.duration = n; o.focusQuick = true; redraw() }, { class: 'pillbtn content-mark', 'aria-pressed': String(Number(o.duration ?? 0) === n) }))), button('Add', addItem, { class: 'pillbtn content-mark', disabled: busy })))
-    const listAdd = (section) => {
-      const name = boardListName(section)
-      const label = 'Add a note'
-      return h('div', { class: 'tt-board-list-foot', key: `add:${section.key}` },
-        o.addSection === section.key ? quickForm() : button([icon.plus(15), label], () => {
-          quick.setAttribute('placeholder', label)
-          quick.setAttribute('aria-label', `New item in ${name}`)
-          o.addSection = section.key; o.focusQuick = true; o.boardMenu = null; redraw()
-        }, { class: 'tt-list-add', disabled: busy, 'aria-label': label, 'title': `Add a note to ${name}`, 'data-add-section': section.key, 'aria-expanded': 'false' }))
-    }
-    const description = (section, block) => {
-      const key = `${section.key}:${block.key}`
-      return h('details', { class: 'tt-description', key: block.key, open: o.openDescriptions?.has(key),
-        ontoggle: e => {
-          if (!e.currentTarget.isConnected) return
-          o.openDescriptions ??= new Set()
-          if (e.currentTarget.open) o.openDescriptions.add(key)
-          else o.openDescriptions.delete(key)
-        } }, h('summary', {}, icon.chevronRight(14), 'About this section'),
-        h('div', { class: 'md tt-description-copy' }, ...renderText(reflowBoardQuotes(block.text))))
-    }
-    if (o.loading || o.refreshing || o.readFailed || o.boardUnavailable) return h('aside', { class: 'tt-board', 'aria-label': 'Thread board', onkeydown: (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeBoard() } } },
-      panelHeader({ title: 'Board', back: historyButton(), actions: [round('Close board', icon.close(14), closeBoard)], props: { class: 'chat-head plain tt-board-head' } }),
-      h('div', { class: 'tt-empty', role: 'status' }, o.loading || o.refreshing ? 'Opening your board…' : 'The board could not be loaded.',
-        o.boardError ? h('p', { role: 'alert', text: o.boardError }) : null,
-        o.readFailed || o.boardUnavailable ? button('Try again', () => open(o.thread.id)) : null))
-    const recovery = o.recovery && recoverBoard(o.recovery.base, o.recovery.text, o.board.markdown)
-    inlineField.readOnly = Boolean(o.boardBusy)
-    o.collapsed ??= new Set()
-    const sectionView = section => {
-      const { items, group, level } = section, closed = o.collapsed.has(section.key)
-      const name = boardListName(section)
-      const heading = `h${Math.min(6, Math.max(3, level + 2))}`
-      const blocks = () => section.blocks.map(l => l.item ? item(l) : l.text.trim() ? description(section, l) : null)
-      if (group) return h('div', { class: 'tt-board-group', key: section.key }, h(heading, { text: name }), blocks())
-      const toggle = () => { if (closed) o.collapsed.delete(section.key); else o.collapsed.add(section.key); redraw() }
-      return h('section', { class: 'tt-board-list', key: section.key, 'data-board-section': section.key, 'aria-label': name },
-        section.key === 'top' && !items ? null : h(heading, { class: 'tt-board-list-head' }, button([
-          h('span', { class: 'tt-board-list-title', text: name }),
-          h('span', { class: 'tt-board-list-count', text: String(items) }), closed ? icon.chevronRight(12) : icon.chevronDown(12)],
-          toggle, { class: 'tt-section-toggle', 'aria-expanded': String(!closed) })),
-        closed ? null : [listAdd(section), blocks(), h('div', { class: 'tt-board-list-end' })])
-    }
-    return h('aside', { class: 'tt-board', 'aria-label': 'Thread board', onkeydown: e => {
-      if (e.key === 'Escape') { e.stopPropagation(); if (o.boardMenu != null) closeMenu(); else closeBoard() }
-    } },
-      panelHeader({ title: 'Board', back: historyButton(), actions: [
-        o.board.path && openBoardFile ? button([side()?.available() ? icon.panelRight(15) : icon.folder(15), 'Open in Files'],
-          () => {
-            finishBoardEdit()
-            drag.cancel()
-            closeMenu()
-            // Opening the file in the other pane reveals this chat. Record that
-            // location so Back can reopen its board with the file still mounted.
-            openBoardFile(o.board.path, o.thread.id, () => chooseView(null, { traverse: false }))
-          }, { class: 'tt-board-files ghost' }) : null,
-        round('Close board', icon.close(16), closeBoard)], props: { class: 'chat-head plain tt-board-head' } }),
-      h('span', { class: 'sr-only tt-board-status', role: 'status', text: o.boardNotice ?? '' }),
-      o.boardError ? h('div', { class: 'banner', role: 'alert', text: o.boardError }) : null,
-      !o.board.revision ? h('div', { class: 'banner', role: 'status' }, 'Board editing will be available after the runtime updates.',
-        button('Refresh', () => refreshBoard(o))) : null,
-      recovery ? h('div', { class: 'tt-recovery', role: 'status' },
-        h('strong', { text: o.boardError ? 'Your edit is saved in this tab' : 'The board changed' }),
-        h('p', { text: recovery.both ? 'The same passage changed. Keep both versions to review them together.' : 'Your draft is safe. Apply it to the board shown below.' }),
-        button(recovery.both ? 'Keep both versions' : 'Reapply my edit', () => saveBoard(recovery.markdown), { disabled: o.boardBusy || o.boardRefreshing || !o.board.revision }),
-        button('Discard draft', () => { if (globalThis.confirm('Discard your saved board edit?')) { o.recovery = null; o.recoveredAction = null; rememberBoard(o, null); redraw() } }, { class: 'quietlink' })) : null,
-      count ? h('div', { class: 'tt-seen-strip' }, h('span', { text: count + ' new from the agents' }),
-        button('Mark seen', () => saveBoard(markBoardSeen(o.board.markdown)), { class: 'quietlink tt-mark-seen', disabled: busy })) : null,
-      h('div', { class: 'tt-board-items' }, !lines.some(l => l.item) && !sections.some(s => s.blocks.some(b => b.text.trim())) ?
-          emptyState({ object: 'page', size: 'small', level: 'h3', title: firstUseActive() ? 'Nothing here yet' : 'Room for your first idea', body: firstUseActive() ? 'Keep what matters from this chat here.' : 'Keep a thought or a next step here.', props: { key: 'board-empty' } }) : null,
-          ...sections.map(sectionView)))
   }
   function emptyThread() {
     return h('div', { class: 'pane-body' }, registry.draw('app.overlay', { slot: 'player' }), emptyState({ object: 'speech', title: 'Good things start here.', body: 'Choose a conversation or start a new thread.' }))
@@ -1897,24 +1610,22 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     const general = o.thread.general || o.thread.id === 'general'
     o.branches = st.threads.filter((row) => row.branched_from?.reply && row.branched_from.thread === o.thread.id)
     syncTasks(o)
-    const count = boardLines(o.board.markdown).filter((l) => l.unseen).length
     const defaultMember = o.thread.members.find((m) => m.persona === o.thread.default)
     const unmatched = [...o.permissions.values()].filter((p) => !o.messages.some((m) => m.id === p.message_id))
     const closeMenu = (act) => () => { o.headerMenu = false; act(); redraw() }
-    const extensionOwnsBoard = hasExtensionView('board')
     const headerContext = { thread: o.thread, state: o, open, patch, view: currentView(),
       selectView: chooseView, backButton: historyButton, panel: sidePanel ? 'side' : 'main' }
     const controls = placement => registry.draw('thread.header.action', {
       ...headerContext, slot: 'control', placement, closeMenu: () => { o.headerMenu = false; redraw() },
     })
     const header = chatHeader({ wide: st.wide,
-      back: o.boardOpen ? null : historyButton() ?? (st.wide ? null : round('Back to threads', icon.chevronLeft(20), () => { close(); refreshList(); redraw() }, { class: 'iconbtn ghost tt-back' })),
+      back: o.extensionView ? null : historyButton() ?? (st.wide ? null : round('Back to threads', icon.chevronLeft(20), () => { close(); refreshList(); redraw() }, { class: 'iconbtn ghost tt-back' })),
       face: threadFace(o.thread, st.wide ? 42 : 40), onIdentity: showDetails, identityTitle: 'Thread details',
       title: o.thread.title || 'New thread', subtitle: null,
       onRename: general ? null : beginRename, renameLabel: 'Rename thread', titleField: o.renaming ? kept(title) : null,
       titleProps: { class: `${st.wide ? 'chattitle' : 'headtitle'} tt-title` },
       props: { class: `${st.wide ? 'chat-head' : 'thread-head'} tt-head` },
-      actions: [...(sidePanel ? side().controls().slice(0, 2) : [extensionOwnsBoard ? null : round('Board', [icon.list(18), count ? h('span', { class: 'navdot', 'aria-label': `${count} new board items` }) : null], () => chooseView(o.boardOpen ? null : 'board'), { class: 'iconbtn ghost tt-board-button', 'aria-description': count ? `${count} new board items` : 'Open thread board', 'aria-expanded': String(Boolean(o.boardOpen)) }), ...controls('header'), taskIndicator()]),
+      actions: [...(sidePanel ? side().controls().slice(0, 2) : [...controls('header'), taskIndicator()]),
         round('Thread actions', icon.dots(20), () => { o.headerMenu = !o.headerMenu; redraw() }, { class: 'iconbtn ghost', 'aria-expanded': String(Boolean(o.headerMenu)) }),
         sidePanel ? side().controls().at(-1) : null] })
     const chosenModel = defaultMember?.engine && composerModel(defaultMember, o.messages, providerCatalog())
@@ -1951,7 +1662,6 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       registry.draw('app.overlay', { slot: 'player' }),
       o.headerMenu ? menuSurface(h('div', { key: 'header-menu', class: 'popover tt-header-menu', role: 'menu' },
         side()?.available() && !o.creating && !o.createFailed ? settingsRow({ title: 'Open to the side', lead: icon.panelRight(18), onclick: closeMenu(() => side().openSide({ kind: 'thread', id: o.thread.id })) }) : null,
-        sidePanel && !extensionOwnsBoard ? settingsRow({ title: 'Board', lead: icon.list(18), onclick: closeMenu(() => chooseView('board')) }) : null,
         sidePanel ? controls('menu') : null,
         sidePanel ? settingsRow({ title: 'Tasks', lead: icon.code(18), onclick: closeMenu(() => { o.tasksOpen = true; o.focusTasks = true }) }) : null,
         settingsRow({ title: 'Thread details', lead: icon.users(18), onclick: closeMenu(showDetails) }),
@@ -1962,7 +1672,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
         h('p', { text: 'Delete this thread and its conversation? This cannot be undone.' }),
         button('Keep thread', () => { o.confirmDelete = false; o.focusActions = true; redraw() }),
         button('Delete permanently', deleteThread, { class: 'pillbtn tt-danger', disabled: o.patching })), { title: 'Delete thread?', anchor: '[aria-label="Thread actions"]', close: () => { o.confirmDelete = false; redraw() } }) : null,
-      h('section', { key: 'conversation', class: `tt-conversation pane-body${o.listeners.size ? ' has-listeners' : ''}`, inert: o.boardOpen || (o.extensionView && hasExtensionView(o.extensionView)) ? true : null, style: { '--tt-listening-inset': `${LISTENING_INSET}px` } },
+      h('section', { key: 'conversation', class: `tt-conversation pane-body${o.listeners.size ? ' has-listeners' : ''}`, inert: (o.extensionView && hasExtensionView(o.extensionView)) ? true : null, style: { '--tt-listening-inset': `${LISTENING_INSET}px` } },
         h('div', { class: 'msgs tt-stream', role: 'log', 'aria-label': 'Thread messages', style: { paddingBottom: o.dockHeight ? `${o.dockHeight + 10 + o.listeningInset}px` : '' }, 'aria-busy': String(o.loading || o.typing.size > 0), onscroll: (e) => {
           const was = o.atEnd, previous = o.scrollTop ?? e.target.scrollTop
           if (Math.abs(e.target.scrollTop - previous) > 1) { o.openingBoundary = null; o.replyAnchor = null; o.taskReplyAnchor = null; o.readingPosition = readingAnchor(e.target) }
@@ -1988,8 +1698,6 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
           o.error ? h('div', { class: 'banner', role: 'alert' }, o.error, o.createFailed ? button('Try creating again', () => create(o.thread.default, { promptTitle: o.promptTitle, promptBody: o.promptBody, placeholder: o.promptPlaceholder, draft: draft.value, source: o.replyTo?.thread ? o.replyTo : null })) : button('Refresh thread', () => open(o.thread.id))) : null,
           o.connection ? h('div', { class: 'noticerow', role: 'status', text: o.connection }) : null,
           composingReply(), renderedComposer), compose.hint?.())),
-      o.boardOpen && !extensionOwnsBoard ? h('button', { class: 'tt-board-scrim', title: 'Dismiss board panel', tabindex: '-1', onclick: () => chooseView(null) }) : null,
-      extensionOwnsBoard ? null : board(),
       branchPanel(),
     ] })
   }
@@ -2067,22 +1775,8 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     gesture.paint()
     if (st.open?.focusReplyDraft) { compose.field().focus({ preventScroll: true }); st.open.focusReplyDraft = false }
     leanFaces()
-    const boardOpen = st.open
-    if (!boardOpen?.boardOpen) drag.cancel()
-    else if (boardOpen.needsInitialBoard) { boardOpen.needsInitialBoard = false; refreshBoard(boardOpen) }
-    if (boardOpen?.focusQuick) { quick.focus(); quick.scrollIntoView?.({ block: 'nearest' }); boardOpen.focusQuick = false }
-    if (boardOpen?.focusEditor) { const at = inlineField.value.length; inlineField.focus(); inlineField.setSelectionRange?.(at, at); boardOpen.focusEditor = false }
-    if (boardOpen?.focusBoardAdd) { const control = dom.querySelector(`[data-add-section=${JSON.stringify(boardOpen.focusBoardAdd)}]:not(:disabled)`); if (control) { control.focus(); boardOpen.focusBoardAdd = null } }
-    if (boardOpen?.focusBoardItem != null) { dom.querySelector(`[data-board-index="${boardOpen.focusBoardItem}"] .tt-item-actions > button`)?.focus(); boardOpen.focusBoardItem = null }
-    if (boardOpen?.settleBoardItem != null && !boardOpen.boardBusy && !boardOpen.boardRefreshing) {
-      const row = dom.querySelector(`[data-board-index="${boardOpen.settleBoardItem}"]`)
-      row?.scrollIntoView?.({ block: 'nearest' })
-      row?.querySelector('.tt-item-actions > button')?.focus({ preventScroll: true })
-      if (!globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) row?.animate?.([{ transform: 'translateY(-8px)', opacity: .4 }, { transform: 'translateY(0)', opacity: 1 }], { duration: 220, easing: 'ease-out' })
-      boardOpen.settleBoardItem = null
-    }
     if (st.open?.focusTasks) { dom.querySelector('.tt-tasks-panel h2')?.focus({ preventScroll: true }); st.open.focusTasks = false }
-    if (st.open?.focusTasksReturn) { (dom.querySelector('.tt-tasks-button:not(:disabled)') ?? dom.querySelector('.tt-board-button'))?.focus({ preventScroll: true }); st.open.focusTasksReturn = false }
+    if (st.open?.focusTasksReturn) { (dom.querySelector('.tt-tasks-button:not(:disabled)') ?? dom.querySelector('.tt-title'))?.focus({ preventScroll: true }); st.open.focusTasksReturn = false }
     if (st.open?.focusTaskRow) { dom.querySelector(`.tt-task-row[data-task=${JSON.stringify(st.open.focusTaskRow)}]`)?.focus({ preventScroll: true }); st.open.focusTaskRow = null }
     if (st.open?.configurationReturn) { dom.querySelector(`button[aria-label=${JSON.stringify(st.open.configurationReturn)}]`)?.focus({ preventScroll: true }); st.open.configurationReturn = null }
     if (st.open?.focusConfiguration) {
@@ -2099,8 +1793,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     if (st.open?.focusRename) { title.focus(); title.select(); st.open.focusRename = false }
     if (st.open?.focusDetails) { dom.querySelector('.tt-details-head h2')?.focus({ preventScroll: true }); st.open.focusDetails = false }
     if (st.open?.focusTitle) { dom.querySelector('.tt-title')?.focus({ preventScroll: true }); st.open.focusTitle = false }
-    if (st.open?.focusBoard) { dom.querySelector('.tt-board h2')?.focus({ preventScroll: true }); st.open.focusBoard = false }
-    if (st.open?.focusChat) { dom.querySelector('.tt-board-button')?.focus({ preventScroll: true }); st.open.focusChat = false }
+    if (st.open?.focusChat) { dom.querySelector('.tt-title')?.focus({ preventScroll: true }); st.open.focusChat = false }
     const pane = dom.querySelector('.tt-stream')
     const o = st.open
     if (pane && o && o.visitId == null) {
@@ -2181,8 +1874,13 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     if (st.open && Date.now() - (st.open.jobsReadAt ?? 0) >= 5000) refreshJobs(st.open)
     if (!st.listLive && st.checked && Date.now() - st.refreshed > 15000 && !st.loading) load({ quiet: true })
   }
-  function dirty() { return st.boardDrafts.size > 0 || Boolean(st.open?.editing && st.open.editText !== st.open.board.markdown) }
-  function pause() { generation++; gesture.reset(); drag.cancel(); selection.disconnect(); clearReturn(); clearListeningTimers(st.open); clearTaskTimers(st.open); clearTimeout(st.open?.replyHighlightTimer); clearTimeout(st.open?.copyMessageTimer); if (st.open) st.open.copiedMessage = null; authors.disconnect(); st.open?.prose?.stop(); st.open?.replySteps?.watch(null); clearTimeout(awaitTimer); awaitTimer = null; controller?.abort(); clearTimeout(retry); stopList() }
+  function dirty() {
+    const state = st.open
+    if (!state) return false
+    const context = { slot: 'below', thread: state.thread, state }
+    return registry.entries('thread.header.action', context).some(entry => registry.invoke(entry, 'dirty', context))
+  }
+  function pause() { generation++; gesture.reset(); selection.disconnect(); clearReturn(); clearListeningTimers(st.open); clearTaskTimers(st.open); clearTimeout(st.open?.replyHighlightTimer); clearTimeout(st.open?.copyMessageTimer); if (st.open) st.open.copiedMessage = null; authors.disconnect(); st.open?.prose?.stop(); st.open?.replySteps?.watch(null); clearTimeout(awaitTimer); awaitTimer = null; controller?.abort(); clearTimeout(retry); stopList() }
   const uploadPreview = (file, name) => transport('POST', `${path(st.open.thread.id)}/attachments`, { name, size: file.size, type: file.type })
   return { uploadPreview, st, load, agentDrafts, loadAgentDrafts, refreshAgents() { runtimeAgents = null; redraw() }, preview, open, close, create, list, showArchived, row: threadRow, activityRows, activityFace: t => threadFace(t, 36), activityInfo: t => {
     const state = threadSubtitle({ ...t, unread: 0 }, name, activityOptions(t))

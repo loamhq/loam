@@ -118,7 +118,7 @@ export function activate(loam) {
           host.openFileRef?.(ref, { root: file.root, path: file.path }, event)
         },
         crumbs: crumbs(file, entry.options.go || host.goFiles),
-        back: entry.options.backToThread ? { label: 'Back to board', go: entry.options.backToThread }
+        back: entry.options.backToThread ? { label: 'Back to thread', go: entry.options.backToThread }
           : entry.options.close ? { label: entry.options.closeLabel || 'Back', go: entry.options.close } : null,
         fileMenu: files.resourceMenu ? () => files.resourceMenu({ ...entry.file.row }, entry.options.home, { openFolder: entry.options.returnBack ? entry.options.close : null, includeDelete: false }) : null,
         fileDelete: () => files.canDeleteFile?.(entry.file.row) ? () => files.beginDelete(entry.file.row) : null,
@@ -191,7 +191,7 @@ export function activate(loam) {
           { label: (known()?.owner ? `${known().owner} · ` : '') + (known()?.host || '') },
           { label: titleOf() },
         ],
-        back: entry.options.backToThread ? { label: 'Back to board', go: entry.options.backToThread }
+        back: entry.options.backToThread ? { label: 'Back to thread', go: entry.options.backToThread }
           : entry.options.close ? { label: entry.options.closeLabel || 'Back', go: entry.options.close } : null,
         menuExtras: () => [{ label: 'Copy link', icon: 'link', run: () => copyText(known()?.url, 'Link copied. Its password stays with your Loam.') }],
         headExtras: () => [entry.options.readAloud?.glyph || null].filter(Boolean),

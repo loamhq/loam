@@ -95,8 +95,8 @@ export function markProgress(state, item, loaded, total) {
 // one entry per part sent, and this app sends one part per chooser pick.
 //
 // **The name that comes back is the name from now on.** The host sanitises it
-// and makes it unique in the day's folder — `Board notes (final).md` is stored
-// as `Board-notes--final-.md`, a second `shot.png` as `shot-1.png` — so a chip
+// and makes it unique in the day's folder — `Team notes (final).md` is stored
+// as `Team-notes--final-.md`, a second `shot.png` as `shot-1.png` — so a chip
 // that went on saying what the person's own disk called it would be naming a
 // file that does not exist.
 export function markStored(state, item, answer) {

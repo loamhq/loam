@@ -22,7 +22,7 @@ export function browserTimeZone() { return Intl.DateTimeFormat().resolvedOptions
 export function formatDate(value, options = { day: 'numeric', month: 'short', year: 'numeric' }, context) {
   return formatDateTime(value, options, context)
 }
-// Board deadlines and date-only expiries name calendar days, not instants.
+// Date-only deadlines name calendar days, not instants.
 export function formatCalendarDate(value, options, context = {}) {
   return formatDate(value, options, /^\d{4}-\d{2}-\d{2}$/.test(value) ? { ...context, timeZone: 'UTC' } : context)
 }

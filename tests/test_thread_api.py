@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise thread membership, model selection, metadata, messages and board operations through the API."""
+"""Exercise thread membership, model selection, metadata, messages and deletion through the API."""
 
 import asyncio
 import hashlib
@@ -25,7 +25,6 @@ for who in ("ada", "iris", "cleo"):
     json.dumps({"name": "Iris", "provider": "codex"}))
 (TMP / "vault" / "15_CONVERSATIONS").mkdir(parents=True)
 (TMP / "vault" / "00_INBOX" / "from-agents").mkdir(parents=True)
-(TMP / "vault" / "00_INBOX" / "from-agents" / "comms.md").write_text("# From agents\n")
 
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_broker as cfg  # noqa: E402
@@ -416,34 +415,9 @@ async def main():
 
     # -- delete -----------------------------------------------------------------
     meta, _, path = threads.read(tid)
-    board = threads.VAULT / meta["board"]
-    threads.board_text(meta)                 # make the board exist
-    route = f"/v1/threads/{tid}/board"
-    original = b'---\r\nby: "[[Iris]]"\r\n---\r\n- first <!-- Iris -->\r\n'
-    board.write_bytes(original)
-    status, opened = await call(server, "GET", f"/v1/threads/{tid}")
-    status, reading = await call(server, "GET", route)
-    revision = "sha256:" + hashlib.sha256(original).hexdigest()
-    for label, snapshot in [("open", opened["board"]), ("GET", reading)]:
-        check(f"{label} returns exact board bytes and their revision",
-              (snapshot["markdown"].encode(), snapshot["revision"]), (original, revision))
-    edit = {"markdown": reading["markdown"].replace("first", "edited"), "base_revision": revision}
-    newer = original + b"- agent addition\r\n"
-    board.write_bytes(newer)
-    status, _ = await call(server, "PUT", route, edit)
-    check("stale save preserves intervening direct file edit", (status, board.read_bytes()), (409, newer))
-    status, _ = await call(server, "PUT", route, {"markdown": "unconditional"})
-    check("a missing revision cannot overwrite the board", (status, board.read_bytes()), (400, newer))
-    latest = (await call(server, "GET", route))[1]
-    status, saved = await call(server, "PUT", route, {"base_revision": latest["revision"], "markdown": latest["markdown"].replace("first", "edited")})
-    expected = newer.replace(b"first", b"edited")
-    check("successful edit preserves CRLF and returns committed revision",
-          (status, board.read_bytes(), saved["revision"]), (200, expected, "sha256:" + hashlib.sha256(expected).hexdigest()))
     status, gone = await call(server, "DELETE", f"/v1/threads/{tid}")
-    check("DELETE removes the record and its board",
-          (status, path.exists(), board.exists(), sorted(gone["removed"])),
-          (200, False, False, sorted([str(path.relative_to(threads.VAULT)),
-                                      meta["board"]])))
+    check("DELETE removes the record", (status, path.exists(), gone["removed"]),
+          (200, False, [str(path.relative_to(threads.VAULT))]))
     status, _ = await call(server, "GET", f"/v1/threads/{tid}")
     check("...and the thread is gone", status, 404)
 
@@ -478,13 +452,8 @@ async def main():
     status, row = await call(server, "POST", "/v1/threads", {"persona": "iris"})
     tid = row["id"]
     meta, msgs_before, old_path = threads.read(tid)
-    old_board = threads.VAULT / meta["board"]
-    threads.write_board(meta, "# board\n\n- [ ] keep me <!-- Iris · new -->\n", threads.board_snapshot(meta)["revision"])
-    # Another thread already holds the board name the new title would take.
     status, other = await call(server, "POST", "/v1/threads",
                                {"persona": "ada", "title": "What to pursue"})
-    other_meta = threads.read(other["id"])[0]
-    threads.write_board(other_meta, "# other\n", threads.board_snapshot(other_meta)["revision"])
     list_w = FakeWriter()
     list_stream = asyncio.create_task(server.thread_list_stream(list_w))
     await asyncio.sleep(0.05)
@@ -498,19 +467,8 @@ async def main():
     check("...the record's title: and its file name both moved",
           (front["title"], new_path.name, old_path.exists()),
           ("What to pursue", "What to pursue (2).md", False))
-    check("...the board went with it, under a name nobody else's board has",
-          (front["board"], (threads.VAULT / front["board"]).is_file(),
-           old_board.exists()),
-          ("00_INBOX/boards/What to pursue (2) — board.md", True, False))
-    check("...the board link resolves to its own text",
-          "keep me" in (threads.VAULT / front["board"]).read_text(), True)
-    check("...the other thread's board untouched",
-          (threads.VAULT / threads.read(other["id"])[0]["board"]).read_text(),
-          "# other\n")
     status, opened = await call(server, "GET", f"/v1/threads/{tid}")
-    check("...the API opens it, title and board",
-          (status, opened["thread"]["title"], "keep me" in opened["board"]["markdown"]),
-          (200, "What to pursue", True))
+    check("the API opens the renamed thread", (status, opened["thread"]["title"]), (200, "What to pursue"))
     check("...no line was added to the thread, as the app's rename adds none",
           len(msgs_after), len(msgs_before))
     check("...an open list was told the new title by its stat",

@@ -116,7 +116,7 @@
 #app:has(.editor) :is(.primary,.roundsend,.takebtn.keep,.roundmic,.player-play,.secondary):not(.editor *) {
   background:var(--paper-hover); color:var(--paper-ink); border-color:transparent;
 }
-:root .tt-thread:has(> .tt-board) > .tt-conversation :is(.roundsend,.takebtn.keep,.roundmic,.player-play) {
+:root .tt-thread > .tt-conversation[inert] :is(.roundsend,.takebtn.keep,.roundmic,.player-play) {
   background:var(--paper-hover); color:var(--paper-ink);
 }
 /* Several saved takes may be open. Only the latest player gets foam. */

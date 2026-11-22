@@ -118,7 +118,7 @@ test('an unsaved edit holds the navigation and its original panel until its guar
   main.guard = () => true; retry()
   assert.deepEqual(main.item(), file('Notes/plan.md')); assert.deepEqual(side.item(), file('Notes/plan.md'))
 })
-test('moving a thread carries unsaved Board edits, attachments and its reading anchor without old prose callbacks', t => {
+test('moving a thread carries unsaved text, attachments and its reading anchor without old prose callbacks', t => {
   installDom()
   const field = { value: 'A draft to keep' }, attachment = { path: 'attachments/note.md', name: 'note.md' }
   const source = createThreads({ api: async () => ({}), redraw() {}, agents: () => [], dom: { querySelector: () => null },
@@ -126,13 +126,11 @@ test('moving a thread carries unsaved Board edits, attachments and its reading a
   t.after(() => source.pause())
   source.st.wide = true
   source.st.open = { thread: { id: 'moving', members: [] }, messages: [{ id: 'reply', author: 'agent', text: 'Kept prose', steps: { local: 'old view' } }],
-    board: { markdown: '# Board\n', path: 'boards/moving.md' }, editing: true, editText: '# An unsaved Board\n', editBase: '# Board\n',
     readingPosition: { id: 'reply', offset: 73 }, atEnd: false, has_more: true, openingUnread: 0, replyTo: 'reply' }
   let reading
-  const destination = { st: { drafts: new Map(), boardDrafts: new Map(), quickDrafts: new Map() }, receiveVisit: (id, visit) => { assert.equal(id, 'moving'); reading = visit } }
+  const destination = { st: { drafts: new Map() }, receiveVisit: (id, visit) => { assert.equal(id, 'moving'); reading = visit } }
   source.transferTo(destination, 'moving'); source.close({ navigate: false })
   assert.deepEqual(destination.st.drafts.get('moving'), { text: 'A draft to keep', attachments: [attachment], replyTo: 'reply' })
-  assert.deepEqual(destination.st.boardDrafts.get('moving'), { text: '# An unsaved Board\n', base: '# Board\n' })
   assert.deepEqual(reading.anchor, { id: 'reply', offset: 73 }); assert.equal(reading.atEnd, false)
   assert.deepEqual(reading.messages, [{ id: 'reply', author: 'agent', text: 'Kept prose' }])
   assert.equal(Object.hasOwn(reading, 'proseCache'), false)

@@ -125,7 +125,7 @@
 .screen.files .fs-custom-view > .panel-history-back { top:5px; width:44px; height:44px; }
 /* The history action leads even when Show sidebar shares the header. */
 .pane:has(> .showbar):has(.panel-history-back) > .showbar { left:62px; }
-.pane:has(> .showbar) .panel-history-back:not(.tt-board-head *) { translate:-48px 0; }
+.pane:has(> .showbar) .panel-history-back:not([role="dialog"] *) { translate:-48px 0; }
 .fs-custom-view > .panel-history-back svg { width:15px; height:15px; stroke-width:1.8px; }
 @container pane (max-width:760px) {
   .fs-custom-view > .panel-history-back { top:6px; }

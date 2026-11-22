@@ -88,7 +88,7 @@ function thread({ phone }) {
         h('span', { class: 'sc-chip', text: 'Draft' }))),
     h('div', { class: 'sc-msg' },
       h('div', { class: 'sc-who' }, face('quill', 22, 10), h('span', { class: 'sc-name', text: 'Quill' })),
-      h('p', { class: 'sc-text', text: 'I added a watering note to the board.' })))
+      h('p', { class: 'sc-text', text: 'I added a watering note to the file.' })))
 }
 function composer() {
   return h('div', { class: 'sc-composer' },

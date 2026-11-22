@@ -22,8 +22,7 @@ FIRST_INSTALL = """\
 user = "nobody"
 [vault]
 inbox = "00_INBOX"
-boards = "00_INBOX/boards"
-general_board = "00_INBOX/from-agents/comms.md"
+failure_log = "00_INBOX/from-agents/loam-wake-failures.md"
 conversations = "15_CONVERSATIONS"
 projects = "40_PROJECTS"
 attachments = "98_ATTACHMENTS"
@@ -45,13 +44,12 @@ spec = importlib.util.spec_from_loader(loader.name, loader)
 sweep = importlib.util.module_from_spec(spec); loader.exec_module(sweep)
 proj = eng.Project("widget", vault, vault, platform=False, record={})
 print(json.dumps({
-    "comms": loam_inbox.COMMS,
     "failure_log": loam_inbox.FAILURE_LOG,
     "activity_log": str(loam_activity.FAILURE_LOG.relative_to(lc.VAULT)),
     "receipts": str(proj.receipts_dir(vault).relative_to(vault)),
     "pinned": list(loam_files.RENAME_PINNED),
     "system_sources": loam_files.SYSTEM_VAULT_SOURCES,
-    "sweep": [sweep.ARCHIVE, sweep.COMMS],
+    "sweep": sweep.ARCHIVE,
     "written": sorted(str(p.relative_to(vault)) for p in vault.rglob("*.md")),
 }))
 """
@@ -81,14 +79,11 @@ def probe(name: str, config: str) -> dict:
 
 def main() -> int:
     first = probe("first-install", FIRST_INSTALL)
-    check("first install: comms and the failure log are where they always were",
-          (first["comms"], first["failure_log"], first["activity_log"]),
-          ("00_INBOX/from-agents/comms.md", "00_INBOX/from-agents/loam-wake-failures.md",
-           "00_INBOX/from-agents/loam-wake-failures.md"))
+    check("the failure ledger and activity reader agree",
+          (first["failure_log"], first["activity_log"]), ("00_INBOX/from-agents/loam-wake-failures.md",) * 2)
     check("first install: receipts under 40_PROJECTS", first["receipts"],
           "40_PROJECTS/widget/receipts")
     check("first install: RENAME_PINNED is the list it was", first["pinned"], [
-        "00_INBOX/boards/*", "00_INBOX/from-agents/comms.md",
         "00_INBOX/from-agents/loam-wake-failures.md", "00_INBOX/archive",
         "40_PROJECTS/*/receipts", "40_PROJECTS/Loam/engineer/role.md",
         "40_PROJECTS/Loam/engineer/projects/loam.md",
@@ -99,26 +94,24 @@ def main() -> int:
         "Engineer/Role.md": "40_PROJECTS/Loam/engineer/role.md",
         "Engineer/Platform project.md": "40_PROJECTS/Loam/engineer/projects/loam.md"})
     check("first install: the inbox sweep's paths as they were", first["sweep"],
-          ["00_INBOX/archive", "00_INBOX/from-agents/comms.md"])
-    check("first install: a failure lands in from-agents, and not on the board",
+          "00_INBOX/archive")
+    check("first install: a failure lands in from-agents",
           first["written"], ["00_INBOX/from-agents/loam-wake-failures.md"])
 
     inst = probe("an-install", AN_INSTALL)
     flat = json.dumps(inst)
     check("an install: no path names the first install's folders",
           [w for w in ("00_INBOX", "40_PROJECTS", "99_SYSTEM", "from-agents") if w in flat], [])
-    check("an install: comms is General's board", inst["comms"], "Inbox/boards/general.md")
-    check("an install: the failure log is in the inbox, not among the boards",
+    check("an install: the failure log is in the inbox",
           (inst["failure_log"], inst["activity_log"]),
           ("Inbox/loam-wake-failures.md", "Inbox/loam-wake-failures.md"))
     check("an install: receipts under Projects", inst["receipts"], "Projects/widget/receipts")
     check("an install: pinned paths are the install's",
-          inst["pinned"][:5], ["Inbox/boards/*", "Inbox/boards/general.md",
-                               "Inbox/loam-wake-failures.md", "Inbox/archive",
+          inst["pinned"][:3], ["Inbox/loam-wake-failures.md", "Inbox/archive",
                                "Projects/*/receipts"])
     check("an install: the inbox sweep reads the install's folders", inst["sweep"],
-          ["Inbox/archive", "Inbox/boards/general.md"])
-    check("an install: a failure lands there, and not on the board", inst["written"],
+          "Inbox/archive")
+    check("an install: a failure lands there", inst["written"],
           ["Inbox/loam-wake-failures.md"])
 
     print(f"\n{'OK' if not FAILURES else f'{FAILURES} FAILED'}")

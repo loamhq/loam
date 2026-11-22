@@ -39,8 +39,7 @@ def interpreter(test: Path) -> str:
 # Use the suite's install layout for every fixture regardless of the host configuration.
 FIXTURE = {
     "timezone": "America/Los_Angeles",
-    "vault": {"inbox": "00_INBOX", "boards": "00_INBOX/boards",
-              "general_board": "00_INBOX/from-agents/comms.md",
+    "vault": {"inbox": "00_INBOX", "failure_log": "00_INBOX/from-agents/loam-wake-failures.md",
               "conversations": "15_CONVERSATIONS", "projects": "40_PROJECTS",
               "attachments": "98_ATTACHMENTS", "system": "99_SYSTEM"},
 }

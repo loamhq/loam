@@ -29,7 +29,6 @@ export function pluginData(request) {
     agentSettings: { get: (plugin, agent) => request('GET', `/plugins/${segment(plugin)}/agents${agent ? `/${segment(agent)}` : ''}`), patch: (plugin, agent, values) => request('PATCH', `/plugins/${segment(plugin)}/agents/${segment(agent)}`, { values }) },
     threads: { list: () => request('GET', '/threads?archived=1'), get: id => request('GET', `/threads/${segment(id)}`), create: body => request('POST', '/threads', body), patch: (id, body) => request('PATCH', `/threads/${segment(id)}`, body) },
     messages: { parts: messageSegments, list: (id, query = '') => request('GET', `/threads/${segment(id)}/messages${query ? `?${query}` : ''}`), send: (id, body) => request('POST', `/threads/${segment(id)}/messages`, body) },
-    boards: { get: id => request('GET', `/threads/${segment(id)}/board`), put: (id, body) => request('PUT', `/threads/${segment(id)}/board`, body) },
     files: { read: (root, path) => request('GET', `/files/read?${new URLSearchParams({ root, path })}`), write: body => request('PUT', '/files/text', body), list: (root, path = '') => request('GET', `/files/list?${new URLSearchParams({ root, path })}`) },
   }
 }

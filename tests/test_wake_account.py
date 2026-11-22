@@ -128,7 +128,7 @@ def test_matcher_leaves_real_answers_alone():
 
 def comms_of(vault: Path) -> str:
     """Read the board to detect an unexpected notification."""
-    path = vault / loam_inbox.COMMS
+    path = vault / "00_INBOX" / "Owner notes.md"
     return path.read_text(encoding="utf-8") if path.exists() else ""
 
 

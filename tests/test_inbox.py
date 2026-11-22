@@ -28,20 +28,6 @@ os.environ.setdefault("LOAM_WAITERS_DIR", str(ATTENTION / "waiters"))
 import json  # noqa: E402
 import loam_inbox  # noqa: E402
 
-# Keep the board fixture independent of runtime notifications.
-SECTIONS = ("Urgent", "Important", "Other")
-COMMS_HEADER = """\
-# From the agents
-
-> One line per item. Nothing pings me. I come and look. Lines older than 14
-> days are swept.
-
-## Urgent
-
-## Important
-
-## Other
-"""
 
 fails = 0
 
@@ -122,45 +108,6 @@ try:
 finally:
     shutil.rmtree(root, ignore_errors=True)
 
-# ------------------------------------------------------------------ comms --
-root = Path(tempfile.mkdtemp(prefix="loam-inbox-test-"))
-try:
-    comms = root / loam_inbox.COMMS
-    comms.parent.mkdir(parents=True)
-    today = date(2026, 9, 5)
-    old, young = today - timedelta(days=15), today - timedelta(days=13)
-    comms.write_text(
-        COMMS_HEADER
-        .replace("## Urgent\n",
-                 f"## Urgent\n\n- {old} · **a** · fifteen days · [[x]]\n"
-                 f"- {young} · **a** · thirteen days · [[x]]\n")
-        .replace("## Other\n", "## Other\n\n- a hand-written line with no date\n"),
-        encoding="utf-8",
-    )
-    with comms.open("ab") as handle:
-        handle.write(f"- {old} · review <!-- Ada · until {today} -->\r\n".encode())
-    dropped = sweep.sweep_comms(comms, timedelta(days=14), today, False)
-    after = comms.read_text(encoding="utf-8")
-
-    check("comms: 15-day line dropped", "fifteen days" not in after)
-    check("comms: explicit expiry and original newline survive the legacy sweep",
-          f"- {old} · review <!-- Ada · until {today} -->\r\n".encode() in comms.read_bytes())
-    check("comms: 13-day line survives", "thirteen days" in after)
-    check("comms: undated line untouched", "a hand-written line with no date" in after)
-    check("comms: all three headings stand, empty or not",
-          all(f"## {s}" in after for s in SECTIONS), after)
-    check("comms: register note stands", "Nothing pings me" in after)
-    check("comms: reported exactly the one it dropped", dropped == 1, str(dropped))
-
-    # An empty section must survive its last line leaving.
-    dropped = sweep.sweep_comms(comms, timedelta(days=0), today, False)
-    after = comms.read_text(encoding="utf-8")
-    check("comms: sections stay when every line expires",
-          all(f"## {s}" in after for s in SECTIONS)
-          and "thirteen days" not in after, after)
-finally:
-    shutil.rmtree(root, ignore_errors=True)
-
 # ------------------------------------------- the log, and nothing posted --
 root = Path(tempfile.mkdtemp(prefix="loam-inbox-test-"))
 try:
@@ -171,8 +118,7 @@ try:
     log = (root / loam_inbox.FAILURE_LOG).read_text(encoding="utf-8")
     check("failure: the log carries the whole reason",
           "it broke. And here is the long tail." in log, log)
-    check("failure: nothing is written on the board (2026-11-19)",
-          not (root / loam_inbox.COMMS).exists())
+    check("failure creates only its ledger", list(root.rglob("*.md")) == [root / loam_inbox.FAILURE_LOG])
     check("failure: a persona's own failure is told to nobody else",
           facts() == [], str(facts()))
 
@@ -212,23 +158,16 @@ try:
         f.write_text("x\n")
     doomed = inbox / "archive" / "genuinely archived.md"
     doomed.write_text("x\n")
-    (inbox / "from-agents" / "comms.md").write_text(
-        COMMS_HEADER.replace(
-            "## Urgent\n", "## Urgent\n\n- 2020-01-01 · **a** · ancient · [[x]]\n"))
-
-    # A clock far enough forward that EVERY file in the tree is past every
-    # window. Only the two declared-temporary things may go.
+    dated = inbox / "Personal notes.md"
+    dated.write_bytes(b"- 2020-01-01: an old entry\r\n")
     far = time.time() + 9999 * 86400
     sweep.sweep_archive(inbox / "archive", timedelta(days=30), far, False)
-    sweep.sweep_comms(inbox / "from-agents" / "comms.md",
-                      timedelta(days=14), date(2099, 1, 1), False)
 
     check("scope: the archived file is deleted", not doomed.exists())
-    check("scope: nothing outside archive/ and comms.md is touched",
+    check("scope: nothing outside archive/ is touched",
           all(f.exists() for f in keep),
           str([str(f) for f in keep if not f.exists()]))
-    check("scope: the failure log beside comms.md is not line-swept",
-          (inbox / "from-agents" / "loam-wake-failures.md").read_text() == "x\n")
+    check("dated personal notes retain their bytes", dated.read_bytes() == b"- 2020-01-01: an old entry\r\n")
 finally:
     shutil.rmtree(root, ignore_errors=True)
 

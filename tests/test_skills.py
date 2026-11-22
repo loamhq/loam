@@ -111,7 +111,7 @@ def main() -> int:
     check("bin/library seed-vault exits 0", (out.returncode, out.stderr), (0, ""))
     shape = [p for p in tree(lc.VAULT) if "/skills/loam-" not in p and "skills/loam-" not in p]
     check("a blank install's vault: the plain folders, the README, both shelves",
-          shape, ["About me.md", "Attachments/", "Conversations/", "Inbox/", "Inbox/boards/", "Projects/",
+          shape, ["About me.md", "Attachments/", "Conversations/", "Inbox/", "Projects/",
                   "README.md", "System/", "System/Dictation terms.md", "System/Loam/", "System/Loam/README.md",
                   "System/Loam/skills/", "System/skills/", "System/skills/README.md"])
     check("...and Loam's shelf is the library, file for file",
@@ -132,15 +132,14 @@ def main() -> int:
           ("mine\n", "mine too\n"))
 
     numbered = TMP / "numbered"
-    folders = {"inbox": "00_INBOX", "boards": "00_INBOX/boards",
-               "general_board": "00_INBOX/from-agents/comms.md",
+    folders = {"inbox": "00_INBOX", "failure_log": "00_INBOX/from-agents/loam-wake-failures.md",
                "conversations": "15_CONVERSATIONS", "projects": "40_PROJECTS",
                "attachments": "98_ATTACHMENTS", "system": "99_SYSTEM"}
     (numbered / "99_SYSTEM" / "conventions").mkdir(parents=True)
     (numbered / "README.md").write_text("an old vault\n")
     made = sk.seed_vault(numbered, folders)
     check("numbered folder names are used as configured, nothing else made",
-          made, ["00_INBOX/", "00_INBOX/boards/", "15_CONVERSATIONS/", "40_PROJECTS/",
+          made, ["00_INBOX/", "15_CONVERSATIONS/", "40_PROJECTS/",
                  "98_ATTACHMENTS/", "99_SYSTEM/Dictation terms.md", "99_SYSTEM/skills/", "99_SYSTEM/Loam/ (installed)"])
     check("...and an existing vault gets no About me.md",
           (numbered / "About me.md").exists(), False)

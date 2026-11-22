@@ -138,6 +138,7 @@ def locations(meta):
     if not specs:
         return {}
     with threads.locked(threads.STATE):
+        meta, _, _ = threads.read(meta["id"])
         return {pid: {"label": spec["label"], "path": str(_path(_binding(pid, meta, spec)))}
                 for pid, spec in specs.items()}
 
@@ -184,6 +185,14 @@ def removed(thread_id):
             del group[thread_id]
     threads.save_state(BINDINGS, bindings)
     return gone
+
+
+def owned_paths():
+    active = threads.load_state(REGISTRY)
+    if not active:
+        return set()
+    return {row["path"] for pid, rows in _bindings().items() if pid in active
+            for row in rows.values()}
 
 
 def existing_documents(pid):

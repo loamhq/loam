@@ -34,7 +34,7 @@ is an ordinary agent: the person can change her, rename her or archive her.
 Then it writes the hello thread: a thread with Iris as its default and only
 member, pinned, with `hello: true` in its frontmatter, and one message, the
 body of `docs/starter/hello.md` with `{owner}` filled from the install's
-owner name. Loam posts it as Iris and marks it preset. Its board starts empty.
+owner name. Loam posts it as Iris and marks it preset.
 
 Her daily reflection runs even while she is the only agent. Its identity
 check compares a phrase from her soul with one from the preset greeting.
@@ -48,7 +48,7 @@ occasion. From seven through thirteen calendar days after seeding, in the
 installation's time zone, the ordinary reflection prompt tells Iris the
 first week has ended until she sends the message.
 She writes one personal message in the original Hello. It is independent
-of chat and board activity. The message carries an occasion marker so a
+of chat activity. The message carries an occasion marker so a
 retried post or reflection cannot send it twice. A missing or
 archived Hello, or one the owner has removed Iris from, is left alone.
 If no reflection runs during that window, the occasion passes quietly.

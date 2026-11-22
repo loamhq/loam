@@ -154,14 +154,7 @@ def main() -> int:
     check("the hello thread: titled, pinned, hello, Iris its default and member",
           (meta["title"], meta.get("pinned"), meta.get("hello"), meta["default"], meta["members"]),
           ("Hello", True, True, "iris", ["iris"]))
-    ordinary = threads.create("iris", "Ordinary chat")
-    check("Hello materializes its board on first read like an ordinary thread",
-          [(threads.VAULT / row["board"]).exists() for row in (meta, ordinary)], [False, False])
-    board = threads.board_snapshot(meta)
-    check("Hello's board contains only the ordinary file heading",
-          (board["markdown"], threads.board_text(ordinary), st.status().get("first_weeks")),
-          ("# Hello — board\n\n", "# Ordinary chat — board\n\n", True))
-    threads.delete(ordinary["id"])
+    check("the starter enables its first weeks", st.status().get("first_weeks"), True)
     check("...holding one message, by Iris, the starter's text, marked preset",
           [(m["id"], m["author"], m["kind"], m.get("preset"), m["text"]) for m in msgs],
           [("m1", "iris", "message", True, st.read_hello()[1])])
@@ -197,14 +190,16 @@ def main() -> int:
               check_runtime.current_run_status()["why"], ["Loam's own check has stopped."])
 
     check("new starter has first-use hints", st.first_use(), [])
-    st.use_control("Board")
+    st.use_control("Files")
     st.use_control("Settings")
-    st.use_control("Board")
+    st.use_control("Files")
     check("using a control dismisses only its own caption, once",
-          st.first_use(), ["Board", "Settings"])
+          st.first_use(), ["Files", "Settings"])
 
     personal = "## My move\n\n- [ ] Pack the kettle.\n"
-    threads.write_board(meta, personal, board["revision"])
+    note = lc.VAULT / "Inbox" / "Packing.md"
+    note.parent.mkdir(exist_ok=True)
+    note.write_text(personal)
     again = st.seed(provision=fake_provision)
     check("a second seed does nothing", ("skipped" in again, len(provisioned)), (True, 1))
 
@@ -222,8 +217,8 @@ def main() -> int:
           (sum(1 for t in threads.rebuild_index() if threads.read(t)[0].get("hello")),
            len(threads.read(out["thread"])[1])), (1, 1))
 
-    check("retrying a seed preserves a person's board",
-          threads.board_text(meta), personal)
+    check("retrying a seed preserves a person's note",
+          note.read_text(), personal)
     check("an interrupted seed from before week-one support stays legacy",
           st.status().get("week_one"), None)
 
@@ -298,7 +293,7 @@ def main() -> int:
     # An install whose agent of that id is its own (the owner's box): nothing.
     st.marker_path().unlink()
     (ws / "soul.md").write_text("their own soul\n")
-    st.use_control("Board")
+    st.use_control("Files")
     check("an existing install never acquires a first-use marker", st.status(), None)
     check("the thread lesson is claimed once across devices on a legacy install",
           [st.use_control("Agentless thread") for _ in range(2)], [True, False])
@@ -333,9 +328,10 @@ def check_retirement(ws: Path) -> None:
     seeded = {"agent": "iris", "thread": tid, "message": msg["id"]}
     loam_agents._write_json(st.marker_path(), seeded)
     threads.update(tid, engines={"iris": "claude-code"})
-    board = threads.VAULT / hello["board"]
-    previous_board = loam_update.show("0.2.18", prefix + "hello-board.md")
-    board.write_text(previous_board)
+    note = threads.VAULT / "Inbox" / "Welcome notes.md"
+    note.parent.mkdir(exist_ok=True)
+    original_note = "# Welcome\n"
+    note.write_text(original_note)
     for name in ("map.md", *st.OWN_FILES):
         (ws / name).write_text(stock("iris/" + name))
     edited = stock("iris/nights.md") + "A personal instruction.\n"
@@ -343,25 +339,25 @@ def check_retirement(ws: Path) -> None:
     refresh()
     meta, messages, path = threads.read(tid)
     check("refreshing the legacy greeting and engine preserves the original note",
-          (messages[0]["text"], messages[0]["id"], meta["engines"], board.read_text()),
-          (st.read_hello()[1], msg["id"], {}, previous_board))
+          (messages[0]["text"], messages[0]["id"], meta["engines"], note.read_text()),
+          (st.read_hello()[1], msg["id"], {}, original_note))
     check("each unchanged sibling refreshes and the edited Iris file survives",
           [(ws / name).read_text() for name in ("map.md", *st.OWN_FILES)],
           [st.draft()["map"], st.own_files()["how-i-am-here.md"], edited])
     threads.update(tid, engines={"iris": "claude-code"})
-    board.write_text(previous_board + "\n")
+    note.write_text(original_note + "\n")
     refresh()
-    check("a later explicit engine choice and a one-byte board edit survive",
-          (threads.read(tid)[0]["engines"], board.read_text()),
-          ({"iris": "claude-code"}, previous_board + "\n"))
+    check("a later explicit engine choice and a one-byte note edit survive",
+          (threads.read(tid)[0]["engines"], note.read_text()),
+          ({"iris": "claude-code"}, original_note + "\n"))
     threads.replace_message(tid, msg["id"], [{**msg, "text": old}])
     threads.append(tid, lc.OWNER_ID, "Hello Iris.")
     before = path.read_bytes()
-    board.write_text(previous_board)
+    note.write_text(original_note)
     loam_agents._write_json(st.marker_path(), seeded)
     refresh()
-    check("a replied legacy Hello keeps every byte of its chat and board",
-          (path.read_bytes(), board.read_text()), (before, previous_board))
+    check("a replied legacy Hello keeps every byte of its chat and note",
+          (path.read_bytes(), note.read_text()), (before, original_note))
 
     from loam_map_migration import initial_map
     for old in ("_active.md", "_reflection.md"):
@@ -380,10 +376,11 @@ def check_retirement(ws: Path) -> None:
     import loam_inbox as inbox
     threads.ensure_general()
     threads.append("general", "iris", "Before the claim")
-    general = threads.VAULT / threads.GENERAL_BOARD
+    general = threads.VAULT / "Inbox" / "History.md"
     general.parent.mkdir(parents=True, exist_ok=True)
     general.write_text("An old drift finding")
     log = lc.VAULT / inbox.FAILURE_LOG
+    log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text("An old wake failure")
     attention.tell("An old check", kick=False)
     with patch.object(claim, "unclaimed", return_value=True), patch.object(
@@ -397,7 +394,7 @@ def check_retirement(ws: Path) -> None:
         claim.prepare()
     except RuntimeError:
         pass
-    check("an already claimed install keeps the board it could have read",
+    check("an already claimed install keeps the note it could have read",
           general.read_text(), "The owner read this.")
 
 

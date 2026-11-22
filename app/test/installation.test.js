@@ -8,7 +8,7 @@ import { actorName } from '../public/schedule-change.js'
 import { editWords } from '../public/schedules.js'
 import { canFrame } from '../public/apps.js'
 import { attachmentFilePath } from '../public/attach.js'
-import { addBoardItem, applyThreadEvent, groupJoinNotices } from '../public/thread-record.js'
+import { applyThreadEvent, groupJoinNotices } from '../public/thread-record.js'
 import { createThreads } from '../public/threads.js'
 import { dailyNotePath, inboxNotePath } from '../public/files.js'
 import { formatTime } from '../public/time.js'
@@ -22,7 +22,7 @@ import { h } from '../public/ui.js'
 import { all, text } from './browser.js'
 
 const identity = { id: 'alex', name: 'Alex', accepts: ['alex', 'legacy-owner'] }
-const settings = { APPS_DOMAIN: 'apps.example.org', APP_TIME_ZONE: 'Asia/Tokyo', VAULT_INBOX_FOLDER: 'Inbox', VAULT_DAILY_FOLDER: 'Journal', VAULT_BOARDS_FOLDER: 'Boards', VAULT_GENERAL_BOARD: 'Inbox/team.md', VAULT_ATTACHMENTS_FOLDER: 'Media' }
+const settings = { APPS_DOMAIN: 'apps.example.org', APP_TIME_ZONE: 'Asia/Tokyo', VAULT_INBOX_FOLDER: 'Inbox', VAULT_DAILY_FOLDER: 'Journal', VAULT_ATTACHMENTS_FOLDER: 'Media' }
 const json = (res, body) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(body)) }
 
 test('owner relay preserves runtime identity, authentication, no-store and refusals; writes never reach the host', async t => {
@@ -53,14 +53,14 @@ test('installation settings reach the pre-paint script and CSP without credentia
   vm.runInNewContext(script, sandbox)
   assert.equal(sandbox.LOAM_INSTALLATION.appsDomain, 'apps.example.org')
   assert.equal(sandbox.LOAM_INSTALLATION.timeZone, 'Asia/Tokyo')
-  assert.equal(sandbox.LOAM_INSTALLATION.generalBoard, 'Inbox/team.md')
+  assert.equal(sandbox.LOAM_INSTALLATION.inbox, 'Inbox')
   assert.ok(!script.includes(TOKEN))
   const page = await fetch(app.url)
   assert.match(page.headers.get('content-security-policy'), /https:\/\/\*\.apps\.example\.org/)
   assert.ok(!page.headers.get('content-security-policy').includes('example.com'))
 })
 
-test('renamed owner and aliases drive schedule labels, board attribution and thread ownership; strangers stay distinct', t => {
+test('renamed owner and aliases drive schedule labels and thread ownership; strangers stay distinct', t => {
   installDom(); setOwner(identity)
   assert.equal(ownerInitial(), 'A')
   for (const id of identity.accepts) {
@@ -74,7 +74,6 @@ test('renamed owner and aliases drive schedule labels, board attribution and thr
   setOwner(identity)
   assert.equal(isOwner('stranger'), false)
   assert.equal(actorName('stranger'), 'Stranger')
-  assert.equal(addBoardItem('', 'Keep this'), `- [ ] ${new Date().toISOString().slice(0, 10)} · Keep this <!-- Alex -->\n`)
   const pending = { text: 'Same words' }, o = { messages: [], thread: { members: [] }, typing: new Set(), steps: new Map(), pending }
   applyThreadEvent(o, { type: 'message.done', message: { id: 'm1', author: 'stranger', text: 'Same words' } })
   assert.equal(o.pending, pending)
@@ -86,7 +85,7 @@ test('renamed owner and aliases drive schedule labels, board attribution and thr
     { id: 'm1', author: 'alex', kind: 'message', text: 'Current owner' },
     { id: 'm2', author: 'legacy-owner', kind: 'message', text: 'Earlier owner id' },
     { id: 'm3', author: 'stranger', kind: 'message', text: 'Someone else' },
-  ], permissions: new Map(), typing: new Set(), steps: new Map(), board: { markdown: '', path: '' } }
+  ], permissions: new Map(), typing: new Set(), steps: new Map() }
   const messagesView = all(threads.view(false), 'tt-message')
   assert.equal(messagesView.length, 3)
   assert.deepEqual(messagesView.map(node => node.classList.contains('mine')), [true, true, false])
@@ -112,7 +111,6 @@ test('configured domain, folders and zone govern frames, note names and attachme
   assert.equal(dailyNotePath('Journal', now), 'Journal/2026-11-15.md')
   assert.equal(inboxNotePath('Inbox', now), 'Inbox/2026-11-15 0830.md')
   assert.equal(formatTime(now, { locale: 'en-GB' }), '08:30')
-  assert.equal(addBoardItem('', 'A note', 0, now, 'Inbox/team.md'), '- 2026-11-14 · A note <!-- Alex -->\n')
 })
 
 test('fresh shipped catalog follows explicit manifest defaults: no extension ships on, themes including Latte on', async () => {
