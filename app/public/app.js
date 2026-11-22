@@ -393,8 +393,10 @@ const activity = createActivity(activityOptions)
 const profileActivity = createActivity({ ...activityOptions, scoped: true })
 const engineerActivity = createActivity({ ...activityOptions, scoped: true })
 const dailyNotes = createDailyNotes({ api, redraw: schedule })
+let agentsRequest = null, agentRosterRevision = 0
 const changedAgent = agent => {
   if (!agent) return
+  agentRosterRevision++
   const rows = state.agents.list
   state.agents = createAgents(agent.archived ? rows.filter(row => row.id !== agent.id)
     : state.agents.byId.has(agent.id) ? rows.map(row => row.id === agent.id ? agent : row) : [...rows, agent])
@@ -565,20 +567,25 @@ function runNotice() {
     } }) : null)
 }
 
-async function loadAgents() {
-  try {
-    const body = await api('GET', '/agents')
-    // Objects — `{id, name}` — sorted by id. One answer, so this reads
-    // one shape rather than guessing between two. `name` is what a person is
-    // shown and the host is the only one that can state it; the avatar's
-    // initial is a fact about the whole set, and sessions.js works it out.
-    state.agents = createAgents(body?.agents)
-    state.agentsReady = Array.isArray(body?.agents)
-  } catch {
-    state.agents = createAgents([])
-    state.agentsReady = false
-  }
-  schedule()
+function loadAgents() {
+  if (agentsRequest) return agentsRequest
+  const revision = agentRosterRevision
+  agentsRequest = api('GET', '/agents').then(body => {
+    // A profile change made here wins over a read started before it.
+    if (revision !== agentRosterRevision || !Array.isArray(body?.agents)) return
+    const current = createAgents(body.agents)
+    const hadRoster = state.agentsReady
+    if (hadRoster && JSON.stringify(current.list) === JSON.stringify(state.agents.list)) return
+    state.agents = current
+    state.agentsReady = true
+    if (hadRoster) {
+      threads.refreshAgents()
+      sidePanel.threads.refreshAgents()
+    } else schedule()
+  }).catch(() => {
+    // A failed read does not tell us that an agent has gone.
+  }).finally(() => { agentsRequest = null })
+  return agentsRequest
 }
 
 // Every provider the host knows, wired or not. A row saying "Codex — not

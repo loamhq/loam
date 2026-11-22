@@ -31,7 +31,24 @@ export function readThreadRecord(body, id) {
     || typeof body.has_more !== 'boolean' || !Object.hasOwn(body, 'turn')) {
     throw new Error('The thread could not be loaded in a format this page can read.')
   }
-  return body
+  const messages = body.messages.map(readThreadMessage)
+  return messages.some((message, i) => message !== body.messages[i]) ? { ...body, messages } : body
+}
+
+const CREATION_LINE = /^Made .+ \(([a-z][a-z0-9-]*)\): their first thread is t-[0-9a-f]+\.?$/u
+export function createdAgentId(message) {
+  if (message?.kind !== 'system') return null
+  if (typeof message.agent_created === 'string' && message.agent_created) return message.agent_created
+  return typeof message.text === 'string' ? CREATION_LINE.exec(message.text.trim())?.[1] ?? null : null
+}
+
+function readThreadMessage(message) {
+  const agent = createdAgentId(message)
+  if (!agent) return message
+  // Project the broker's legacy announcement onto the ID-only card, keeping
+  // the original message's place in history and its reconnection cursor.
+  const { id, kind, author, at } = message
+  return { id, kind, author, at, agent_created: agent }
 }
 
 // View IDs stay unique across cached visits and new turns in this page.
@@ -169,9 +186,9 @@ export function applyThreadEvent(open, e) {
     const draft = !replay && open.messages.find((m) => m.id === `draft:${e.message.author}`)
     const viewKey = previous?.viewKey ?? draft?.viewKey
     const trailingDid = e.message.segments == null ? (previous?.trailingDid ?? draft?.trailingDid) : null
-    const message = { ...e.message, ...(viewKey ? { viewKey } : {}), ...(parts?.length ? { segments: parts } : {}),
+    const message = readThreadMessage({ ...e.message, ...(viewKey ? { viewKey } : {}), ...(parts?.length ? { segments: parts } : {}),
       ...(trailingDid?.length ? { trailingDid } : {}),
-      ...(e.message.steps == null && previous?.steps ? { steps: previous.steps } : {}) }
+      ...(e.message.steps == null && previous?.steps ? { steps: previous.steps } : {}) })
     const draftAt = replay ? -1 : open.messages.findIndex((m) => m.id === `draft:${message.author}`)
     if (!replay) {
       open.progress.delete(message.author)

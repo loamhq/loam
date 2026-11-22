@@ -29,12 +29,12 @@ export function draftLine(draft = {}) {
 
 // Drafts belong to the host and the conversation. Only an explicit confirmation
 // publishes the revision currently on screen; the host rejects a stale revision.
-export function createAgentDrafts({ api, redraw, made = () => {}, askChanges = () => {}, openThread = null, renderText = markdown }) {
-  const st = { thread: null, rows: [], expanded: new Set(), busy: false, loading: false, error: '', result: null }
+export function createAgentDrafts({ api, redraw, made = () => {}, askChanges = () => {}, renderText = markdown }) {
+  const st = { thread: null, rows: [], expanded: new Set(), busy: false, loading: false, error: '' }
   let generation = 0
   async function load(thread = st.thread) {
     const ticket = ++generation
-    if (st.thread !== thread) { st.rows = []; st.expanded.clear(); st.result = null; st.error = '' }
+    if (st.thread !== thread) { st.rows = []; st.expanded.clear(); st.error = '' }
     st.thread = thread; st.loading = true
     try {
       const body = await api('GET', `/agents/drafts?${new URLSearchParams({ thread })}`)
@@ -49,7 +49,7 @@ export function createAgentDrafts({ api, redraw, made = () => {}, askChanges = (
     try {
       const result = await api('POST', `/agents/drafts/${encodeURIComponent(draft.draft)}/confirm`, { rev })
       made(result.agent)
-      if (st.thread === thread) { st.result = result; st.rows = st.rows.filter(d => d.draft !== draft.draft) }
+      if (st.thread === thread) st.rows = st.rows.filter(d => d.draft !== draft.draft)
     } catch (e) { if (st.thread === thread) { st.error = e.message; await load(thread) } }
     finally { st.busy = false; redraw() }
   }
@@ -91,14 +91,9 @@ export function createAgentDrafts({ api, redraw, made = () => {}, askChanges = (
         h('button', { type: 'button', class: 'pillbtn secondary', disabled: st.busy, text: 'Ask for changes', onclick: () => askChanges(d) })))
   }
   function view(thread) {
-    if (st.thread !== thread || (!st.rows.length && !st.result && !st.error)) return null
-    const made = st.result?.agent
+    if (st.thread !== thread || (!st.rows.length && !st.error)) return null
     return h('section', { class: 'agent-drafts', 'aria-label': 'New agent review' },
       st.error ? h('p', { role: 'alert', class: 'schedule-error', text: st.error }) : null,
-      made ? h('div', { class: 'card agent-draft-result', role: 'status' },
-        blob(agentLook(made.id, createAgents([made])), { size: 36, font: 16 }),
-        h('p', { text: `${made.name || 'Your new agent'} is ready.` }),
-        st.result.first_thread && openThread ? h('button', { type: 'button', class: 'pillbtn secondary', text: `Say hello to ${made.name || 'them'}`, onclick: () => openThread(st.result.first_thread) }) : null) : null,
       ...st.rows.map(card))
   }
   return { st, load, confirm, view }

@@ -28,10 +28,10 @@ import { providerMark } from './marks.js'
 import { readEvents } from './sse.js'
 import { createLink } from './link.js'
 import { readField, caretPoint, setMarkdown } from './compose.js'
-import { applyThreadEvent, threadTurns, readThreadRecord, readThreadSummary, readThreadList, readAcceptedMessage, compareThreads, messageSegments, firstMessageTitle, groupJoinNotices, withPending, withMarks } from './thread-record.js'
+import { applyThreadEvent, threadTurns, readThreadRecord, readThreadSummary, readThreadList, readAcceptedMessage, compareThreads, messageSegments, firstMessageTitle, groupJoinNotices, withPending, withMarks, createdAgentId } from './thread-record.js'
 
 const button = (text, onclick, props = {}) => h('button', { class: 'pillbtn', type: 'button', onclick, ...props }, text)
-export function createThreads({ registry = createCoreRegistry(), linePending = () => false, api, redraw, agents, changedAgent = () => {}, agentsReady = () => false, providers = () => [], rail, nav, enter, leave, compose, openProfile, openSettings = null, openRef, address = () => {}, viewAddress = () => {}, archiveAddress = () => false, historyButton = () => null, visitId = () => null, messageState = createMessageState(), sidebar = null, renderText = markdown, marketCards = null, fixture = false, running = null, stepUI = null, dom = document, navigate = null, side = () => null, sidePanel = false, visible = () => true, listIsMain = () => true, missing = () => {} }) {
+export function createThreads({ registry = createCoreRegistry(), linePending = () => false, api, redraw, agents, changedAgent = () => {}, agentsReady = () => false, loadAgents = () => {}, providers = () => [], rail, nav, enter, leave, compose, openProfile, openSettings = null, openRef, address = () => {}, viewAddress = () => {}, archiveAddress = () => false, historyButton = () => null, visitId = () => null, messageState = createMessageState(), sidebar = null, renderText = markdown, marketCards = null, fixture = false, running = null, stepUI = null, dom = document, navigate = null, side = () => null, sidePanel = false, visible = () => true, listIsMain = () => true, missing = () => {} }) {
 
   const follow = follower()
   const elementId = id => sidePanel ? `side-${id}` : id
@@ -77,11 +77,14 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       o.focusReplyDraft = true
       redraw()
     },
-    openThread: id => open(id),
     renderText,
   })
   const agentDrafts = agentDraftController.st
   const loadAgentDrafts = () => agentDraftController.load(st.open?.thread.id)
+  // The list stream only sends its agent catalog at connection time.
+  function refreshCreationCards(messages) {
+    if (!st.fixture && messages?.some(m => m.agent_created)) loadAgents()
+  }
   let controller = null, generation = 0, retry = null, listingRequest = 0
   let awaitTimer = null, awaitDue = Infinity
   let returnTimer = null
@@ -406,6 +409,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       })] : []
       Object.assign(o, body, { messages, has_more: retained.length && messages.length ? savedVisit.has_more : body.has_more,
         loading: false, refreshing: false, connection: '', after: body.messages.at(-1)?.id ?? null })
+      refreshCreationCards(messages)
       const latestOwner = messages.findLast(m => isOwner(m.author))
       if (!o.thread.default && latestOwner?.unaddressed && !messages.some(m => m.answer_for === latestOwner.id)) {
         o.note ??= { id: latestOwner.id, teach: false }
@@ -525,6 +529,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     if (e.type === 'message.done') {
       receivedNote(o, e.message)
       refreshList(); if (o.atEnd !== false) markRead(o)
+      if (!st.fixture && createdAgentId(e.message)) loadAgents()
       if (!st.fixture && e.message?.kind === 'system') agentDraftController.load(o.thread.id)
       if (!st.listLive && e.message?.kind === 'system' && o.typing.size) refreshTurn(o, e.message.id, o.eventVersion)
     }
@@ -782,6 +787,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       const extra = body.messages.filter((m) => !existing.has(m.id))
       const joined = mergeHistory(o.messages, body.messages, o.gapBefore)
       o.messages = joined.messages
+      refreshCreationCards(extra)
       if (o.gapBefore) {
         o.gapBefore = body.has_more && !joined.connected && extra.length ? body.messages[0].id : null
         if (joined.extendsStart) o.has_more = body.has_more
@@ -1215,23 +1221,31 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     return h('div', { class: 'tt-reply-footer' }, rows,
       opened ? h('div', { class: 'tt-turn-facts', role: 'region', 'aria-label': 'Turn details' }, ...facts.map((bits) => h('div', { text: bits.join(' · ') }))) : null)
   }
+  function creationCard(m) {
+    const id = m.agent_created
+    const roster = createAgents((fixtureAgents ?? agents()).filter(agent => !agent.archived))
+    const current = roster.byId.get(id)
+    return h('div', { class: 'card tt-agent-created', key: m.id, 'data-message-id': m.id },
+      current ? blob(agentLook(id, roster), { size: 40, font: 18, decorative: true }) : null,
+      h('div', { class: 'tt-agent-created-copy' },
+        h('span', { class: 'tt-agent-created-label', text: 'Agent created' }),
+        current || agentsReady() ? h('strong', { text: current?.name ?? 'No longer here' }) : null),
+      current ? button('Start a chat', () => create(id), { class: 'pillbtn secondary', 'aria-label': `Start a chat with ${current.name}` }) : null)
+  }
   function message(...args) { return registry.component('core.message', { args, message: args[0], thread: st.open?.thread, state: st, defaultView: () => builtinMessage(...args) }) }
   function builtinMessage(m) {
     const context = { message: m, thread: st.open.thread, state: st }
     const renderer = registry.entries('message.renderer', context).findLast(entry => !entry.component)
     if (renderer) return registry.invoke(renderer, 'render', context)
+    if (m.agent_created) return creationCard(m)
     if (m.kind === 'system') {
       const names = m.joins?.names.map(name), joined = names?.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : null
       const key = `system:${st.open.thread.id}:${m.id}`, shown = openMessages.has(key)
       const id = `system-${encodeURIComponent(st.open.thread.id)}-${encodeURIComponent(m.id)}`
-      // Loam's lines name drafts, threads and messages by id for the agents;
-      // the person reads words and a thread's name (formatSystemLine).
-      const parts = (raw) => formatSystemLine(systemText(raw), { threads: st.threads })
+      const words = (raw) => formatSystemLine(systemText(raw)).map(part => part.text).join('')
       const content = typeof m.link?.thread === 'string'
-        ? h('a', { class: 'tt-branch-link', href: `${path(m.link.thread)}${m.link.message ? `#${encodeURIComponent(m.link.message)}` : ''}`, onclick: (e) => followThreadLink(e, m.link), text: parts(m.text).map((part) => part.text ?? part.link.title).join('') })
-        : joined ? `${name(m.joins.actor)} brought in ${joined}.` : parts(m.text ?? `${m.actor ? name(m.actor) : 'You'} brought in ${name(m.member_joined)}`).map((part) => part.link
-          ? h('a', { class: 'tt-branch-link', href: path(part.link.thread), onclick: (e) => followThreadLink(e, part.link), text: part.link.title })
-          : part.text)
+        ? h('a', { class: 'tt-branch-link', href: `${path(m.link.thread)}${m.link.message ? `#${encodeURIComponent(m.link.message)}` : ''}`, onclick: (e) => followThreadLink(e, m.link), text: words(m.text) })
+        : joined ? `${name(m.joins.actor)} brought in ${joined}.` : words(m.text ?? `${m.actor ? name(m.actor) : 'You'} brought in ${name(m.member_joined)}`)
       return h('div', { class: `exitline tt-system${shown ? ' expanded' : ''}`, key: m.id, 'data-message-id': m.id, 'data-join-count': names?.length },
         h('div', { class: 'tt-system-text', id, 'data-system-key': key }, content),
         longSystemLines.has(key) ? button(shown ? 'Show less' : 'Show more', () => { if (shown) openMessages.delete(key); else openMessages.add(key); redraw() },
@@ -1883,6 +1897,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     if (authExpired()) return
     if (!active) { stopList(); return }
     ensureList(); listLink?.wake()
+    refreshCreationCards(st.open?.messages)
     if (st.open && Date.now() - (st.open.jobsReadAt ?? 0) >= 5000) refreshJobs(st.open)
     if (!st.listLive && st.checked && Date.now() - st.refreshed > 15000 && !st.loading) load({ quiet: true })
   }

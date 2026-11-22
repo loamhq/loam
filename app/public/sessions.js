@@ -21,12 +21,16 @@ export const AGENT_SHAPES = [
 
 const PROVIDER_GLYPHS = { 'claude-code': 'C', codex: 'X', antigravity: 'A', grok: 'G', opencode: 'O' }
 
+function agentDisplayName(agent) {
+  return [agent.display, agent.name].find(value => typeof value === 'string' && value.trim())?.trim() ?? capitalise(agent.id)
+}
+
 export function createAgents(entries = []) {
   const clean = (Array.isArray(entries) ? entries : [])
     .filter((entry) => entry && typeof entry === 'object' && typeof entry.id === 'string' && entry.id !== '')
     .map((entry) => ({
       id: entry.id,
-      name: typeof entry.name === 'string' && entry.name.trim() !== '' ? entry.name : capitalise(entry.id),
+      name: agentDisplayName(entry),
       ...(typeof entry.role === 'string' && entry.role.trim() ? { role: entry.role.trim() } : {}),
       ...(typeof entry.description === 'string' && entry.description.trim() ? { description: entry.description.trim() } : {}),
       face: entry.face ?? null,
