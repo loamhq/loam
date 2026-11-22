@@ -204,9 +204,12 @@ export function createApp({
       const segments = pluginFile[2].split('/').map(dec)
       if (segments.some(part => !part || ['.', '..'].includes(part) || /[\\\x00]/.test(part))) return sendJson(res, 400, { error: 'Invalid plugin file path.' })
       const target = `/v1/plugins/${encodeURIComponent(dec(pluginFile[1]))}/files/${segments.map(encodeURIComponent).join('/')}`
-      const out = await broker.file(target, { method, signal: AbortSignal.timeout(30000) })
-      res.writeHead(out.status, { 'content-type': out.contentType ?? 'application/octet-stream', 'cache-control': out.cacheControl ?? 'no-cache', 'x-content-type-options': 'nosniff' })
-      if (method === 'HEAD' || !out.stream) { out.stream?.destroy(); return res.end() }
+      const out = await broker.file(target, { method, ifNoneMatch: req.headers['if-none-match'] ?? null, signal: AbortSignal.timeout(30000) })
+      const respHeaders = { 'cache-control': out.cacheControl ?? 'no-cache', 'x-content-type-options': 'nosniff' }
+      if (out.etag) respHeaders.etag = out.etag
+      if (out.status !== 304) respHeaders['content-type'] = out.contentType ?? 'application/octet-stream'
+      res.writeHead(out.status, respHeaders)
+      if (method === 'HEAD' || out.status === 304 || !out.stream) { out.stream?.destroy(); return res.end() }
       return await new Promise((resolve, reject) => { out.stream.on('error', reject); res.on('close', () => { out.stream.destroy(); resolve() }); out.stream.pipe(res); res.on('finish', resolve) })
     }
     // The marketplace's list (2026-11-17): a read. An install from it is

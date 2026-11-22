@@ -132,3 +132,38 @@ test('a place a starting plugin names is pending until it has started (no flash 
   assert.equal(loader.pending('files.viewer'), false)
   await loader.dispose()
 })
+
+test('Yours plugin modules start importing in parallel with shipped plugins while still activating after defaults', async () => {
+  let releaseShippedImport, releaseShippedActivate
+  const imported = [], activated = []
+  const rows = [
+    row('shipped-one', { layer: 'shipped' }),
+    row('yours-one', { layer: 'yours' }),
+  ]
+  const loader = createPluginLoader({
+    registry: createCoreRegistry(), ui: {},
+    request: async () => ({ plugins: rows }),
+    importer: async url => {
+      const id = url.includes('/yours-one/') ? 'yours-one' : 'shipped-one'
+      imported.push(id)
+      if (id === 'shipped-one') await new Promise(resolve => { releaseShippedImport = resolve })
+      return {
+        async activate() {
+          if (id === 'shipped-one') await new Promise(resolve => { releaseShippedActivate = resolve })
+          activated.push(id)
+        },
+      }
+    },
+  })
+  const reading = loader.refresh()
+  await new Promise(setImmediate)
+  assert.deepEqual(imported, ['shipped-one', 'yours-one'], 'yours starts importing without waiting for shipped import')
+  assert.deepEqual(activated, [])
+  releaseShippedImport()
+  await new Promise(setImmediate)
+  assert.deepEqual(activated, [], 'yours still waits to activate until shipped activation settles')
+  releaseShippedActivate()
+  await reading
+  assert.deepEqual(activated, ['shipped-one', 'yours-one'])
+  await loader.dispose()
+})

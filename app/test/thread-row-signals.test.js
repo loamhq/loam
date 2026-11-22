@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createThreads } from '../public/threads.js'
+import { createCoreRegistry } from '../public/core-registrations.js'
 import { installDom } from './fakedom.js'
 import { all, find, text } from './browser.js'
 import { h } from '../public/ui.js'
@@ -99,4 +100,104 @@ test('the header still opens named background tasks while the selected list row 
   tree = threads.view(true)
   assert.equal(all(tree, 'tt-tasks-panel').length, 1)
   assert.match(text(find(tree, 'tt-tasks-panel')), /Review the notes/)
+})
+
+test('thread.header.action reserves remembered width per thread and layout while pending and reserves nothing without a contribution', (t) => {
+  const wideKey = 'loam.thread.headerActions.wide'
+  const compactKey = 'loam.thread.headerActions.compact'
+  const saved = new Map([
+    [wideKey, JSON.stringify({ one: 38 })],
+    [compactKey, JSON.stringify({ one: 44 })],
+  ])
+  const storage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    getItem: name => saved.get(name) ?? null,
+    setItem: (name, val) => saved.set(name, String(val)),
+    removeItem: name => saved.delete(name),
+  } })
+  t.after(() => {
+    if (storage) Object.defineProperty(globalThis, 'localStorage', storage)
+    else delete globalThis.localStorage
+  })
+
+  let pending = true
+  const threads = setup(t, { headerActionPending: () => pending })
+  const withControl = row({ id: 'one', title: 'With control' })
+  const withoutControl = row({ id: 'two', title: 'Without control' })
+  threads.st.threads = [withControl, withoutControl]
+
+  // Pending on a thread with a remembered contribution: reserves exact width per layout.
+  threads.st.open = { thread: withControl, messages: [], permissions: new Map(), typing: new Set(), turns: [] }
+  const widePending = find(threads.view(true), 'tt-header-actions')
+  assert.ok(widePending)
+  assert.equal(widePending.getAttribute('aria-hidden'), 'true')
+  assert.equal(widePending.style.width, '38px')
+  const compactPending = find(threads.view(false), 'tt-header-actions')
+  assert.ok(compactPending)
+  assert.equal(compactPending.style.width, '44px')
+
+  // Pending on a thread with no remembered contribution: reserves nothing (no wrapper, no extra gap).
+  threads.st.open = { thread: withoutControl, messages: [], permissions: new Map(), typing: new Set(), turns: [] }
+  assert.equal(find(threads.view(true), 'tt-header-actions'), null)
+  assert.equal(find(threads.view(false), 'tt-header-actions'), null)
+
+  // Settled with no contribution clears stale storage and renders nothing.
+  pending = false
+  threads.st.open = { thread: withControl, messages: [], permissions: new Map(), typing: new Set(), turns: [] }
+  assert.equal(find(threads.view(true), 'tt-header-actions'), null)
+  assert.equal(saved.has(wideKey), false)
+  assert.equal(saved.get(compactKey), JSON.stringify({ one: 44 }))
+})
+
+test('thread.header.action renders live controls in .tt-header-actions separate from tasks and records ResizeObserver width', (t) => {
+  const compactKey = 'loam.thread.headerActions.compact'
+  const saved = new Map()
+  const storage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    getItem: name => saved.get(name) ?? null,
+    setItem: (name, val) => saved.set(name, String(val)),
+    removeItem: name => saved.delete(name),
+  } })
+  const origRO = globalThis.ResizeObserver
+  let observed = null, roCallback = null
+  globalThis.ResizeObserver = class {
+    constructor(cb) { roCallback = cb }
+    observe(el) { observed = el }
+    disconnect() { observed = null }
+  }
+  t.after(() => {
+    if (storage) Object.defineProperty(globalThis, 'localStorage', storage)
+    else delete globalThis.localStorage
+    globalThis.ResizeObserver = origRO
+  })
+
+  const registry = createCoreRegistry()
+  registry.scope({ id: 'ext' }).places.thread.header.action.add({
+    id: 'btn', slot: 'control',
+    render: ({ placement }) => placement === 'header' ? h('button', { class: 'iconbtn ghost ext-btn', 'aria-label': 'Extra' }) : null,
+  })
+  let liveSlot = null
+  const threads = setup(t, {
+    registry, headerActionPending: () => false,
+    dom: { querySelector: sel => sel.includes('tt-header-actions') ? liveSlot : null, querySelectorAll: () => [] },
+  })
+  const record = row({ id: 't-live', title: 'Live', members: [member({ background: 1, background_tasks: [{ id: 'a', description: 'Work' }] })], background: 1 })
+  threads.st.threads = [record]
+  threads.st.open = { thread: record, messages: [], permissions: new Map(), typing: new Set(), turns: [] }
+  const tree = threads.view(false)
+  const slot = find(tree, 'tt-header-actions')
+  assert.ok(slot)
+  assert.equal(slot.getAttribute('data-header-actions-layout'), 'compact')
+  assert.equal(slot.getAttribute('data-header-actions-thread'), 't-live')
+  assert.equal(all(slot, 'ext-btn').length, 1)
+  assert.equal(all(slot, 'tt-tasks-button').length, 0, 'task indicator stays outside the plugin header-action slot')
+  assert.equal(all(find(tree, 'tt-head'), 'tt-tasks-button').length, 1)
+  liveSlot = slot
+  Object.defineProperty(slot, 'isConnected', { value: true, configurable: true })
+  slot.dataset = { headerActionsLayout: 'compact', headerActionsThread: 't-live' }
+  slot.getBoundingClientRect = () => ({ width: 44 })
+  threads.afterRender()
+  assert.equal(observed, slot)
+  roCallback([{ target: slot }])
+  assert.equal(saved.get(compactKey), JSON.stringify({ 't-live': 44 }))
 })

@@ -1659,12 +1659,15 @@ def _row(folder: Path, layer: str, listed: dict) -> dict:
     return row
 
 
-def _rows(listed: dict | None = None) -> list[dict]:
+def _rows(listed: dict | None = None, *, only: str | None = None) -> list[dict]:
     listed = listed if listed is not None else load_list(strict=False)
     rows: list[dict] = []
     seen_shipped: set[str] = set()
     for root in shipped_roots():
-        for folder in _folders(root):
+        candidates = ([root / only] if (root / only).is_dir() else []) if only else _folders(root)
+        for folder in candidates:
+            if only and folder.name.startswith((".", "_")):
+                continue
             row = _row(folder, "shipped", listed)
             if folder.name in seen_shipped:
                 row["broken"] = row["broken"] or (
@@ -1673,12 +1676,23 @@ def _rows(listed: dict | None = None) -> list[dict]:
             rows.append(row)
     yours = yours_root()
     present = set()
-    folders = {p.name: p for p in _folders(yours)}
-    folders.update({p.name: p for p in _folders(yours / "_copies")})
+    if only:
+        folders = {}
+        if not only.startswith((".", "_")):
+            if (yours / only).is_dir():
+                folders[only] = yours / only
+            if (yours / "_copies" / only).is_dir():
+                folders[only] = yours / "_copies" / only
+    else:
+        folders = {p.name: p for p in _folders(yours)}
+        folders.update({p.name: p for p in _folders(yours / "_copies")})
     for folder in folders.values():
         present.add(folder.name)
         rows.append(_row(folder, "yours", listed))
-    for pid, line in sorted(listed["plugins"].items()):
+    plugin_items = ([(only, listed["plugins"][only])]
+                    if only and only in listed["plugins"] else
+                    ([] if only else sorted(listed["plugins"].items())))
+    for pid, line in plugin_items:
         if pid not in present and isinstance(line, dict):
             if not ID.fullmatch(pid):
                 continue
@@ -1748,7 +1762,7 @@ def listing() -> dict:
 def one(pid: str) -> dict:
     """``GET /v1/plugins/<id>``: the row in force for an id (or its first
     broken row when none is), with the others under ``rows``."""
-    rows = [r for r in _rows() if r["id"] == pid]
+    rows = _rows(only=pid) if ID.fullmatch(pid) else []
     if not rows:
         raise PluginError(f"no plugin {pid!r} in either layer", 404)
     _servers().annotate(rows, logs=True)
@@ -2661,6 +2675,31 @@ def install(body: dict, by: str | None = None, *, automatic: dict | None = None)
 # A plugin's files, for the page
 # ---------------------------------------------------------------------------
 
+def _effective_for_file(pid: str) -> dict | None:
+    """Resolve the effective folder and manifest for one plugin id without
+    scanning or fingerprinting every plugin in both layers."""
+    yours = yours_root()
+    candidates: list[Path] = []
+    copy_dir = yours / "_copies" / pid
+    yours_dir = yours / pid
+    if copy_dir.is_dir():
+        candidates.append(copy_dir)
+    elif yours_dir.is_dir():
+        candidates.append(yours_dir)
+    for root in shipped_roots():
+        shipped_dir = root / pid
+        if shipped_dir.is_dir():
+            candidates.append(shipped_dir)
+            break
+    for folder in candidates:
+        try:
+            found = read_folder(folder, pid)
+        except Exception:  # noqa: BLE001 -- broken candidate falls through as in _rows()
+            continue
+        return {**found["manifest"], "folder": str(folder)}
+    return None
+
+
 def file_for(pid: str, rel: list[str]) -> tuple[Path, str]:
     """``GET /v1/plugins/<id>/files/<path>``: the file and its type, from
     the folder in force for the id. Only ``page/``, ``assets/``,
@@ -2672,7 +2711,7 @@ def file_for(pid: str, rel: list[str]) -> tuple[Path, str]:
     if not rel or any(p in ("", ".", "..") or "\0" in p or "/" in p or "\\" in p
                       for p in rel):
         raise PluginError("no such file", 404)
-    row = next((r for r in _rows() if r["id"] == pid and r["effective"]), None)
+    row = _effective_for_file(pid)
     shots = {s.get(k) for s in ((row or {}).get("screenshots") or [])
              for k in ("src", "src_dark")}
     cover = "/".join(rel) in ({(row or {}).get(k)
@@ -2728,7 +2767,7 @@ def _read_agents(pid: str) -> dict:
 
 def _in_force(pid: str) -> dict:
     _need_id(pid)
-    rows = [r for r in _rows() if r["id"] == pid]
+    rows = _rows(only=pid)
     if not rows:
         raise PluginError(f"no plugin {pid!r} in either layer", 404)
     row = next((r for r in rows if r["effective"]), None)
