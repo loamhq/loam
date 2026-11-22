@@ -62,7 +62,7 @@ PLACES = ("agent.tool", "agent.prompt", "schedule.kind", "settings.entry",
           "engineer.env", "drift.check", "box.listener",
           # First release L9 (2026-11-14): a key the person pastes, checked on
           # entry; a vault folder the plugin uses.
-          "settings.secret", "vault.folder",
+          "settings.secret", "vault.folder", "thread.file",
           # First release L6 (2026-11-14): a command run at a job's launch
           # whose output is that job's environment: what carries a project's
           # cloud credentials, written fresh for each job, which a fixed
@@ -174,6 +174,19 @@ def contributes_of(value, folder: Path | None, warnings: list[str]) -> dict:
                               "lanes": _lanes(e, where),
                               "agents": _agents(e, where),
                               "secrets": _secret_names(e, where)})
+            elif place == "thread.file":
+                if items:
+                    raise ContributionError(f"{where}: one file per thread per plugin")
+                label = e.get("label")
+                suffix = e.get("suffix", "")
+                initial = e.get("initial", "# {title}")
+                if not isinstance(label, str) or not re.fullmatch(r"[\w -]{1,60}", label):
+                    raise ContributionError(f"{where}: label needs a short file name")
+                if not isinstance(suffix, str) or not re.fullmatch(r"[\w –—-]{0,40}", suffix):
+                    raise ContributionError(f"{where}: suffix needs plain filename characters")
+                if not isinstance(initial, str) or len(initial) > 160 or "\n" in initial:
+                    raise ContributionError(f"{where}: initial needs one short heading")
+                items.append({"label": label, "suffix": suffix, "initial": initial})
             elif place == "agent.prompt":
                 text, file = e.get("text"), e.get("file")
                 if (text is None) == (file is None):
@@ -408,6 +421,8 @@ def declared(contrib: dict) -> dict:
     if contrib.get("vault.folder"):
         out["vault"] = sorted(f.get("path") or f"(its {f['setting']} setting)"
                               for f in contrib["vault.folder"])
+    if contrib.get("thread.file"):
+        out.setdefault("vault", []).append("Manages a Markdown file for each thread")
     if contrib.get("box.listener"):
         out["inbound"] = sorted(f"{l['process']}: {l['why']}" for l in contrib["box.listener"])
     if contrib.get("web.door"):
@@ -1081,6 +1096,11 @@ def apply(reason: str = "") -> dict:
     out: dict = {"reason": reason, "units": [], "rendered": [], "errors": []}
     if not real_layer():
         return {**out, "skipped": "Yours is not the box's (a test)"}
+    try:
+        import loam_thread_files
+        loam_thread_files.configure(active())
+    except Exception as exc:
+        out["errors"].append(f"thread files: {exc}")
     try:
         out["units"] = apply_units()
     except Exception as exc:  # noqa: BLE001

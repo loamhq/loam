@@ -338,6 +338,12 @@ export function createApp({
       const query = url.searchParams.has('archived') ? `?archived=${encodeURIComponent(url.searchParams.get('archived'))}` : ''
       return await relayEvents(req, res, `/v1/threads/events${query}`)
     }
+    const threadFile = /^\/threads\/([a-zA-Z0-9_-]+)\/files\/([a-z0-9-]+)$/.exec(rest)
+    if (threadFile) {
+      if (!['GET', 'PUT'].includes(method)) return sendJson(res, 405, { error: 'Use GET or PUT for a thread file.' })
+      const body = method === 'PUT' ? await readBody(req, FILES_TEXT_BODY) : undefined
+      return await relayJson(res, method, '/v1' + rest, body)
+    }
     const threadBranch = /^\/threads\/([^/]+)\/branch$/.exec(rest)
     if (threadBranch) {
       if (method !== 'POST') return sendJson(res, 405, { error: 'Use POST to open a branch composer.' })

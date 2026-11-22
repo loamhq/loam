@@ -98,7 +98,8 @@ def main() -> int:
         if args.action == "list":
             rows = [{"id": r["id"], "title": r["title"],
                      "members": [m["persona"] for m in r["members"]],
-                     "board": str(threads.VAULT / r["board"])}
+                     "board": str(threads.VAULT / r["board"]),
+                     "files": threads.thread_files.locations(r)}
                     for r in threads.listing()]
             print(json.dumps({"ok": True, "threads": rows}))
             return 0

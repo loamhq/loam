@@ -100,6 +100,11 @@ up" with `setup: true` (an address it needs before it can work): once one
 has a value, its page leads with its controls. `docs/plugins.md` has each
 field; Loam's demo world for screenshots is `app/tools/capture-plugin-shots.mjs`.
 
+**A file beside each thread.** The experimental `thread.file` contribution
+registers one named Markdown document per thread. Its path appears in the turn
+and follows a rename. Read and save it with its revision through
+`/api/threads/<id>/files/<plugin>`. The interface may change. See `docs/plugins.md`.
+
 **When it needs the owner to know something** (a check failed, a spend
 passed a mark, a credential is about to expire), a plugin tells the agent
 the owner chose in Settings › Agents. Call `loam tell "what happened" --by

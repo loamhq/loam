@@ -1,0 +1,200 @@
+"""Markdown files contributed to threads. Bind names to thread IDs before creating files.
+
+The registry is derived from enabled manifests at install time. Bindings live outside
+thread transcripts and survive a switch off. All callers share the thread writer lock.
+"""
+
+from __future__ import annotations
+
+import os
+import stat
+from pathlib import Path
+
+import loam_config as lc
+import loam_file_revision as revisions
+import loam_threads as threads
+
+
+REGISTRY = "file-types.json"
+BINDINGS = "file-bindings.json"
+
+
+def configure(plugins):
+    types = {p["id"]: spec for p in plugins
+             for spec in p["contributes"].get("thread.file", [])}
+    with threads.locked(threads.STATE):
+        if types or (threads.STATE / REGISTRY).exists():
+            threads.save_state(REGISTRY, types)
+
+
+def _bindings():
+    # A malformed ownership record must never authorize a move, adoption or deletion.
+    import json
+    try:
+        return json.loads((threads.STATE / BINDINGS).read_text("utf-8"))
+    except FileNotFoundError:
+        return {}
+
+
+def _path(rel):
+    inbox = threads.VAULT / lc.vault_folder("inbox")
+    path = threads.VAULT / rel
+    if (not path.is_relative_to(inbox) or path.suffix != ".md"
+            or path.resolve() != path or path == inbox):
+        raise threads.ThreadError(409, "Thread file is outside its configured inbox")
+    return path
+
+
+def _available(pid, title, spec, bindings):
+    folder = Path(lc.vault_folder("inbox")) / pid
+    used = {row[key] for group in bindings.values() for row in group.values()
+            for key in ("path", "moving_to") if key in row}
+    base = threads.safe_title(title)
+    n = 1
+    while True:
+        name = base if n == 1 else f"{base} ({n})"
+        rel = str(folder / f"{name}{spec['suffix']}.md")
+        if rel not in used and not os.path.lexists(_path(rel)):
+            return rel
+        n += 1
+
+
+def adopt(pid, entries, *, spec=None):
+    """Import an operator-verified set of (id, title, vault-relative path) tuples.
+    A shared existing file needs an explicit owner. Missing duplicates get separate
+    names, in stable ID order. Import only creates reservations in runtime state.
+    """
+    with threads.locked(threads.STATE):
+        spec = spec or _spec(pid)
+        bindings = _bindings()
+        group = bindings.setdefault(pid, {})
+        claimed = {row["path"]: (plugin, tid) for plugin, rows in bindings.items()
+                   for tid, row in rows.items()}
+        entries = sorted(entries)
+        # Reserve explicit paths first, including names with a numeric suffix.
+        pending = []
+        for tid, title, rel in entries:
+            path = _path(rel)
+            if path.exists() and not path.is_file():
+                raise threads.ThreadError(409, "Thread file is not a regular file")
+            if tid in group:
+                continue
+            if rel in claimed:
+                if path.exists():
+                    raise threads.ThreadError(409, f"Two threads claim {rel}")
+                pending.append((tid, title))
+                continue
+            group[tid] = {"path": rel, "title": title}
+            claimed[rel] = (pid, tid)
+        for tid, title in pending:
+            group[tid] = {"path": _available(pid, title, spec, bindings), "title": title}
+        threads.save_state(BINDINGS, bindings)
+
+
+def _spec(pid):
+    spec = threads.load_state(REGISTRY).get(pid)
+    if not spec:
+        raise threads.ThreadError(404, "This extension has no active thread file")
+    return spec
+
+
+def _binding(pid, meta, spec):
+    """Caller holds the thread lock. Complete a pending rename before any file access."""
+    bindings = _bindings()
+    group = bindings.setdefault(pid, {})
+    tid, title = meta["id"], meta["title"]
+    if tid not in group:
+        group[tid] = {"path": _available(pid, title, spec, bindings), "title": title}
+        threads.save_state(BINDINGS, bindings)
+    row = group[tid]
+    if row["title"] != title or "moving_to" in row:
+        if "moving_to" not in row:
+            row["moving_to"] = _available(pid, title, spec, bindings)
+            row["new_title"] = title
+            threads.save_state(BINDINGS, bindings)
+        old, new = _path(row["path"]), _path(row["moving_to"])
+        # link+unlink refuses an occupied destination. A retry after linking can
+        # identify the same inode and finish without overwriting someone else's note.
+        if old.exists():
+            if not old.is_file():
+                raise threads.ThreadError(409, "Thread file is no longer a regular file")
+            new.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                new.hardlink_to(old)
+            except FileExistsError:
+                if not new.samefile(old):
+                    raise threads.ThreadError(409, "The new thread file name is occupied")
+            old.unlink()
+        row.update(path=row.pop("moving_to"), title=row.pop("new_title"))
+        threads.save_state(BINDINGS, bindings)
+        if row["title"] != title:
+            return _binding(pid, meta, spec)
+    return row["path"]
+
+
+def locations(meta):
+    """Resolve active files for a turn or tool without creating notes."""
+    specs = threads.load_state(REGISTRY)
+    if not specs:
+        return {}
+    with threads.locked(threads.STATE):
+        return {pid: {"label": spec["label"], "path": str(_path(_binding(pid, meta, spec)))}
+                for pid, spec in specs.items()}
+
+
+def renamed(meta):
+    """Caller holds the thread lock after committing the new thread title."""
+    for pid, spec in threads.load_state(REGISTRY).items():
+        _binding(pid, meta, spec)
+
+
+def removed(thread_id):
+    """Called under the thread lock for a confirmed delete. An inactive plugin's
+    files remain ordinary notes. A missing file is an idempotent deletion."""
+    specs = threads.load_state(REGISTRY)
+    if not specs:
+        return []
+    bindings = _bindings()
+    gone = []
+    for pid in specs:
+        group = bindings.get(pid, {})
+        if thread_id in group:
+            row = group[thread_id]
+            if "moving_to" in row:
+                _binding(pid, {"id": thread_id, "title": row["new_title"]}, specs[pid])
+                bindings = _bindings()
+                group = bindings[pid]
+            path = _path(group[thread_id]["path"])
+            if path.is_file():
+                path.unlink()
+                gone.append(group[thread_id]["path"])
+            del group[thread_id]
+    threads.save_state(BINDINGS, bindings)
+    return gone
+
+
+def document(pid, thread_id, payload=None):
+    with threads.locked(threads.STATE):
+        spec = _spec(pid)
+        meta, _, _ = threads.read(thread_id)
+        rel = _binding(pid, meta, spec)
+        path = _path(rel)
+        if payload is not None:
+            content, base = payload.get("markdown"), payload.get("base_revision")
+            if not isinstance(content, str) or not isinstance(base, str):
+                raise threads.ThreadError(400, "Supply markdown and its base revision")
+            try:
+                revisions.replace_text(path, content, base)
+            except revisions.RevisionConflict as exc:
+                raise threads.ThreadError(409, str(exc)) from None
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                with path.open("x", encoding="utf-8") as f:
+                    f.write(spec["initial"].replace("{title}", meta["title"]) + "\n\n")
+            except FileExistsError:
+                pass
+        if not stat.S_ISREG(path.lstat().st_mode):
+            raise threads.ThreadError(409, "Thread file is no longer a regular file")
+        raw = path.read_bytes()
+        return {"path": rel, "markdown": raw.decode("utf-8"), "revision": revisions.revision(raw)}

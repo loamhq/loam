@@ -656,6 +656,19 @@ provider's key** and is not shown as a key of its own (`declaration` in
 `lib/loam_plugins.py`, since 0.2.12), so no listing can say both. The page
 draws no pasted-key form for a plugin that declares `keys:`.
 
+## Thread files (experimental)
+
+An extension can contribute one `thread.file` entry with a short `label`, an optional
+filename `suffix` before `.md`, and an optional one-line `initial` heading containing
+`{title}`. The thread's opening context names the labeled path. The thread list
+command returns these paths under `files`, keyed by plugin ID. The first
+`GET /api/threads/<thread>/files/<plugin>` creates the file in the plugin's folder
+under the configured inbox and returns `path`, `markdown`, and `revision`. PUT to
+the same URL with `markdown` and `base_revision`. A stale revision returns 409.
+Thread IDs reserve distinct paths even before any file exists. A rename moves
+the file, a branch gets its own, and confirmed thread deletion removes its active
+file. Switching off the extension leaves the notes in place. This interface may change.
+
 ## Telling an agent that something needs attention (2026-11-19)
 
 A plugin reports a failed backup, a spending threshold, an expiring

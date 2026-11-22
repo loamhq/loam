@@ -37,6 +37,7 @@ import loam_config as lc
 
 import loam_clock
 import loam_file_revision
+import loam_thread_files as thread_files
 
 VAULT = Path(os.environ.get("LOAM_VAULT") or lc.VAULT)
 AI_LABS = Path(os.environ.get("LOAM_AI_LABS") or lc.WORKSPACES)
@@ -1215,7 +1216,8 @@ def update(thread_id: str, *, title: str | None = None, default=_UNSET,
             new = clean_title(title)
             if new != meta["title"]:
                 meta["title"] = new
-                meta["board"] = _rename_board(thread_id, meta["board"], new)
+                if "boards" not in load_state(thread_files.REGISTRY):
+                    meta["board"] = _rename_board(thread_id, meta["board"], new)
                 target = _unique_path(new, own=path)
                 _rewrite(path, meta)
                 if target != path:
@@ -1226,6 +1228,7 @@ def update(thread_id: str, *, title: str | None = None, default=_UNSET,
                 ts = load_state("threads.json")
                 ts.setdefault(thread_id, {})["placeholder_title"] = False
                 save_state("threads.json", ts)
+                thread_files.renamed(meta)
                 return meta
         _rewrite(path, meta)
     return meta
@@ -1241,8 +1244,9 @@ def delete(thread_id: str) -> dict:
         meta, _, path = read(thread_id)
         board = VAULT / meta["board"]
         removed = [str(path.relative_to(VAULT))]
+        removed.extend(thread_files.removed(thread_id))
         path.unlink()
-        if board.is_file() and board.parent == VAULT / BOARDS:
+        if "boards" not in load_state(thread_files.REGISTRY) and board.is_file() and board.parent == VAULT / BOARDS:
             board.unlink()
             removed.append(meta["board"])
         _CACHE.pop(str(path), None)
@@ -1517,6 +1521,14 @@ def empty_board(meta: dict) -> str:
 
 
 def board_text(meta: dict, create_missing: bool = True) -> str:
+    if "boards" in load_state(thread_files.REGISTRY):
+        if create_missing:
+            return thread_files.document("boards", meta["id"])["markdown"]
+        location = thread_files.locations(meta)["boards"]["path"]
+        try:
+            return Path(location).read_bytes().decode("utf-8")
+        except FileNotFoundError:
+            return ""
     path = VAULT / meta["board"]
     try:
         return path.read_bytes().decode("utf-8")
@@ -1530,6 +1542,8 @@ def board_text(meta: dict, create_missing: bool = True) -> str:
 
 
 def board_snapshot(meta: dict, markdown: str | None = None) -> dict:
+    if "boards" in load_state(thread_files.REGISTRY):
+        return thread_files.document("boards", meta["id"])
     if markdown is None:
         markdown = board_text(meta)
     return {"path": meta["board"], "markdown": markdown,
@@ -1539,6 +1553,8 @@ def board_snapshot(meta: dict, markdown: str | None = None) -> dict:
 def write_board(meta: dict, markdown: str, revision: str) -> dict:
     if not isinstance(markdown, str) or not isinstance(revision, str) or not revision:
         raise ThreadError(400, "A board save needs markdown and its base revision")
+    if "boards" in load_state(thread_files.REGISTRY):
+        return thread_files.document("boards", meta["id"], {"markdown": markdown, "base_revision": revision})
     path = VAULT / meta["board"]
     with locked(path):
         try:
@@ -1851,9 +1867,13 @@ def turn_prompt(meta: dict, persona: str, msgs: list[dict], fresh: bool,
     except (ThreadError, KeyError, OSError):
         record_file = None
     mine = summary_path(persona, meta["id"])
+    files = thread_files.locations(meta)
+    file_lines = [f"The {f['label']} is {f['path']}." for f in files.values()]
+    if "boards" not in files:
+        file_lines.append(f"The board is {VAULT / meta['board']}.")
     head = (f"[Loam thread \"{meta['title']}\" (id {meta['id']}). Members: {names}; "
             f"{answers}. "
-            f"The board is {VAULT / meta['board']}.]\n"
+            f"{' '.join(file_lines)}]\n"
             f"[{clock_line(now)}]\n")
     if fresh:
         head += ("This turn opens a new session of yours in this thread. What it "
