@@ -658,14 +658,9 @@ draws no pasted-key form for a plugin that declares `keys:`.
 
 ## Telling an agent that something needs attention (2026-11-19)
 
-A plugin never posts in a thread or on General's board; nothing of Loam's
-does (batch B, 2026-11-18: "If something is wrong, they should pass it to
-a persona that then decides what to do and how to communicate with me if
-necessary"). When a plugin has something the owner may need to know (a
-backup failing, a spend threshold passed, a credential about to expire, a
-resize it made), it tells **the agent that hears when something in Loam
-needs attention**: the one the owner chose in Settings › Agents
-(`system.persona`; the first agent by default). That agent hears it as the
+A plugin reports a failed backup, a spending threshold, an expiring
+credential or a completed resize to the agent the owner chose in
+Settings › Agents (`system.persona`, initially the first agent). That agent hears it as the
 input of a run of its own and decides what to do, including whether the
 owner hears of it, in General, in its own words.
 

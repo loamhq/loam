@@ -2204,10 +2204,8 @@ class ThreadEngine:
         """Every provider's own memory off, re-pinned and checked at each
         session start (first release L8; lib/loam_provider_memory.py): a CLI
         that updated itself can have turned one back on. A store that grew
-        is a fact handed to the system persona once (lib/loam_attention.py,
-        2026-11-19), never a line in the thread (2026-11-16: the owner read
-        such lines in a fresh chat as an error) nor on the board. Never
-        stops the turn."""
+        goes to the system persona through the attention queue. The turn
+        proceeds while the persona handles the notice."""
         try:
             def run() -> list[str]:
                 # Codex's pins ride CODEX_HOME/config.toml, which the broker

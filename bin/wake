@@ -810,9 +810,8 @@ def run(project: Path, agent: str, vault: Path, started: str,
     api_turns = loam_session.round_trips(envelope.get("session_id"))
     hit_cap = loam_session.turn_cap_hit(envelope)
     cost = envelope.get("total_cost_usd")
-    # What the run spent and what it was refused, on every line below that
-    # had an envelope. A denial is reported once here, whichever way the run
-    # ended, and never to comms.md but for the one repeat in loam_usage.
+    # Record denials for every run with an envelope. Repeated vault-write
+    # refusals also reach the system persona through the attention queue.
     spent = loam_usage.from_envelope(envelope)
     denials = spent.get("permission_denials") or []
     if denials:

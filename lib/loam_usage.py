@@ -51,10 +51,8 @@ MODEL_FIELDS = (
 )
 INPUT_CHARS = 500
 
-# A persona's write into the vault refused three nights running is the one
-# denial that reaches comms.md (brief of 2026-09-30). Once is the boundary
-# working; three nights is a persona that believes it can write somewhere it
-# cannot and is losing the work every night.
+# Three consecutive nights of refused vault writes send one actionable
+# notice to the selected system persona. The failure log retains each run.
 WRITE_TOOLS = ("Write", "Edit")
 REPEAT_NIGHTS = 3
 

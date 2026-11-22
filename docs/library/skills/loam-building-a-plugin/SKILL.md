@@ -101,10 +101,9 @@ has a value, its page leads with its controls. `docs/plugins.md` has each
 field; Loam's demo world for screenshots is `app/tools/capture-plugin-shots.mjs`.
 
 **When it needs the owner to know something** (a check failed, a spend
-passed a mark, a credential is about to expire), a plugin never posts in a
-thread or on a board. It tells the agent the owner chose to hear when
-something in Loam needs attention: `loam tell "what happened" --by
-<plugin id> --evidence "<where to look>"` from any command, or
+passed a mark, a credential is about to expire), a plugin tells the agent
+the owner chose in Settings › Agents. Call `loam tell "what happened" --by
+<plugin id> --evidence "<where to look>"` from a command, or
 `loam_attention.tell(...)` in Python. Say the fact, not what to do about
 it; the same fact is told once. That agent decides whether the owner hears
 of it. `docs/plugins.md`, "Telling an agent that something needs

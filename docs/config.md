@@ -180,8 +180,7 @@ is what the installer runs.
 The checks run at every session start, after `provider-pin apply` moves a
 CLI, and on `bin/provider-memory check`. A store that grew is told once to
 the agent that hears when something in Loam needs attention
-(lib/loam_attention.py, 2026-11-19); never in a conversation's thread
-(2026-11-16) nor on the board.
+through the attention queue (`lib/loam_attention.py`).
 
 ### Makers' report relay
 
