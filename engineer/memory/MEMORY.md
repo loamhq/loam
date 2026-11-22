@@ -2759,24 +2759,33 @@ listener for immediate notification in an open page.
   starts empty and only carries what the owner pins.
 - **Write-time attribution ledger (`lib/loam_recent.py`).** Vault auto-commit
   uses one bot identity and frontmatter is neither required nor trustworthy
-  (launcher receipts carry the briefing persona's name). Writes are recorded
-  into `<state>/files/attribution.sqlite` (WAL) from app saves/creates/uploads,
-  the persona PostToolUse hook (`hooks/loading_size.py`), thread turns, wakes,
-  and engineer jobs/receipts. Engineer writes, `<projects>/*/receipts/**`,
-  `<projects>/Loam/engineer/**`, `schedule.md`, and Loam files never appear in
-  Recent. **Keep `run_turn`'s `finally:` non-awaiting** before
+  (launcher receipts carry the briefing persona's name). Attribution is
+  strictly positive in `<state>/files/attribution.sqlite` (WAL): owner writes
+  come from app saves/creates/uploads (`source='app'`) and Syncthing deliveries
+  from paired devices (`source='syncthing'`, real-time `ItemFinished` long-poll
+  daemon thread in `bin/session-broker` plus `/rest/db/file`
+  `local.modifiedBy != myID[:7]` during backfill); persona writes come from
+  `hooks/loading_size.py`, thread turns, wakes, and `by=`; engineer writes
+  record `kind='engineer'`. **Unattributed writes (running engineer jobs
+  before end-diff, scripts, helper processes) are excluded from Recent rather
+  than defaulted to owner.** Recent also filters to readable files only
+  (`.md`, `.markdown`, `.html`, `.htm`, `.pdf`, raster images — no `.json`,
+  code, or data files). **Keep `run_turn`'s `finally:` non-awaiting** before
   `remember_session(..., watch=...)`: yielding with `await asyncio.to_thread`
   there opens a SIGTERM race that drops after-result watches
   (`test_session_processes.py`); schedule `record_diff` with `run_in_executor`
-  instead.
+  instead. Any file-API test that patches `cfg.STATE_DIR` (e.g.,
+  `tests/test_broker_files.py`) must also patch `lc.STATE` so writes do not
+  land in the host's live `attribution.sqlite`.
 - **Phone back from a file opened on Files (`returnToList`).** Opening a file
   from the Files list on a narrow viewport sets `returnToList` so Back returns
   to Files even when a chat or prior file remains in the main history stack.
-- **`quick-actions` and update cleanup.** `plugins/quick-actions/` (`default_on:
-  false`) replaces `daily-notes` and the always-on inbox button, using
-  conditional `vault.folder` (`when: {setting, in: [...]}`) so `Inbox` is not
-  created when only `daily-note` is chosen. `lib/loam_vault_cleanup.py` (hooked
-  into `bin/library install` on updates) moves thread boards into `[vault].boards`
+- **`quick-actions` ("Files quick actions") and update cleanup.**
+  `plugins/quick-actions/` (`name: Files quick actions`, `default_on: false`)
+  replaces `daily-notes` and the always-on inbox button, using conditional
+  `vault.folder` (`when: {setting, in: [...]}`) so `Inbox` is not created when
+  only `daily-note` is chosen. `lib/loam_vault_cleanup.py` (hooked into
+  `bin/library install` on updates) moves thread boards into `[vault].boards`
   and `loam-wake-failures.md` into `<system>/`, moves empty or insubstantial
   (`<= 5` non-frontmatter words) seeded folders (`Inbox`, `Daily`, `Images`)
   recoverably into `<vault>/.trash/loam-cleanup-<stamp>/`, and migrates active
@@ -2812,3 +2821,7 @@ listener for immediate notification in an open page.
   renders statically via `<img>` with `Content-Security-Policy: sandbox; default-src 'none'`
   on `/raw`. `DOOR_HEADERS` in `bin/plugin-gateway` adds `range` (206 audio/video
   seeking) and `x-loam-agent-name`.
+  recoverably into `<vault>/.trash/loam-cleanup-<stamp>/`, and migrates
+  `quick-actions` on or off directly by `folder_has_substance()` on the
+  configured inbox and daily folders. New installs seed only `About me.md`,
+  `<projects>/Loam/Start here.html`, `README.md`, and Loam files.

@@ -329,8 +329,8 @@ function settingsRoot() {
 
 const QUICK_ACTION_LABELS = {
   both: 'New note and Today’s note',
-  'new-note': 'New note only',
-  'daily-note': 'Today’s note only',
+  'new-note': 'New note',
+  'daily-note': 'Today’s note',
 }
 
 function settingsFiles({ back = true } = {}) {
@@ -341,12 +341,12 @@ function settingsFiles({ back = true } = {}) {
   const qaSub = qa?.on ? (QUICK_ACTION_LABELS[qa.actions] ?? 'On') : 'Off'
   return [
     back ? settingsBack('Settings', 'root') : null,
-    settingsHead('Files', 'Quick actions, pinned items and downloads.'),
-    h('section', { class: 'settings-section', 'aria-label': 'Quick actions' },
-      h('h3', { class: 'kicker', text: 'Quick actions' }),
+    settingsHead('Files', 'Files quick actions, pinned items and downloads.'),
+    h('section', { class: 'settings-section', 'aria-label': 'Files quick actions' },
+      h('h3', { class: 'kicker', text: 'Files quick actions' }),
       h('div', { class: 'rows' }, settingsRow({
         lead: tile(icon.plus(16)),
-        title: 'Quick actions in Files',
+        title: 'Files quick actions',
         sub: qaSub,
         onclick: () => goSettings('plugins', 'quick-actions'),
       }))),

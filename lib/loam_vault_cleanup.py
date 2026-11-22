@@ -363,8 +363,8 @@ def cleanup_seeded_folders(vault: Path, *, extra_folders: tuple[str, ...] = (),
 
 def migrate_quick_actions(vault: Path, *, dry_run: bool = False) -> dict:
     """Carry active inbox / daily-notes settings into the unified quick-actions
-    plugin. Runs after seeded-folder cleanup so empty cleaned-up folders are
-    not recreated."""
+    plugin based on actual folder substance: on when the install has
+    substantial notes in its inbox or daily folder, off otherwise."""
     import loam_contributions as contrib  # noqa: PLC0415
     import loam_plugins as lp  # noqa: PLC0415
 
@@ -379,21 +379,20 @@ def migrate_quick_actions(vault: Path, *, dry_run: bool = False) -> dict:
                 lp._save_list(data)
         return {"status": "already-configured", "on": bool(on["quick-actions"])}
 
-    had_daily = bool(on.get("daily-notes"))
     daily_vals = contrib.setting_values("daily-notes")
     daily_dir = (daily_vals.get("folder") or "Daily").strip("/")
     inbox_dir = lc.vault_folder("inbox").strip("/")
 
-    inbox_alive = (vault / inbox_dir).is_dir()
-    daily_alive = had_daily and (vault / daily_dir).is_dir()
+    inbox_used = bool(inbox_dir) and folder_has_substance(vault / inbox_dir)
+    daily_used = bool(daily_dir) and folder_has_substance(vault / daily_dir)
 
-    if inbox_alive and daily_alive:
+    if inbox_used and daily_used:
         actions = "both"
         want_on = True
-    elif inbox_alive:
+    elif inbox_used:
         actions = "new-note"
         want_on = True
-    elif daily_alive:
+    elif daily_used:
         actions = "daily-note"
         want_on = True
     else:
@@ -550,7 +549,7 @@ def format_report(report: dict) -> str:
         lines.append(f"Removed unused seeded folder: {row['folder']}/{detail} -> {row['trash']}")
     qa = report.get("quick_actions") or {}
     if qa.get("status") == "migrated":
-        lines.append(f"Quick actions: {'on' if qa.get('on') else 'off'} (actions={qa.get('actions')})")
+        lines.append(f"Files quick actions: {'on' if qa.get('on') else 'off'} (actions={qa.get('actions')})")
     return "\n".join(lines)
 
 

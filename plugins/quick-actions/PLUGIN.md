@@ -1,6 +1,6 @@
 ---
 id: quick-actions
-name: Quick actions
+name: Files quick actions
 version: 1.0.0
 author: Loam contributors
 api: 0
@@ -16,13 +16,13 @@ touches:
 contributes:
   settings.entry:
     - key: actions
-      label: Quick actions in Files
+      label: Actions to show
       choices: [both, new-note, daily-note]
       labels:
         both: "New note and Today’s note"
-        new-note: "New note only"
-        daily-note: "Today’s note only"
-      note: Choose which quick actions appear at the top of Files.
+        new-note: "New note"
+        daily-note: "Today’s note"
+      note: Choose whether Files shows New note, Today’s note, or both.
       default: both
     - key: inbox_folder
       label: New note folder
@@ -58,7 +58,7 @@ today’s date.
 
 ## How to use it
 
-1. Turn **Quick actions** on here.
+1. Turn **Files quick actions** on here.
 2. Choose which actions to show in Files and which folders they write into.
 3. Open **Files** to use them right at the top.
 

@@ -1895,9 +1895,16 @@ function recentAvatar(author, home, size = 30) {
   })
 }
 
-function formatFolderPath(folder) {
+export function formatFolderPath(folder) {
   if (!folder) return 'Your files'
   return folder.split('/').filter(Boolean).join(' › ')
+}
+
+export function shortFolderPath(folder) {
+  if (!folder) return 'Your files'
+  const parts = folder.split('/').filter(Boolean)
+  if (parts.length <= 2) return parts.join(' › ')
+  return parts.slice(-2).join(' › ')
 }
 
 // Pinned files and folders: always shown on the Files home, with a calm empty
@@ -2001,7 +2008,8 @@ function homeRecent(files, home, go) {
         if (item.kind === 'group') {
           const open = rec.expanded.has(item.id)
           const parentPath = parentOf(item.folder)
-          const where = parentPath ? formatFolderPath(parentPath) : formatFolderPath(item.folder)
+          const where = shortFolderPath(parentPath || item.folder)
+          const fullWhere = item.folder ? formatFolderPath(item.folder) : null
           const whoName = item.author?.kind === 'owner' ? 'You' : item.author?.name || 'Agent'
           blocks.push(
             h(
@@ -2020,7 +2028,7 @@ function homeRecent(files, home, go) {
                   'div',
                   { class: 'fs-words' },
                   h('div', { class: 'fs-name', text: item.label }),
-                  h('div', { class: 'fs-meta', text: `${whoName} · ${where}` }),
+                  h('div', { class: 'fs-meta', title: fullWhere, text: `${whoName} · ${where}` }),
                 ),
                 h('span', { class: 'fs-recent-when', text: recentWhen(item.modified, dayGroup.day) }),
                 h('span', { class: 'fs-recent-chev' }, icon.chevronRight(10)),
@@ -2052,8 +2060,9 @@ function homeRecent(files, home, go) {
           )
         } else {
           const { isMain, isSide } = marksFor('vault', item.path, true)
-          const metaParts = [formatFolderPath(item.folder)]
+          const metaParts = [shortFolderPath(item.folder)]
           if (item.author?.kind === 'agent' && item.author.name) metaParts.push(item.author.name)
+          const fullWhere = item.folder ? formatFolderPath(item.folder) : null
           const side = go.side?.()
           const sideItem = { kind: 'file', root: 'vault', path: item.path, row: item.row }
           blocks.push(
@@ -2076,7 +2085,7 @@ function homeRecent(files, home, go) {
                   'div',
                   { class: 'fs-words' },
                   h('div', { class: 'fs-name', text: displayFileName(item.name) }),
-                  h('div', { class: 'fs-meta', text: metaParts.join(' · ') }),
+                  h('div', { class: 'fs-meta', title: fullWhere, text: metaParts.join(' · ') }),
                 ),
                 h('span', { class: 'fs-recent-when', text: recentWhen(item.modified, dayGroup.day) }),
               ),
@@ -2120,7 +2129,7 @@ function homeActions(home) {
     buttons.push(h(
       'button',
       { class: 'fs-action fs-newinbox', type: 'button', onclick: home.onInbox },
-      h('span', { class: 'fs-actionglyph', 'aria-hidden': 'true' }, icon.plus(18)),
+      h('span', { class: 'fs-actionglyph', 'aria-hidden': 'true' }, icon.plus(16)),
       h('span', { class: 'fs-actionlabel', text: 'New note' }),
     ))
   }
@@ -2128,7 +2137,7 @@ function homeActions(home) {
     buttons.push(h(
       'button',
       { class: 'fs-action fs-daily', type: 'button', onclick: home.onDaily },
-      h('span', { class: 'fs-actionglyph', 'aria-hidden': 'true' }, icon.sun(18)),
+      h('span', { class: 'fs-actionglyph', 'aria-hidden': 'true' }, icon.sun(16)),
       h('span', { class: 'fs-actionlabel', text: 'Today’s note' }),
     ))
   }
@@ -2209,14 +2218,14 @@ export function folderView(files, { go, wide, collapse = null, historyBack = nul
     if (qa) body.push(qa)
     const places = []
     for (const r of st.roots.items) {
-      const glyph = r.root === 'spaces' ? icon.spark(20) : icon.folder(20)
+      const glyph = r.root === 'spaces' ? icon.spark(22) : icon.folder(22)
       places.push(
         h(
           'button',
           { class: 'fs-place', key: `root:${r.root}`, type: 'button', onclick: () => go(r.root, '') },
           h('span', { class: 'fs-place-tile', 'aria-hidden': 'true' }, glyph),
           h('div', { class: 'fs-rootwords' }, h('div', { class: 'fs-rootname', text: r.name }), r.homeDesc ? h('div', { class: 'fs-rootdesc', text: r.homeDesc }) : null),
-          icon.chevronRight(10),
+          icon.chevronRight(11),
         ),
       )
     }
@@ -2225,9 +2234,9 @@ export function folderView(files, { go, wide, collapse = null, historyBack = nul
         h(
           'button',
           { class: 'fs-place', key: `root:@${r.id}`, type: 'button', onclick: () => go(`@${r.id}`, '') },
-          h('span', { class: 'fs-place-tile', 'aria-hidden': 'true' }, typeof r.icon === 'function' ? r.icon(20) : icon[r.icon]?.(20) ?? icon.folder(20)),
+          h('span', { class: 'fs-place-tile', 'aria-hidden': 'true' }, typeof r.icon === 'function' ? r.icon(22) : icon[r.icon]?.(22) ?? icon.folder(22)),
           h('div', { class: 'fs-rootwords' }, h('div', { class: 'fs-rootname', text: r.name }), r.desc ? h('div', { class: 'fs-rootdesc', text: r.desc }) : null),
-          icon.chevronRight(10),
+          icon.chevronRight(11),
         ),
       )
     }
@@ -2280,9 +2289,9 @@ export function folderView(files, { go, wide, collapse = null, historyBack = nul
   } else {
     const atVaultTop = st.root === 'vault' && st.path === ''
     const visibleRows = atVaultTop ? st.listing.rows.filter((row) => !loamPaths.has(row.path)) : st.listing.rows
-    if (visibleRows.length === 0 && !(atVaultTop && loamList.length > 0)) {
+    if (visibleRows.length === 0) {
       body.push(emptyState({ object: 'folder', size: 'small', title: 'Nothing here yet', body: firstUseActive() ? 'Keep files here with your agents.' : 'What you or your agents put in this folder shows up here.', props: { class: 'fs-quiet' } }))
-    } else if (visibleRows.length > 0) {
+    } else {
       const marksFor = openFileMarks(files, go)
       body.push(
         h(
@@ -2305,16 +2314,20 @@ export function folderView(files, { go, wide, collapse = null, historyBack = nul
     if (atVaultTop && loamList.length > 0) {
       body.push(
         h(
-          'button',
-          { class: 'fs-loam-entry', key: 'fs:loamfiles', type: 'button', onclick: () => go('loam', '', { isFile: false }) },
-          h('span', { class: 'fs-loam-tile', 'aria-hidden': 'true' }, icon.cog(18)),
+          'div',
+          { class: 'fs-loam-foot', key: 'fs:loamfoot' },
           h(
-            'div',
-            { class: 'fs-words' },
-            h('div', { class: 'fs-name', text: 'Loam files' }),
-            h('div', { class: 'fs-meta', text: 'What Loam needs to run. You’ll rarely need this.' }),
+            'button',
+            { class: 'fs-loam-entry', key: 'fs:loamfiles', type: 'button', onclick: () => go('loam', '', { isFile: false }) },
+            h('span', { class: 'fs-loam-tile', 'aria-hidden': 'true' }, icon.cog(18)),
+            h(
+              'div',
+              { class: 'fs-words' },
+              h('div', { class: 'fs-name', text: 'Loam files' }),
+              h('div', { class: 'fs-meta', text: 'What Loam needs to run. You’ll rarely need this.' }),
+            ),
+            icon.chevronRight(10),
           ),
-          icon.chevronRight(10),
         ),
       )
     }

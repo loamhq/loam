@@ -219,9 +219,9 @@ reachable by search, wiki-links, deep links and from chats). Wake failure logs
 (`loam-wake-failures.md`) and thread boards live inside **Loam files** rather
 than the inbox.
 
-On the **Files** home, optional **Quick actions** (**New note**, **Today's
+On the **Files** home, optional **Files quick actions** (**New note**, **Today's
 note**) come from the built-in `quick-actions` plugin (off by default on new
-installs; configured in Settings › Plugins › Quick actions or through
+installs; configured in Settings › Plugins › Files quick actions or through
 `bin/settings set plugin.quick-actions.*`). Below the places sit **Pinned**
 (items pinned by the owner from any file or folder's ⋯ menu; nothing is seeded
 pinned) and **Recent** (the owner's and personas' recent changes in Your files

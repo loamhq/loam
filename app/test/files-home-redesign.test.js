@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createFiles, folderView } from '../public/files.js'
+import { createFiles, folderView, formatFolderPath, shortFolderPath } from '../public/files.js'
 import { installDom } from './fakedom.js'
 import { all, find, text } from './browser.js'
 
@@ -190,8 +190,9 @@ test('Your files hides Loam files behind one quiet row; Loam files lists machine
 
   const visibleNames = all(find(vaultView, 'card-group'), 'fs-name').map(text)
   assert.deepEqual(visibleNames, ['Projects', 'About me.md'])
+  const loamFoot = find(vaultView, 'fs-loam-foot')
   const loamBtn = find(vaultView, 'fs-loam-entry')
-  assert.ok(loamBtn, 'quiet Loam files row is shown at bottom of Your files')
+  assert.ok(loamFoot && loamBtn, 'quiet Loam files row sits in bottom-pinned footer wrapper of Your files')
   assert.match(text(loamBtn), /Loam files/)
   assert.match(text(loamBtn), /What Loam needs to run/)
 
@@ -210,4 +211,44 @@ test('Your files hides Loam files behind one quiet row; Loam files lists machine
   assert.equal(opened.at(-1).root, 'vault')
   assert.equal(opened.at(-1).path, 'Boards')
   assert.equal(opened.at(-1).opts?.isFile, false)
+})
+
+test('shortFolderPath shortens deep paths to the last two folders and Recent sets full path title', async () => {
+  assert.equal(shortFolderPath(''), 'Your files')
+  assert.equal(shortFolderPath('10_DAILY'), '10_DAILY')
+  assert.equal(shortFolderPath('40_PROJECTS/Loam'), '40_PROJECTS › Loam')
+  assert.equal(shortFolderPath('40_PROJECTS/Loam/analysis/per-case'), 'analysis › per-case')
+  assert.equal(formatFolderPath('40_PROJECTS/Loam/analysis/per-case'), '40_PROJECTS › Loam › analysis › per-case')
+
+  const deepRecent = {
+    who: 'all', window: 'default', used_fallback: false, has_more: false, total_shown: 1, total_week: 1,
+    days: [{
+      day: 'Today', day_key: '2026-11-22',
+      items: [
+        fileItem(
+          '40_PROJECTS/Loam/analysis/per-case/review.md',
+          'review.md',
+          { kind: 'agent', id: 'ada', name: 'Ada' },
+          '40_PROJECTS/Loam/analysis/per-case',
+        ),
+      ],
+    }],
+  }
+  const { f } = makeController({ roots: sampleRoots, recentByKey: { 'all:default': deepRecent } })
+  f.registry.scope({ id: 'doc-comments' }).places['files.root'].add({
+    id: 'doc-comments', name: 'Shared Docs', desc: 'Shared by you, or with you.',
+    render: () => null,
+  })
+  await f.loadRoots()
+  await f.loadRecent('all', 'default')
+  const view = folderView(f, { go: () => {}, wide: false, home: { shortcuts: [], showNewNote: false, showDailyNote: false } })
+
+  // All 3 places (Your files, Agent files, Shared Docs) render as equal standalone cards
+  const placeNames = all(find(view, 'fs-places'), 'fs-rootname').map(text)
+  assert.deepEqual(placeNames, ['Your files', 'Agent files', 'Shared Docs'])
+
+  // Recent row shows shortened 2-folder path with full path in title attribute
+  const meta = find(find(view, 'fs-recent-row'), 'fs-meta')
+  assert.equal(text(meta), 'analysis › per-case · Ada')
+  assert.equal(meta.getAttribute('title'), '40_PROJECTS › Loam › analysis › per-case')
 })

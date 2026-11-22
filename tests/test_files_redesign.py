@@ -735,9 +735,42 @@ check(
     report_m,
 )
 
+# Dry-run & standalone substance rule: even before folders are deleted, a vault
+# with only a frontmatter-only Daily note and empty Inbox migrates OFF.
+dry_vault = TMP / "dry-substance-vault"
+(dry_vault / "Inbox").mkdir(parents=True)
+(dry_vault / "Daily").mkdir(parents=True)
+(dry_vault / "Daily" / "2026-11-21.md").write_text("---\ncreated_by: \"[[Sam]]\"\n---\n\n# 2026-11-21\n", encoding="utf-8")
+(PLUGINS / "installed.json").write_text(json.dumps({"on": {"daily-notes": True}, "plugins": {}}), encoding="utf-8")
+dry_qa = cleanup.migrate_quick_actions(dry_vault, dry_run=True)
+check(
+    "migration substance rule: frontmatter-only Daily + empty Inbox -> OFF even before cleanup",
+    dry_qa["on"] is False and dry_qa["status"] == "migrated",
+    dry_qa,
+)
+
+# Daily-only substantial vault -> ON with daily-note only
+daily_only_vault = TMP / "daily-only-vault"
+(daily_only_vault / "Inbox").mkdir(parents=True)
+(daily_only_vault / "Daily").mkdir(parents=True)
+(daily_only_vault / "Daily" / "2026-11-22.md").write_text("A genuine daily journal entry with plenty of real words.\n", encoding="utf-8")
+(PLUGINS / "installed.json").write_text(json.dumps({"on": {}, "plugins": {}}), encoding="utf-8")
+daily_only_qa = cleanup.migrate_quick_actions(daily_only_vault, dry_run=True)
+check(
+    "migration substance rule: substantial Daily only -> ON (daily-note)",
+    daily_only_qa["on"] is True and daily_only_qa["actions"] == "daily-note",
+    daily_only_qa,
+)
+
 # ---------------------------------------------------------------------------
-# 8. quick-actions persona settings parity + conditional vault.folder
+# 8. quick-actions plugin name, persona settings parity + conditional vault.folder
 # ---------------------------------------------------------------------------
+qa_row = next(r for r in lp._rows() if r["id"] == "quick-actions")
+check(
+    "plugin display name: quick-actions is named 'Files quick actions'",
+    qa_row["name"] == "Files quick actions",
+    qa_row["name"],
+)
 lp.set_on("quick-actions", True)
 keys = {e.key for e in settings.entries()}
 check(

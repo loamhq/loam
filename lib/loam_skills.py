@@ -400,7 +400,7 @@ Your files under **Loam files**.
 | `{system}/{OWN_DIR}/` | Your shared shelf of skills, read by every agent. Updates never touch it. |
 
 Optional folders such as `Inbox/`, `Daily/` or `Images/` are created only when
-you turn on Quick actions or generate an image, or when you make them yourself.
+you turn on Files quick actions or generate an image, or when you make them yourself.
 
 A skill is a folder with a `SKILL.md` in it. An agent’s own skill, in its
 workspace’s `skills/`, wins over a shared one with the same name.

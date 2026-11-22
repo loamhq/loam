@@ -99,7 +99,7 @@
 :root[data-look="foundry"] :is(.tt-section-heading,.tt-details-section h3,.theme-option h4) { text-transform:uppercase; letter-spacing:.12em; font-size:11px; }
 :root[data-look="foundry"] :is(.iconbtn,.pillbtn,.chip,.navbtn,.roundbtn,.plusbtn,.modelbtn,.roundsend,.roundmic,.thread-tile,.segmented,.segmented button,.appearance-modes,.appearance-modes button,.navrow,.railtab,.theme-preview,.theme-choice-check,.tt-list-item,.card,.fs-entry,.setrow) { border-radius:var(--radius-md); }
 :root[data-look="foundry"] :is(.composer,.composer-box,.tt-compose,.navpill,.popover,.menu-surface,.theme-choice) { border-radius:var(--radius-lg); }
-:root[data-look="foundry"] :is(.pane,.tt-tasks-panel,.tt-configuration,.settings,.pinned-card,.rows,.card.card-group,.fs-rootcard,.fs-places,.fs-action,.fs-preview,.fs-field,.fs-media,.fs-pdf,.apps-desk > main) { border-radius:var(--radius-xl); }
+:root[data-look="foundry"] :is(.pane,.tt-tasks-panel,.tt-configuration,.settings,.pinned-card,.rows,.card.card-group,.fs-rootcard,.fs-place,.fs-action,.fs-preview,.fs-field,.fs-media,.fs-pdf,.apps-desk > main) { border-radius:var(--radius-xl); }
 :root[data-look="foundry"] [data-menu-surface] { border-radius:var(--radius-xl); }
 :root[data-look="foundry"] :is(.fold,.actions,.approve) { border-radius:var(--radius-lg); }
 :root[data-look="foundry"][data-theme="dark"] :is(.pane,.setbody,.sheet) { box-shadow:inset 1px 0 rgba(170,201,216,.12); }

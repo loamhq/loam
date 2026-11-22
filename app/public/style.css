@@ -1975,27 +1975,25 @@ a.ghline { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
 .fs-htmlbar > .fs-rename-form { flex: 1; padding: 8px 0; }
 .fs-htmlbar .fs-rename-input { font: inherit; }
 .fs-sub { font-size: 13px; color: var(--paper-ink-2); line-height: 1.4; }
-.fs-scroll { flex: 1; overflow: auto; overscroll-behavior: contain; padding: var(--space-sm) var(--space-lg) 130px; display: flex; flex-direction: column; gap: var(--space-lg); }
-.fs-folder.athome .fs-scroll { padding: var(--space-md) var(--space-lg) 136px; gap: 26px; }
-.fs-folder.wide.athome .fs-scroll { padding: var(--space-sm) var(--space-lg) 36px; gap: 24px; }
+.fs-scroll { flex: 1; overflow: auto; overscroll-behavior: contain; padding: var(--space-sm) var(--space-lg) calc(96px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: var(--space-lg); }
+.fs-folder.athome .fs-scroll { padding: var(--space-md) var(--space-lg) 136px; gap: 28px; }
+.fs-folder.wide.athome .fs-scroll { padding: var(--space-sm) var(--space-lg) 36px; gap: 26px; }
 /* Column scrollers keep each item's natural height; overflow belongs to the
  * scroller. The desktop Settings sheet has two horizontal flex panes. */
 :where(.fs-scroll, .profile-body, .setnav, .setmain, .popover, .actions-sheet) > *,
 .sheet > :not(.setnav):not(.setmain) { flex-shrink: 0; }
 .fs-folder.wide .fs-scroll { padding-bottom: 24px; }
-.fs-places { background: var(--paper-card); border-radius: 22px; padding: 6px; display: flex; flex-direction: column; }
-.fs-place { position: relative; display: flex; align-items: center; gap: 14px; padding: 15px 14px; border: 0; background: transparent; border-radius: 16px; text-align: left; color: inherit; width: 100%; cursor: pointer; transition: background-color var(--motion-fast) var(--ease-standard); }
-.fs-place + .fs-place::before { content: ''; position: absolute; left: 70px; right: 14px; top: 0; border-top: 1px solid var(--paper-rule); pointer-events: none; transition: opacity var(--motion-fast) var(--ease-standard); }
+.fs-places { display: flex; flex-direction: column; gap: 12px; }
+.fs-place { position: relative; display: flex; align-items: center; gap: 16px; padding: 18px 18px; min-height: 94px; border: 0; background: var(--paper-card); border-radius: 22px; text-align: left; color: inherit; width: 100%; cursor: pointer; transition: background-color var(--motion-fast) var(--ease-standard); }
 @media (hover: hover) {
-  .fs-place:hover { background: var(--paper-hover-alpha); }
-  .fs-place:hover::before, .fs-place:hover + .fs-place::before { opacity: 0; }
+  .fs-place:hover { background: var(--paper-hover); }
 }
 .fs-place:active { background: var(--paper-pressed); }
 .fs-place > svg:last-child { flex: none; color: var(--paper-ink-3); opacity: .72; }
-.fs-place-tile { width: 42px; height: 42px; border-radius: 13px; flex: none; display: flex; align-items: center; justify-content: center; background: var(--paper-raised); color: var(--paper-ink-2); }
+.fs-place-tile { width: 46px; height: 46px; border-radius: 15px; flex: none; display: flex; align-items: center; justify-content: center; background: var(--paper-raised); color: var(--paper-ink-2); }
 .fs-rootwords { flex: 1; min-width: 0; }
-.fs-rootname { font-size: 16px; font-weight: 650; line-height: 1.25; color: var(--paper-ink); }
-.fs-rootdesc { font-size: 13px; color: var(--paper-ink-3); line-height: 1.38; margin-top: 2px; }
+.fs-rootname { font-size: 16.5px; font-weight: 680; line-height: 1.25; color: var(--paper-ink); letter-spacing: -0.01em; }
+.fs-rootdesc { font-size: 13.5px; color: var(--paper-ink-3); line-height: 1.4; margin-top: 3px; }
 .card.card-group { gap:0; }
 .setrow.on { background:var(--latte-control-selected); color:var(--latte-control-selected-ink); }
 .setrow.on :is(.setrow-title,.setrow-sub,.fs-name,.fs-meta),.setrow.on > svg:last-child { color:inherit; }
@@ -2161,6 +2159,7 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .fs-recent-day { font-size: 12px; font-weight: 650; color: var(--paper-ink-3); padding: 14px 10px 4px; }
 .fs-recent-day:first-child { padding-top: 2px; }
 .fs-recent-row { padding: 9px 10px; gap: 12px; border-radius: 14px; min-height: 52px; }
+.fs-recent-row .fs-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fs-recent-entry { border-radius: 14px; }
 .fs-recent-entry > .fs-recent-row { width: 100%; }
 .fs-recent-av { flex: none; }
@@ -2183,7 +2182,8 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .fs-recent-empty p { margin: 0; }
 .fs-recent-empty-title { font-size: 14px; font-weight: 600; color: var(--paper-ink-2); margin-bottom: 3px; }
 .fs-recent-more { align-self: flex-start; margin: 6px 0 0 2px; }
-.fs-loam-entry { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px 14px; margin-top: 4px; border: 1px solid var(--paper-rule); border-radius: 18px; background: transparent; color: var(--paper-ink-3); text-align: left; cursor: pointer; transition: background-color var(--motion-fast) var(--ease-standard); }
+.fs-loam-foot { margin-top: auto; padding-top: 12px; }
+.fs-loam-entry { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px 14px; border: 1px solid var(--paper-rule); border-radius: 18px; background: transparent; color: var(--paper-ink-3); text-align: left; cursor: pointer; transition: background-color var(--motion-fast) var(--ease-standard); }
 @media (hover: hover) { .fs-loam-entry:hover { background: var(--paper-hover-alpha); } }
 .fs-loam-entry:active { background: var(--paper-pressed); }
 .fs-loam-entry > svg:last-child { flex: none; color: var(--paper-ink-3); opacity: .72; }
@@ -2201,13 +2201,13 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .fs-export-feedback { padding-top: 4px; padding-bottom: 12px; cursor: default; }
 .fs-export-feedback.warn .note { color: var(--danger); }
 .fs-menu-archive:disabled { opacity: .6; cursor: default; }
-.fs-actions-home { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.fs-actions-home { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .fs-actions-home.single { grid-template-columns: 1fr; }
-.fs-action { display: flex; align-items: center; gap: 11px; min-height: 58px; padding: 14px 16px; border: 0; border-radius: 18px; background: var(--paper-card); color: var(--paper-ink); text-align: left; min-width: 0; cursor: pointer; transition: background-color var(--motion-fast) var(--ease-standard); }
-@media (hover: hover) { .fs-action:hover { background: var(--paper-hover); } }
-.fs-action:active { background: var(--paper-pressed); }
-.fs-actionlabel { font-size: 14.5px; font-weight: 650; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fs-actionglyph { width: 32px; height: 32px; border-radius: 10px; background: var(--paper-raised); color: var(--paper-ink-2); flex: none; display: flex; align-items: center; justify-content: center; }
+.fs-action { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 10px 14px; border: 1px solid var(--paper-rule-strong); border-radius: 16px; background: transparent; color: var(--paper-ink-2); text-align: left; min-width: 0; cursor: pointer; transition: background-color var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard); }
+@media (hover: hover) { .fs-action:hover { background: var(--paper-hover-alpha); color: var(--paper-ink); border-color: var(--paper-ink-3); } }
+.fs-action:active { background: var(--paper-pressed); color: var(--paper-ink); }
+.fs-actionlabel { font-size: 14px; font-weight: 600; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fs-actionglyph { width: 24px; height: 24px; border-radius: 8px; background: transparent; color: var(--paper-ink-2); flex: none; display: flex; align-items: center; justify-content: center; }
 .fs-setcard .field-input { border-radius: 14px; }
 .listnotice.inline { margin: 0 20px 8px; font-size: 13px; color: var(--danger); }
 .fs-reason { font-size: 12.5px; color: var(--paper-ink-2); line-height: 1.4; }
