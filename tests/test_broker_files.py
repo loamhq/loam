@@ -1632,10 +1632,12 @@ def test_archive(c: Client, t: dict) -> None:
 
 
 def main() -> int:
+    import loam_config as lc  # noqa: PLC0415
     tmp = Path(tempfile.mkdtemp(prefix="broker-files-test-"))
     keep = (cfg.STATE_DIR, cfg.SESSION_DIR, cfg.USAGE_PATH, cfg.TOKEN_PATH,
-            cfg.VAULT, cfg.AI_LABS, files.SYSTEM_BASE)
+            cfg.VAULT, cfg.AI_LABS, files.SYSTEM_BASE, lc.STATE)
     try:
+        lc.STATE = tmp / "state"
         cfg.STATE_DIR = tmp / "state"
         cfg.SESSION_DIR = tmp / "state" / "sessions"
         cfg.USAGE_PATH = tmp / "state" / "provider-usage.json"
@@ -1673,7 +1675,7 @@ def main() -> int:
             thread.join(10)
     finally:
         (cfg.STATE_DIR, cfg.SESSION_DIR, cfg.USAGE_PATH, cfg.TOKEN_PATH,
-         cfg.VAULT, cfg.AI_LABS, files.SYSTEM_BASE) = keep
+         cfg.VAULT, cfg.AI_LABS, files.SYSTEM_BASE, lc.STATE) = keep
         shutil.rmtree(tmp, ignore_errors=True)
     print(f"\n{sum(results)}/{len(results)} passed")
     return 0 if all(results) else 1

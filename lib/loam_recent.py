@@ -3,30 +3,41 @@
 Vault auto-commit runs on a timer under one bot identity, and Markdown
 frontmatter is neither required nor trustworthy on its own (engineer writes
 often carry none, and launcher receipts carry the briefing persona's name).
-So Loam records write authorship as writes happen in a small SQLite WAL ledger
+So Loam records write authorship positively in a small SQLite WAL ledger
 under ``STATE/files/attribution.sqlite``:
 
 - App Files API saves, creates and uploads -> ``owner`` (or the named persona
   when a plugin passes ``by``).
+- Syncthing deliveries from paired devices (``ItemFinished`` events in real
+  time, and ``/rest/db/file`` ``local.modifiedBy != myID`` on catch-up/backfill)
+  -> ``owner``.
 - Persona tool hooks (``hooks/loading_size.py``) and turn/wake start-end vault
   snapshots -> that persona (``agent``).
 - Engineer jobs and launcher receipt/artifact writes -> ``engineer`` (always
   excluded from Recent).
-- Anything modified on disk without a matching ledger entry (Syncthing,
-  Obsidian, manual edits) -> ``owner``.
+- Anything written on disk without a positive owner or agent record (a running
+  engineer job before its end-diff, a script, a background helper) ->
+  unattributed, and **left out of Recent** rather than credited to the owner.
 
-Reads never block on git: ``recent_files`` walks the vault outside Loam files
-and structural exclusions with ``os.scandir`` (tens of milliseconds even on a
-large vault) and resolves authorship against the ledger.
+Recent lists only files a person reads: Markdown notes, HTML pages, PDFs and
+images (not JSON, code or data files). Reads never block on git:
+``recent_files`` walks the vault outside Loam files and structural exclusions
+with ``os.scandir`` (tens of milliseconds even on a large vault) and resolves
+authorship against the ledger.
 """
 
 from __future__ import annotations
 
+import http.client
+import json
 import os
 import re
 import sqlite3
+import ssl
 import stat
 import time
+import urllib.parse
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -48,11 +59,28 @@ VALID_KINDS = ("owner", "agent", "engineer", "runtime")
 VALID_WHO = ("all", "you", "agents")
 VALID_WINDOWS = ("default", "week")
 
+# Files a person reads: Markdown notes, HTML pages, PDFs and images.
+# Excludes JSON, code, logs and other data files.
+RECENT_EXTENSIONS = frozenset({
+    ".md", ".markdown",
+    ".html", ".htm",
+    ".pdf",
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".heic", ".heif",
+})
+
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+_SYNCTHING_ADDR_RE = re.compile(r"^(?:(https?)://)?(\[?[^\]:/]+\]?):([0-9]{1,5})/?$")
+
 _FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|$)", re.S)
 _FM_AUTHOR_RE = re.compile(r"(?m)^(last_modified_by|created_by)\s*:\s*(.+?)\s*$")
 _HTML_COMMENT_AUTHOR_RE = re.compile(
     r"<!--[^\n]*?(?:last_modified_by|created_by)\s*:\s*([^\n·>]+?)(?:\s*(?:·|-->))", re.I)
 _WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)")
+
+
+def is_readable_file(name_or_path: str | Path) -> bool:
+    """True when ``name_or_path`` is a readable note, HTML page, PDF or image."""
+    return Path(name_or_path).suffix.lower() in RECENT_EXTENSIONS
 
 
 def db_path() -> Path:
@@ -78,7 +106,46 @@ def _connect() -> sqlite3.Connection:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+        """
+    )
     return conn
+
+
+def _get_meta(key: str) -> str | None:
+    path = db_path()
+    if not path.is_file():
+        return None
+    try:
+        conn = _connect()
+        try:
+            row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+            return row[0] if row else None
+        finally:
+            conn.close()
+    except (OSError, sqlite3.Error):
+        return None
+
+
+def _set_meta(key: str, value: str) -> None:
+    try:
+        conn = _connect()
+        try:
+            conn.execute(
+                "INSERT INTO meta (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, str(value)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except (OSError, sqlite3.Error):
+        pass
 
 
 def _vault_root(vault: Path | None = None) -> Path:
@@ -324,9 +391,9 @@ def record_diff(before: dict[str, int], *, kind: str, actor: str, source: str,
                     fresh = started_at is not None and r_at >= started_at - 0.5
                     same_write = abs(r_mtime - mtime_ns) <= MTIME_TOLERANCE_NS
                     if fresh and same_write:
-                        # Keep app saves unconditionally; for non-engineer diffs,
-                        # also keep an explicit hook or engineer record.
-                        if r_src == "app":
+                        # Keep app saves and Syncthing deliveries unconditionally;
+                        # for non-engineer diffs, also keep an explicit hook or engineer record.
+                        if r_src in ("app", "syncthing"):
                             continue
                         if kind != "engineer" and r_src in ("hook", "engineer-job", "launcher"):
                             continue
@@ -389,14 +456,15 @@ def _persona_names() -> dict[str, str]:
     return names
 
 
-def _resolve_author(rel: str, mtime_ns: int, ledger: dict[str, dict]) -> tuple[str, str]:
-    """Return ``(kind, actor)`` for ``rel`` as it currently stands on disk."""
+def _resolve_author(rel: str, mtime_ns: int, ledger: dict[str, dict]) -> tuple[str | None, str]:
+    """Return ``(kind, actor)`` when a positive attribution matches ``rel`` on
+    disk, or ``(None, "")`` when unattributed or modified after the last
+    recorded write. Unattributed writes are excluded from Recent rather than
+    credited to the owner."""
     rec = ledger.get(rel)
     if rec is not None and mtime_ns <= rec["mtime_ns"] + MTIME_TOLERANCE_NS:
         return rec["kind"], rec["actor"]
-    # Unrecorded write, or file was modified on disk after the last recorded
-    # write (Syncthing, Obsidian, manual edit) -> owner.
-    return "owner", lc.OWNER_ID
+    return None, ""
 
 
 def _day_label(day_date, today_date) -> str:
@@ -475,6 +543,8 @@ def recent_files(who: str = "all", window: str = "default", *,
                 walk(Path(entry.path), here)
             elif stat.S_ISREG(st.st_mode):
                 if proj_parts and here == proj_parts + ("Loam", "infrastructure", "schedule.md"):
+                    continue
+                if not is_readable_file(name):
                     continue
                 if st.st_mtime < week_cutoff:
                     continue
@@ -600,6 +670,275 @@ def recent_files(who: str = "all", window: str = "default", *,
     }
 
 
+# -- Syncthing positive owner attribution --------------------------------------
+
+def _parse_loopback_address(raw: str, *, tls_default: bool = False) -> tuple[str, int, bool] | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    m = _SYNCTHING_ADDR_RE.match(text)
+    if not m:
+        return None
+    scheme, raw_host, raw_port = m.group(1), m.group(2), m.group(3)
+    host = raw_host.strip("[]").lower()
+    if host not in _LOOPBACK_HOSTS:
+        return None
+    port = int(raw_port)
+    if not 1 <= port <= 65535:
+        return None
+    tls = (scheme.lower() == "https") if scheme else bool(tls_default)
+    return host, port, tls
+
+
+def _syncthing_config_candidates() -> list[Path]:
+    out: list[Path] = []
+    st_home = os.environ.get("SYNCTHING_HOME")
+    if st_home:
+        out.append(Path(st_home).expanduser() / "config.xml")
+    xdg_state = os.environ.get("XDG_STATE_HOME")
+    if xdg_state:
+        out.append(Path(xdg_state).expanduser() / "syncthing" / "config.xml")
+    out.append(Path.home() / ".local" / "state" / "syncthing" / "config.xml")
+    xdg_cfg = os.environ.get("XDG_CONFIG_HOME")
+    if xdg_cfg:
+        out.append(Path(xdg_cfg).expanduser() / "syncthing" / "config.xml")
+    out.append(Path.home() / ".config" / "syncthing" / "config.xml")
+    out.append(Path.home() / "Library" / "Application Support" / "Syncthing" / "config.xml")
+    seen: set[Path] = set()
+    uniq: list[Path] = []
+    for p in out:
+        if p not in seen:
+            seen.add(p)
+            uniq.append(p)
+    return uniq
+
+
+def discover_syncthing() -> dict | None:
+    """Discover local loopback Syncthing REST credentials, or None if absent.
+
+    Checks (in order): explicit test/env overrides, Loam's saved ``syncthing``
+    provider key, and standard local Syncthing ``config.xml`` paths. Never
+    connects to a non-loopback address.
+    """
+    if os.environ.get("LOAM_SYNCTHING_DISABLE") == "1":
+        return None
+
+    env_url = os.environ.get("LOAM_SYNCTHING_URL")
+    env_key = os.environ.get("LOAM_SYNCTHING_API_KEY")
+    if env_url and env_key:
+        parsed = _parse_loopback_address(env_url)
+        if parsed:
+            host, port, tls = parsed
+            return {"host": host, "port": port, "tls": tls, "apikey": env_key.strip()}
+        return None
+
+    # Check Loam's saved provider keys if configured.
+    try:
+        import loam_keys  # noqa: PLC0415
+        saved = loam_keys._read_env(loam_keys._private("syncthing"))
+        key = (saved.get("SYNCTHING_API_KEY") or "").strip()
+        if key:
+            url = (saved.get("SYNCTHING_GUI_URL") or "http://127.0.0.1:8384").strip()
+            parsed = _parse_loopback_address(url)
+            if parsed:
+                host, port, tls = parsed
+                return {"host": host, "port": port, "tls": tls, "apikey": key}
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Fall back to standard local Syncthing config.xml.
+    for cfg_path in _syncthing_config_candidates():
+        if not cfg_path.is_file():
+            continue
+        try:
+            root = ET.parse(cfg_path).getroot()
+        except (OSError, ET.ParseError):
+            continue
+        gui = root.find("gui")
+        if gui is None:
+            continue
+        if (gui.attrib.get("enabled") or "true").lower() == "false":
+            continue
+        apikey = (gui.findtext("apikey") or "").strip()
+        if not apikey:
+            continue
+        addr = (gui.findtext("address") or "127.0.0.1:8384").strip()
+        tls_default = (gui.attrib.get("tls") or "false").lower() == "true"
+        parsed = _parse_loopback_address(addr, tls_default=tls_default)
+        if parsed:
+            host, port, tls = parsed
+            return {"host": host, "port": port, "tls": tls, "apikey": apikey}
+    return None
+
+
+def _syncthing_get(st_cfg: dict, path: str, *, http_timeout: float = 5.0):
+    host = st_cfg["host"]
+    port = int(st_cfg["port"])
+    if st_cfg.get("tls"):
+        conn = http.client.HTTPSConnection(
+            host, port, timeout=http_timeout, context=ssl._create_unverified_context())  # noqa: S323
+    else:
+        conn = http.client.HTTPConnection(host, port, timeout=http_timeout)
+    try:
+        conn.request("GET", path, headers={"X-API-Key": st_cfg["apikey"]})
+        with conn.getresponse() as resp:
+            if not 200 <= resp.status < 300:
+                raise OSError(f"Syncthing HTTP {resp.status} for {path}")
+            raw = resp.read()
+    finally:
+        conn.close()
+    return json.loads(raw.decode("utf-8")) if raw.strip() else None
+
+
+def _syncthing_vault_info(st_cfg: dict, vroot: Path, *, http_timeout: float = 3.0) -> dict | None:
+    """Resolve Syncthing's device ID, start time, and folder IDs covering ``vroot``."""
+    try:
+        status = _syncthing_get(st_cfg, "/rest/system/status", http_timeout=http_timeout) or {}
+        folders = _syncthing_get(st_cfg, "/rest/config/folders", http_timeout=http_timeout) or []
+    except (OSError, ValueError, http.client.HTTPException):
+        return None
+    my_id = str(status.get("myID") or "").strip()
+    if not my_id:
+        return None
+    start_time = str(status.get("startTime") or "").strip()
+    mapped: dict[str, str] = {}
+    for f in folders:
+        if not isinstance(f, dict):
+            continue
+        fid = str(f.get("id") or "").strip()
+        raw_path = str(f.get("path") or "").strip()
+        if not fid or not raw_path:
+            continue
+        try:
+            fpath = Path(raw_path).expanduser().resolve()
+        except OSError:
+            continue
+        if fpath == vroot:
+            mapped[fid] = ""
+        else:
+            try:
+                rel = fpath.relative_to(vroot)
+                mapped[fid] = rel.as_posix()
+            except ValueError:
+                continue
+    if not mapped:
+        return None
+    return {"my_short": my_id[:7], "start_time": start_time, "folders": mapped}
+
+
+def sync_syncthing_events(*, vault: Path | None = None, st_cfg: dict | None = None,
+                          since: int | None = None, timeout: int = 0,
+                          http_timeout: float | None = None) -> dict:
+    """Ingest Syncthing ``ItemFinished`` events for the vault as positive owner writes.
+
+    Syncthing emits ``ItemFinished`` only when pulling items from a remote paired
+    device (never for local filesystem edits on this box). Persists the last
+    seen event ID and Syncthing ``startTime`` in the ledger's ``meta`` table so
+    restarts of either Syncthing or Loam do not miss or replay stale cursors.
+    """
+    vroot = _vault_root(vault)
+    cfg_st = st_cfg if st_cfg is not None else discover_syncthing()
+    if not cfg_st:
+        return {"ok": False, "reason": "unconfigured", "recorded": [], "deleted": [], "last_id": 0}
+    info = _syncthing_vault_info(cfg_st, vroot, http_timeout=min(http_timeout or 3.0, 5.0))
+    if not info:
+        return {"ok": False, "reason": "no-vault-folder", "recorded": [], "deleted": [], "last_id": 0}
+
+    saved_start = _get_meta("syncthing_start_time") or ""
+    saved_id = 0
+    try:
+        saved_id = int(_get_meta("syncthing_last_event_id") or "0")
+    except ValueError:
+        saved_id = 0
+    if info["start_time"] and saved_start and info["start_time"] != saved_start:
+        saved_id = 0
+
+    cursor = saved_id if since is None else int(since)
+    req_timeout = float(http_timeout) if http_timeout is not None else max(5.0, float(timeout) + 5.0)
+    qs = urllib.parse.urlencode({
+        "events": "ItemFinished",
+        "since": str(cursor),
+        "timeout": str(max(0, int(timeout))),
+    })
+    try:
+        events = _syncthing_get(cfg_st, f"/rest/events?{qs}", http_timeout=req_timeout) or []
+    except (OSError, ValueError, http.client.HTTPException) as exc:
+        return {"ok": False, "reason": str(exc), "recorded": [], "deleted": [], "last_id": cursor}
+
+    recorded: list[str] = []
+    deleted: list[str] = []
+    last_id = cursor
+    folders = info["folders"]
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        ev_id = ev.get("id")
+        if isinstance(ev_id, int) and ev_id > last_id:
+            last_id = ev_id
+        if ev.get("type") != "ItemFinished":
+            continue
+        data = ev.get("data") or {}
+        if data.get("error"):
+            continue
+        if data.get("type") != "file":
+            continue
+        fid = str(data.get("folder") or "")
+        if fid not in folders:
+            continue
+        item = str(data.get("item") or "").replace("\\", "/").lstrip("/")
+        if not item:
+            continue
+        prefix = folders[fid]
+        rel = to_rel_path(f"{prefix}/{item}" if prefix else item, vroot)
+        if not rel or excluded_path(rel):
+            continue
+        action = str(data.get("action") or "").lower()
+        if action == "update":
+            if (vroot / rel).is_file():
+                if record_write(rel, kind="owner", actor=lc.OWNER_ID, source="syncthing", vault=vroot):
+                    recorded.append(rel)
+        elif action == "delete":
+            record_delete(rel, vault=vroot)
+            deleted.append(rel)
+
+    if info["start_time"]:
+        _set_meta("syncthing_start_time", info["start_time"])
+    if last_id != saved_id or (since is None and _get_meta("syncthing_last_event_id") is None):
+        _set_meta("syncthing_last_event_id", str(last_id))
+
+    return {
+        "ok": True,
+        "recorded": recorded,
+        "deleted": deleted,
+        "last_id": last_id,
+        "events": len(events),
+    }
+
+
+def _syncthing_remote_owner(rel: str, info: dict, st_cfg: dict, *, http_timeout: float = 2.0) -> bool:
+    """True when Syncthing's persistent index says ``rel`` was last modified by a
+    remote paired device (``local.modifiedBy != myID[:7]``)."""
+    folder_id = None
+    folder_rel = None
+    for fid, prefix in info["folders"].items():
+        if not prefix:
+            folder_id, folder_rel = fid, rel
+            break
+        if rel.startswith(prefix + "/"):
+            folder_id, folder_rel = fid, rel[len(prefix) + 1:]
+            break
+    if not folder_id or not folder_rel:
+        return False
+    qs = urllib.parse.urlencode({"folder": folder_id, "file": folder_rel})
+    try:
+        data = _syncthing_get(st_cfg, f"/rest/db/file?{qs}", http_timeout=http_timeout) or {}
+    except (OSError, ValueError, http.client.HTTPException):
+        return False
+    loc = data.get("local") or {}
+    mby = str(loc.get("modifiedBy") or "").strip()
+    return bool(mby) and mby != info["my_short"]
+
+
 # -- backfill for existing installs --------------------------------------------
 
 def _parse_author_hint(path: Path) -> str | None:
@@ -631,10 +970,14 @@ def _parse_author_hint(path: Path) -> str | None:
     return (wiki.group(1) if wiki else raw).strip()
 
 
-def _classify_hint(hint: str | None, persona_lookup: dict[str, str]) -> tuple[str, str]:
+def _classify_hint(hint: str | None, persona_lookup: dict[str, str]) -> tuple[str | None, str]:
+    """Positively classify an author hint, or return ``(None, "")`` when absent
+    or unrecognized so unattributed files stay out of Recent."""
     if not hint:
-        return "owner", lc.OWNER_ID
+        return None, ""
     low = hint.strip().lower()
+    if not low:
+        return None, ""
     if low in ("engineer", "platform engineer", "loam", "reviewer", "loam-vps") or low.endswith(" engineer"):
         return "engineer", "engineer"
     if low in persona_lookup:
@@ -647,19 +990,62 @@ def _classify_hint(hint: str | None, persona_lookup: dict[str, str]) -> tuple[st
     wiki = _WIKILINK_RE.search(lc.OWNER_LINK)
     if wiki:
         owner_tokens.add(wiki.group(1).strip().lower())
-    if low in owner_tokens or low.split()[0] in owner_tokens:
+    first = low.split()[0] if low.split() else ""
+    if low in owner_tokens or (first and first in owner_tokens):
         return "owner", lc.OWNER_ID
-    return "owner", lc.OWNER_ID
+    return None, ""
+
+
+def _purge_stale_backfill(vroot: Path) -> int:
+    """Remove prior ``source='backfill'`` rows and entries for deleted files."""
+    path = db_path()
+    if not path.is_file():
+        return 0
+    removed = 0
+    try:
+        conn = _connect()
+        try:
+            cur = conn.execute("DELETE FROM writes WHERE source = 'backfill'")
+            removed += cur.rowcount or 0
+            rows = conn.execute("SELECT rel_path FROM writes").fetchall()
+            missing = [rel for (rel,) in rows if not (vroot / rel).is_file()]
+            for rel in missing:
+                conn.execute("DELETE FROM writes WHERE rel_path = ?", (rel,))
+                removed += 1
+            conn.commit()
+        finally:
+            conn.close()
+    except (OSError, sqlite3.Error):
+        return removed
+    return removed
 
 
 def backfill_recent(vault: Path | None = None, *, days: int = WEEK_DAYS,
-                    now: float | None = None) -> dict:
-    """Backfill attribution for files changed within the past ``days`` days
-    using frontmatter/HTML-comment hints (falling back to owner), skipping
-    existing non-backfill ledger entries and structural exclusions."""
+                    now: float | None = None, reset_backfill: bool = True,
+                    st_cfg: dict | None = None) -> dict:
+    """Backfill positive attribution for readable files changed within the past
+    ``days`` days.
+
+    Sources (positive only — unattributed files are left out of Recent):
+    1. Syncthing buffered ``ItemFinished`` events + persistent ``/rest/db/file``
+       remote device ``modifiedBy`` -> ``owner`` (``source='syncthing'``).
+    2. Explicit frontmatter / HTML-comment author hints matching a known
+       persona, owner, or engineer -> ``source='backfill'``.
+    3. Files with no positive signal are skipped (unattributed).
+    """
     vroot = _vault_root(vault)
     now_ts = time.time() if now is None else float(now)
     cutoff = now_ts - days * 86400
+
+    purged = _purge_stale_backfill(vroot) if reset_backfill else 0
+
+    cfg_st = st_cfg if st_cfg is not None else discover_syncthing()
+    st_info = _syncthing_vault_info(cfg_st, vroot) if cfg_st else None
+    st_events = 0
+    if cfg_st and st_info:
+        ev_res = sync_syncthing_events(vault=vroot, st_cfg=cfg_st, since=0, timeout=0)
+        st_events = len(ev_res.get("recorded") or [])
+
     existing = _load_ledger()
     names = _persona_names()
     persona_lookup: dict[str, str] = {}
@@ -668,16 +1054,35 @@ def backfill_recent(vault: Path | None = None, *, days: int = WEEK_DAYS,
         persona_lookup[display.lower()] = pid
 
     snap = snapshot_vault(vroot)
-    counts = {"owner": 0, "agent": 0, "engineer": 0, "skipped": 0}
+    counts = {
+        "owner": 0,
+        "syncthing": st_events,
+        "agent": 0,
+        "engineer": 0,
+        "unattributed": 0,
+        "skipped": 0,
+        "purged": purged,
+    }
     for rel, mtime_ns in sorted(snap.items()):
         if mtime_ns / 1e9 < cutoff:
+            continue
+        if not is_readable_file(rel):
             continue
         prev = existing.get(rel)
         if prev and prev["source"] != "backfill" and mtime_ns <= prev["mtime_ns"] + MTIME_TOLERANCE_NS:
             counts["skipped"] += 1
             continue
+        if cfg_st and st_info and _syncthing_remote_owner(rel, st_info, cfg_st):
+            if record_write(rel, kind="owner", actor=lc.OWNER_ID, source="syncthing",
+                            vault=vroot, mtime_ns=mtime_ns, recorded_at=now_ts):
+                counts["owner"] += 1
+                counts["syncthing"] += 1
+            continue
         hint = _parse_author_hint(vroot / rel)
         kind, actor = _classify_hint(hint, persona_lookup)
+        if not kind:
+            counts["unattributed"] += 1
+            continue
         if record_write(rel, kind=kind, actor=actor, source="backfill",
                         vault=vroot, mtime_ns=mtime_ns, recorded_at=now_ts):
             counts[kind] = counts.get(kind, 0) + 1

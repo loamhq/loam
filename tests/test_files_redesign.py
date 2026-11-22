@@ -257,20 +257,33 @@ set_mtime(VAULT / "Conversations" / "2026-11-22.md", fixed_now - 210)
 (VAULT / "System" / "loam-wake-failures.md").write_text("# Alert\n", encoding="utf-8")
 set_mtime(VAULT / "System" / "loam-wake-failures.md", fixed_now - 200)
 
-# 3e. External edit (Syncthing/Obsidian) with no ledger row -> owner;
-#     and external overwrite of an earlier agent file -> owner
-ext_file = VAULT / "Notes" / "obsidian.md"
-ext_file.write_text("# Edited in Obsidian\n", encoding="utf-8")
-set_mtime(ext_file, fixed_now - 180)
+# 3e. Unattributed writes (running engineer job, script, unrecorded overwrite)
+#     are EXCLUDED from Recent — never credited to owner.
+unattr_file = VAULT / "Notes" / "unattributed-script.md"
+unattr_file.write_text("# Written by background script or running engineer\n", encoding="utf-8")
+set_mtime(unattr_file, fixed_now - 180)
 
 overwritten = VAULT / "Notes" / "overwritten.md"
 overwritten.write_text("# Agent draft\n", encoding="utf-8")
 old_ns = set_mtime(overwritten, fixed_now - 900)
 recent.record_write(overwritten, kind="agent", actor="ada", source="hook", mtime_ns=old_ns)
-overwritten.write_text("# Owner edited later externally\n", encoding="utf-8")
+overwritten.write_text("# Unrecorded external write\n", encoding="utf-8")
 set_mtime(overwritten, fixed_now - 150)
 
-# 3f. Rename carries attribution
+# 3f. Non-readable files (.json, .py, .js, .txt) NEVER appear in Recent even if attributed
+for bad_name in ("results.json", "script.py", "helper.js", "dump.txt", "trace.jsonl"):
+    bp = VAULT / "Notes" / bad_name
+    bp.write_text("data\n", encoding="utf-8")
+    bns = set_mtime(bp, fixed_now - 140)
+    recent.record_write(bp, kind="owner", actor="sam", source="app", mtime_ns=bns)
+
+# Readable PDF and HTML DO appear when positively attributed
+pdf_file = VAULT / "Notes" / "report.pdf"
+pdf_file.write_bytes(b"%PDF-1.4\n")
+pdf_ns = set_mtime(pdf_file, fixed_now - 135)
+recent.record_write(pdf_file, kind="owner", actor="sam", source="app", mtime_ns=pdf_ns)
+
+# 3g. Rename carries attribution
 renamed_src = VAULT / "Notes" / "to-rename.md"
 renamed_src.write_text("# Ada wrote\n", encoding="utf-8")
 ren_ns = set_mtime(renamed_src, fixed_now - 120)
@@ -278,49 +291,162 @@ recent.record_write(renamed_src, kind="agent", actor="ada", source="hook", mtime
 files.rename({"root": "vault", "path": "Notes/to-rename.md", "name": "renamed-by-ada.md"})
 set_mtime(VAULT / "Notes" / "renamed-by-ada.md", fixed_now - 120)
 
-rec_all = recent.recent_files("all", "week", now=fixed_now)
-flat_items = []
-for day in rec_all["days"]:
-    for entry in day["items"]:
-        if entry["kind"] == "group":
-            for it in entry["items"]:
-                flat_items.append((it["path"], entry["author"]["kind"], entry["author"]["id"]))
-        else:
-            flat_items.append((entry["path"], entry["author"]["kind"], entry["author"]["id"]))
-by_path = {p: (k, a) for p, k, a in flat_items}
+# 3h. Positive Syncthing owner attribution (ItemFinished + /rest/db/file remote modifiedBy)
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import threading as _threading
+from urllib.parse import parse_qs, urlparse
 
-check(
-    "attribution: owner app, concurrent app, external, and overwritten -> owner",
-    all(by_path.get(p) == ("owner", "sam") for p in (
-        "Notes/owner-note.md",
-        "Notes/concurrent.md",
-        "Notes/obsidian.md",
-        "Notes/overwritten.md",
-    )),
-    by_path,
-)
-check(
-    "attribution: app by=, hook Write, hook generate_image, diff, rename -> agents",
-    by_path.get("Notes/by-ada.md") == ("agent", "ada")
-    and by_path.get("Notes/hook-written.md") == ("agent", "ada")
-    and by_path.get("Notes/renamed-by-ada.md") == ("agent", "ada")
-    and by_path.get("Notes/diagram.png") == ("agent", "finn")
-    and by_path.get("Notes/bash-output.md") == ("agent", "finn"),
-    by_path,
-)
-check(
-    "exclusions: engineer writes, receipts, engineer/, schedule.md, Loam files absent",
-    not any(p in by_path for p in (
-        "Notes/engineer-touched.md",
-        "Projects/Demo/receipts/2026-11-22-job.md",
-        "Projects/Loam/engineer/role.md",
-        "Projects/Loam/infrastructure/schedule.md",
-        "Boards/t-123.md",
-        "Conversations/2026-11-22.md",
-        "System/loam-wake-failures.md",
-    )),
-    sorted(by_path),
-)
+synced_file = VAULT / "Notes" / "synced-from-phone.md"
+synced_file.write_text("# Edited on phone via Obsidian\n", encoding="utf-8")
+set_mtime(synced_file, fixed_now - 110)
+
+remote_backfill_file = VAULT / "Notes" / "remote-device-note.md"
+remote_backfill_file.write_text("# Synced earlier from laptop\n", encoding="utf-8")
+set_mtime(remote_backfill_file, fixed_now - 105)
+
+ST_TOKEN = "test-syncthing-key"
+st_state = {
+    "events": [
+        {
+            "id": 501,
+            "type": "ItemFinished",
+            "data": {
+                "action": "update",
+                "error": None,
+                "folder": "loam-vault",
+                "item": "Notes/synced-from-phone.md",
+                "type": "file",
+            },
+        },
+        {
+            "id": 502,
+            "type": "ItemFinished",
+            "data": {
+                "action": "update",
+                "error": None,
+                "folder": "loam-vault",
+                "item": "Notes/ignored-sync.json",
+                "type": "file",
+            },
+        },
+    ],
+    "remote_files": {"Notes/remote-device-note.md": "REMOTE1"},
+}
+
+
+class _MockSyncthing(BaseHTTPRequestHandler):
+    def log_message(self, fmt, *args):
+        return
+
+    def do_GET(self):
+        if self.headers.get("X-API-Key") != ST_TOKEN:
+            self.send_response(403)
+            self.end_headers()
+            return
+        parsed = urlparse(self.path)
+        qs = parse_qs(parsed.query)
+        if parsed.path == "/rest/system/status":
+            body = {"myID": "LOCAL01-AAAAAAA-BBBBBBB-CCCCCCC-DDDDDDD-EEEEEEE-FFFFFFF-GGGGGGG",
+                    "startTime": "2026-11-22T00:00:00Z"}
+        elif parsed.path == "/rest/config/folders":
+            body = [{"id": "loam-vault", "path": str(VAULT)}]
+        elif parsed.path == "/rest/events":
+            since = int((qs.get("since") or ["0"])[0])
+            body = [e for e in st_state["events"] if e["id"] > since]
+        elif parsed.path == "/rest/db/file":
+            rel = (qs.get("file") or [""])[0]
+            mby = st_state["remote_files"].get(rel, "LOCAL01")
+            body = {"local": {"modifiedBy": mby}}
+        else:
+            self.send_response(404)
+            self.end_headers()
+            return
+        raw = json.dumps(body).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+
+st_srv = HTTPServer(("127.0.0.1", 0), _MockSyncthing)
+st_port = st_srv.server_address[1]
+_threading.Thread(target=st_srv.serve_forever, daemon=True).start()
+st_cfg = {"host": "127.0.0.1", "port": st_port, "tls": False, "apikey": ST_TOKEN}
+try:
+    sync_res = recent.sync_syncthing_events(vault=VAULT, st_cfg=st_cfg, timeout=0)
+    check(
+        "syncthing: ItemFinished records synced vault file positively as owner",
+        sync_res["ok"] is True and "Notes/synced-from-phone.md" in sync_res["recorded"],
+        sync_res,
+    )
+    # Concurrent agent turn diff MUST NOT clobber syncthing owner attribution
+    snap_pre = recent.snapshot_vault()
+    snap_pre.pop("Notes/synced-from-phone.md", None)
+    recent.record_diff(snap_pre, kind="agent", actor="ada", source="turn", started_at=time.time() - 5)
+    check(
+        "syncthing: concurrent agent record_diff preserves syncthing owner record",
+        recent._load_ledger().get("Notes/synced-from-phone.md", {}).get("kind") == "owner"
+        and recent._load_ledger().get("Notes/synced-from-phone.md", {}).get("source") == "syncthing",
+        recent._load_ledger().get("Notes/synced-from-phone.md"),
+    )
+
+    rec_all = recent.recent_files("all", "week", now=fixed_now)
+    flat_items = []
+    for day in rec_all["days"]:
+        for entry in day["items"]:
+            if entry["kind"] == "group":
+                for it in entry["items"]:
+                    flat_items.append((it["path"], entry["author"]["kind"], entry["author"]["id"]))
+            else:
+                flat_items.append((entry["path"], entry["author"]["kind"], entry["author"]["id"]))
+    by_path = {p: (k, a) for p, k, a in flat_items}
+
+    check(
+        "attribution: owner app, concurrent app, pdf, and syncthing -> owner",
+        all(by_path.get(p) == ("owner", "sam") for p in (
+            "Notes/owner-note.md",
+            "Notes/concurrent.md",
+            "Notes/report.pdf",
+            "Notes/synced-from-phone.md",
+        )),
+        by_path,
+    )
+    check(
+        "attribution: unattributed writes & unrecorded overwrites are ABSENT from Recent",
+        "Notes/unattributed-script.md" not in by_path
+        and "Notes/overwritten.md" not in by_path,
+        by_path,
+    )
+    check(
+        "readable filter: .json/.jsonl/.py/.js/.txt excluded from Recent even when attributed",
+        not any(f"Notes/{bad}" in by_path for bad in ("results.json", "script.py", "helper.js", "dump.txt", "trace.jsonl")),
+        sorted(by_path),
+    )
+    check(
+        "attribution: app by=, hook Write, hook generate_image, diff, rename -> agents",
+        by_path.get("Notes/by-ada.md") == ("agent", "ada")
+        and by_path.get("Notes/hook-written.md") == ("agent", "ada")
+        and by_path.get("Notes/renamed-by-ada.md") == ("agent", "ada")
+        and by_path.get("Notes/diagram.png") == ("agent", "finn")
+        and by_path.get("Notes/bash-output.md") == ("agent", "finn"),
+        by_path,
+    )
+    check(
+        "exclusions: engineer writes, receipts, engineer/, schedule.md, Loam files absent",
+        not any(p in by_path for p in (
+            "Notes/engineer-touched.md",
+            "Projects/Demo/receipts/2026-11-22-job.md",
+            "Projects/Loam/engineer/role.md",
+            "Projects/Loam/infrastructure/schedule.md",
+            "Boards/t-123.md",
+            "Conversations/2026-11-22.md",
+            "System/loam-wake-failures.md",
+        )),
+        sorted(by_path),
+    )
+finally:
+    st_srv.shutdown()
 
 # ---------------------------------------------------------------------------
 # 4. Grouping (3+ same author/folder/local day) + Filter (all/you/agents)
@@ -371,17 +497,20 @@ for i in range(11):
     sub.mkdir()
     p = sub / f"s{i}.md"
     p.write_text(f"solo {i}\n", encoding="utf-8")
-    set_mtime(p, fixed_now - 1000 - i * 60)
+    ns = set_mtime(p, fixed_now - 1000 - i * 60)
+    recent.record_write(p, kind="owner", actor="sam", source="app", vault=win_vault, mtime_ns=ns)
 for i in range(5):
     sub = win_vault / "Solo" / f"w{i}"
     sub.mkdir()
     p = sub / f"w{i}.md"
     p.write_text(f"week {i}\n", encoding="utf-8")
-    set_mtime(p, fixed_now - 3 * 86400 - i * 60)
+    ns = set_mtime(p, fixed_now - 3 * 86400 - i * 60)
+    recent.record_write(p, kind="owner", actor="sam", source="app", vault=win_vault, mtime_ns=ns)
 for i in range(2):
     p = win_vault / "Solo" / f"old{i}.md"
     p.write_text(f"old {i}\n", encoding="utf-8")
-    set_mtime(p, fixed_now - 9 * 86400 - i * 60)
+    ns = set_mtime(p, fixed_now - 9 * 86400 - i * 60)
+    recent.record_write(p, kind="owner", actor="sam", source="app", vault=win_vault, mtime_ns=ns)
 
 w_def = recent.recent_files("all", "default", vault=win_vault, now=fixed_now)
 w_week = recent.recent_files("all", "week", vault=win_vault, now=fixed_now)
@@ -407,7 +536,8 @@ for i in range(14):
     sub.mkdir()
     p = sub / f"note{i}.md"
     p.write_text("hi\n", encoding="utf-8")
-    set_mtime(p, fixed_now - 4 * 86400 - i * 60)
+    ns = set_mtime(p, fixed_now - 4 * 86400 - i * 60)
+    recent.record_write(p, kind="owner", actor="sam", source="app", vault=fb_vault, mtime_ns=ns)
 fb_def = recent.recent_files("all", "default", vault=fb_vault, now=fixed_now)
 check(
     "window fallback: empty 48h falls back to 10 from past week with used_fallback=True, has_more=True",
@@ -424,32 +554,78 @@ for i in range(60):
     sub.mkdir()
     p = sub / f"f{i}.md"
     p.write_text("x\n", encoding="utf-8")
-    set_mtime(p, fixed_now - 3600 - i * 30)
+    ns = set_mtime(p, fixed_now - 3600 - i * 30)
+    recent.record_write(p, kind="owner", actor="sam", source="app", vault=cap_vault, mtime_ns=ns)
 cap_week = recent.recent_files("all", "week", vault=cap_vault, now=fixed_now)
 check("window week cap: never exceeds 50 rows", cap_week["total_shown"] == 50, cap_week["total_shown"])
 
 # ---------------------------------------------------------------------------
-# 6. Backfill parses frontmatter & HTML comments and excludes engineer hints
+# 6. Backfill: positive-only (frontmatter/HTML hints + Syncthing remote modifiedBy);
+#    plain unattributed notes and non-readable files stay OUT of Recent
 # ---------------------------------------------------------------------------
 bf_vault = TMP / "backfill-vault"
 (bf_vault / "Docs").mkdir(parents=True)
 reset_ledger()
 (bf_vault / "Docs" / "md-agent.md").write_text("---\nlast_modified_by: \"[[Ada]]\"\n---\nHello\n", encoding="utf-8")
 (bf_vault / "Docs" / "html-agent.html").write_text("<!-- created_by: Finn -->\n<h1>Hi</h1>\n", encoding="utf-8")
+(bf_vault / "Docs" / "owner-hint.md").write_text("---\nlast_modified_by: \"[[Sam]]\"\n---\nOwner note\n", encoding="utf-8")
 (bf_vault / "Docs" / "eng-hint.md").write_text("---\ncreated_by: Platform engineer\n---\nLog\n", encoding="utf-8")
-(bf_vault / "Docs" / "plain.md").write_text("# Plain owner note\n", encoding="utf-8")
-for name in ("md-agent.md", "html-agent.html", "eng-hint.md", "plain.md"):
+(bf_vault / "Docs" / "unattributed.md").write_text("# Unattributed note\n", encoding="utf-8")
+(bf_vault / "Docs" / "remote-synced.md").write_text("# Synced from phone without frontmatter\n", encoding="utf-8")
+(bf_vault / "Docs" / "data.json").write_text("{\"a\": 1}\n", encoding="utf-8")
+for name in ("md-agent.md", "html-agent.html", "owner-hint.md", "eng-hint.md", "unattributed.md", "remote-synced.md", "data.json"):
     set_mtime(bf_vault / "Docs" / name, fixed_now - 300)
-bf_counts = recent.backfill_recent(bf_vault, now=fixed_now)
+
+class _BackfillSyncthing(BaseHTTPRequestHandler):
+    def log_message(self, fmt, *args):
+        return
+
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        qs = parse_qs(parsed.query)
+        if parsed.path == "/rest/system/status":
+            body = {"myID": "LOCAL01-AAAAAAA-BBBBBBB-CCCCCCC-DDDDDDD-EEEEEEE-FFFFFFF-GGGGGGG",
+                    "startTime": "2026-11-22T00:00:00Z"}
+        elif parsed.path == "/rest/config/folders":
+            body = [{"id": "bf-vault", "path": str(bf_vault)}]
+        elif parsed.path == "/rest/events":
+            body = []
+        elif parsed.path == "/rest/db/file":
+            rel = (qs.get("file") or [""])[0]
+            body = {"local": {"modifiedBy": "PHONE99" if rel == "Docs/remote-synced.md" else "LOCAL01"}}
+        else:
+            self.send_response(404)
+            self.end_headers()
+            return
+        raw = json.dumps(body).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+bf_srv = HTTPServer(("127.0.0.1", 0), _BackfillSyncthing)
+bf_port = bf_srv.server_address[1]
+_threading.Thread(target=bf_srv.serve_forever, daemon=True).start()
+try:
+    bf_counts = recent.backfill_recent(
+        bf_vault, now=fixed_now,
+        st_cfg={"host": "127.0.0.1", "port": bf_port, "tls": False, "apikey": "k"},
+    )
+finally:
+    bf_srv.shutdown()
+
 bf_res = recent.recent_files("all", "week", vault=bf_vault, now=fixed_now)
 bf_paths = {e["path"]: (e["author"]["kind"], e["author"]["id"]) for d in bf_res["days"] for e in d["items"]}
 check(
-    "backfill: attributes md frontmatter & html comment to agents, plain to owner, hides engineer",
-    bf_counts["agent"] == 2 and bf_counts["owner"] == 1 and bf_counts["engineer"] == 1
+    "backfill: positive hints & Syncthing remote -> included; unattributed & .json -> ABSENT",
+    bf_counts["agent"] == 2 and bf_counts["owner"] == 2 and bf_counts["engineer"] == 1
+    and bf_counts["unattributed"] == 1
     and bf_paths == {
         "Docs/md-agent.md": ("agent", "ada"),
         "Docs/html-agent.html": ("agent", "finn"),
-        "Docs/plain.md": ("owner", "sam"),
+        "Docs/owner-hint.md": ("owner", "sam"),
+        "Docs/remote-synced.md": ("owner", "sam"),
     },
     (bf_counts, bf_paths),
 )

@@ -3729,6 +3729,9 @@ async def serve(addr: str, port: int, remote_path=None) -> int:
     asyncio.create_task(keep_moved_to_market())
     # The thread writer owns both the attachment store and record metadata.
     asyncio.create_task(migrate_thread_images())
+    # Watch local Syncthing ItemFinished events on a daemon thread for positive
+    # owner attribution of synced device edits (silent no-op without Syncthing).
+    syncthing_stop = start_syncthing_recent_watcher()
     tcp = await asyncio.start_server(server.handle, addr, port)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -3736,6 +3739,7 @@ async def serve(addr: str, port: int, remote_path=None) -> int:
 
     def on_signal(sig: signal.Signals) -> None:
         broker.stopping = True
+        syncthing_stop.set()
         watch.arm(sig.name)
         stop.set()
 
@@ -3747,6 +3751,7 @@ async def serve(addr: str, port: int, remote_path=None) -> int:
           f"sessions)", file=sys.stderr, flush=True)
     async with tcp:
         await stop.wait()
+    syncthing_stop.set()
     await server.threads.handoffs.close()
     if remote_path:
         # Cancel the workers before closing readers. Cancellation preserves
@@ -3763,6 +3768,32 @@ async def serve(addr: str, port: int, remote_path=None) -> int:
     else:
         await shutdown(broker, server)
     return 0
+
+
+def start_syncthing_recent_watcher():
+    """Watch local Syncthing ItemFinished events on a daemon thread so synced
+    device edits are positively attributed to the owner in real time."""
+    import threading  # noqa: PLC0415
+
+    stop_ev = threading.Event()
+
+    def _run() -> None:
+        try:
+            import loam_recent  # noqa: PLC0415
+        except Exception:  # noqa: BLE001
+            return
+        while not stop_ev.is_set():
+            try:
+                res = loam_recent.sync_syncthing_events(timeout=25, http_timeout=30.0)
+                if not res.get("ok"):
+                    stop_ev.wait(60.0)
+                elif res.get("recorded") or res.get("deleted"):
+                    stop_ev.wait(0.25)
+            except Exception:  # noqa: BLE001
+                stop_ev.wait(60.0)
+
+    threading.Thread(target=_run, name="syncthing-recent", daemon=True).start()
+    return stop_ev
 
 
 async def migrate_thread_images() -> None:
