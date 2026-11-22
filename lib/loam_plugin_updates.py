@@ -7,8 +7,11 @@ the exact installed source, candidate commit and two-step install token.
 
 import json
 import os
+import shutil
 import threading
 import time
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import loam_attention
 import loam_marketplace as market
@@ -38,6 +41,54 @@ def tag_link(pid, source):
     return plugins.pinned_link({**src, "ref": tag, "ref_kind": "tag"})
 
 
+def market_tag(pid, line, entry):
+    """Prove the active tree against a tag in the listed repository."""
+    source = line["source"]
+    built = source["kind"] == "built"
+    if not entry or (not built and (source["kind"] != "link" or source.get("via") == "market"
+                                    or not review.market_origin(pid, source, entry))):
+        return None
+    folder = review.target(pid)
+    files = plugins.fingerprint(folder)
+    if not files or not built and files != line.get("files"):
+        return None
+    found = plugins.read_folder(folder, pid)
+    manifest = found["manifest"]
+    version = manifest["version"]
+    if not version_key(version) or version_key(version) > version_key(entry["version"]):
+        return None
+    if set(manifest["kind"]) & set(plugins.LISTED_ONLY) or built and version == entry["version"]:
+        return None  # The ordinary candidate already checks for an exact current built release.
+    src = plugins.parse_source({"url": entry["repo"], "path": (entry.get("pin") or entry)["path"]})
+    url, env = plugins._remote(src)
+    tags = plugins._refs(env.pop("_refs"))["tags"]
+    tried = set()
+    for tag in sorted(tags, key=lambda name: (name != source.get("ref"), not name.endswith(version), name)):
+        commit = tags[tag]
+        if not built and commit != source.get("commit"):
+            continue
+        tagged = {**src, "kind": "link", "via": "market", "ref": tag,
+                  "ref_kind": "tag", "commit": commit}
+        if version == entry["version"] and not review.market_pin(pid, tagged, entry):
+            continue
+        if commit in tried:
+            continue
+        tried.add(commit)
+        with TemporaryDirectory(dir=plugins._staging()) as tmp:
+            repo = Path(tmp) / "repo"
+            if plugins._checkout(url, env, commit, repo) != commit:
+                continue
+            candidate = repo / src["path"]
+            if candidate.resolve() != candidate or not candidate.is_dir():
+                continue
+            shutil.rmtree(repo / ".git")
+            if plugins.fingerprint(candidate) == files:
+                tagged["url"] = plugins.pinned_link({**tagged, "ref_kind": "commit"})
+                return {"id": pid, "version": version, "source": tagged, "files": files,
+                        "declaration": plugins.declaration(manifest, found["has"])}
+    return None
+
+
 def inspect(pid, line, entry, market_state):
     source = line["source"]
     if source["kind"] == "loam":
@@ -51,14 +102,13 @@ def inspect(pid, line, entry, market_state):
     # Untracked local code can join only its same-id, immutable Market release.
     if built and not entry:
         return {"base": source, "via": "market"}
-    legacy_match = (not built and not source.get("via") and entry and
-                    entry["repo"].lower() == source["repo"].lower() and
-                    (entry.get("pin", {}).get("path") or entry["path"]) == source.get("path", ""))
+    same_origin = not built and review.market_origin(pid, source, entry)
+    legacy_match = same_origin and not source.get("via")
     via = "market" if (built or source.get("via") == "market" or line.get("update_via") == "market"
                        or legacy_match) else "link"
     result = {"base": source, "via": via}
     if via == "market":
-        if not entry:
+        if not entry or (not built and not same_origin):
             return result
         pin = entry.get("pin") or {}
         if (pin.get("ref") and pin["ref"] == source.get("commit")
@@ -146,17 +196,18 @@ def check(nightly=False):
             if plugins.ID.fullmatch(folder.name) and folder.name not in lines:
                 lines[folder.name] = {"source": {"kind": "built"}}
         new_install = lines.keys() - cache.get("plugins", {}).keys()
-        if cache.get("review_format") != 2 or new_install or time.time() - cache.get("checked", 0) >= DAY:
+        if cache.get("review_format") != 3 or new_install or time.time() - cache.get("checked", 0) >= DAY:
             catalogue = market.read(refresh=True) if lines else {"plugins": [], "state": "empty"}
             entries = {entry["id"]: entry for entry in catalogue["plugins"]}
             cache = {"checked": time.time(), "market_state": catalogue["state"],
-                     "entries": {}, "plugins": {}, "errors": {}, "review_format": 2}
+                     "entries": {}, "plugins": {}, "errors": {}, "review_format": 3}
             for pid, line in lines.items():
                 upstream_id = line.get("id", pid)
                 entry = entries.get(upstream_id)
                 if entry:
                     cache["entries"][pid] = {k: entry[k] for k in
-                                              ("id", "author", "repo", "ref", "path", "pin")
+                                              ("id", "author", "repo", "ref", "path", "pin",
+                                               "version", "link", "pinned_link")
                                               if k in entry}
                 try:
                     record = inspect(upstream_id, line, entry, catalogue["state"])
@@ -176,6 +227,7 @@ def check(nightly=False):
             tmp.write_text(json.dumps(cache))
             os.replace(tmp, path)
         updates = {}
+        cache_changed = False
         errors = {**cache.get("errors", {}), **local_errors}
         for pid, record in cache["plugins"].items():
             line = lines.get(pid)
@@ -183,6 +235,7 @@ def check(nightly=False):
                 continue
             built = line["source"]["kind"] == "built"
             candidate = record.get("candidate")
+            entry = cache["entries"].get(pid)
             if candidate and candidate.get("files") and candidate["id"] == pid:
                 with plugins.locked():
                     current = plugins.load_list()
@@ -190,12 +243,36 @@ def check(nightly=False):
                     if (base or {"source": {"kind": "built"}})["source"] != record["base"]:
                         continue
                     try:
-                        if review.adopt(current, pid, candidate, entry=cache["entries"].get(pid)):
+                        if review.adopt(current, pid, candidate, entry=entry):
                             adopted.append(pid)
                             continue
                     except (plugins.PluginError, OSError) as exc:
                         errors[pid] = str(exc)
                         continue
+            if nightly and line.get("id", pid) == pid:
+                try:
+                    release = market_tag(pid, line, entry)
+                    if release:
+                        with plugins.locked():
+                            current = plugins.load_list()
+                            base = review.original(current, pid)
+                            if (base or {"source": {"kind": "built"}})["source"] != record["base"]:
+                                continue
+                            if not review.adopt(current, pid, release, entry=entry, verified_tag=True):
+                                continue
+                            adopted.append(pid)
+                            listed = current
+                            line = current["plugins"][pid]
+                        cache_changed = True
+                        record = inspect(pid, line, entry, cache["market_state"])
+                        cache["plugins"][pid] = record
+                        built = False
+                        candidate = record.get("candidate")
+                except (plugins.PluginError, plugins.ManifestError, OSError, ValueError) as exc:
+                    errors[pid] = str(exc)
+                    if pid in adopted:
+                        cache["checked"] = 0  # Retry discovery using the new baseline.
+                    continue
             if built or record.get("match_only"):
                 continue
             updates[pid] = {k: record[k] for k in ("via", "version", "link", "held") if k in record}
@@ -219,9 +296,7 @@ def check(nightly=False):
                     detail=json.dumps(record["added"]) if record["added"] else None)
                 if told in ("told", "repeat"):
                     record["notified"] = True
-                    tmp = path.with_suffix(".tmp")
-                    tmp.write_text(json.dumps(cache))
-                    os.replace(tmp, path)
+                    cache_changed = True
             if not record.get("link"):
                 continue
             if nightly and not record["held"] and pref["auto_update"]:
@@ -232,5 +307,9 @@ def check(nightly=False):
                     updates.pop(pid)
                 except (plugins.PluginError, OSError) as exc:
                     errors[pid] = str(exc)
+        if cache_changed:
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(cache))
+            os.replace(tmp, path)
         return {"plugins": updates, "adopted": adopted, "entries": cache["entries"], "market_state": cache["market_state"],
                 "checked": cache["checked"], "errors": errors}

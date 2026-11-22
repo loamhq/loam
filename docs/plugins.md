@@ -841,7 +841,13 @@ Market and link installs default to automatic updates. About and
 `bin/settings set plugin.auto_update` change that preference. Editing the
 installed folder or placing a same-id copy in `<plugins>/_copies/<id>/`
 pauses updates. The copy takes precedence. All install routes recheck local files at the
-swap, including mode, type and content. Loam adopts a same-ID copy in place when it exactly matches its Market or linked release, keeps the owner’s update preference, and sends any remaining personal differences to the agent when an update is available. Removing the copy restores the original. A different-id
+swap, including mode, type and content. Loam adopts a same-ID copy in place
+when it exactly matches its Market or linked release. Nightly discovery
+also compares built and link-installed copies with earlier tags in the
+listed repository and folder. An exact match connects the installed version
+to the Market, preserves its switch and update preference, and lets the
+usual installer apply or offer the reviewed update. Personal edits go to the
+agent when an update is available. Removing the copy restores the original. A different-id
 plugin directly in the owner's plugins folder can run alongside the original.
 
 `loam plugin track COPY ORIGINAL` records a copy’s starting release, including

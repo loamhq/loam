@@ -69,17 +69,21 @@ def original(data, pid):
         return {"id": pid, **{k: line.get(k) for k in ("source", "version", "files")}}
 
 
+def market_origin(pid, source, entry):
+    return (entry and entry["id"] == pid
+            and entry["repo"].lower() == source["repo"].lower()
+            and (entry.get("pin") or entry)["path"] == source["path"])
+
+
 def market_pin(pid, source, entry):
-    if not entry or entry["id"] != pid:
+    if not market_origin(pid, source, entry):
         return False
     pin = entry.get("pin") or entry
-    same_ref = (pin["ref"] == source["commit"] or not entry.get("pin")
-                and source["ref_kind"] == "tag" and pin["ref"] == source["ref"])
-    return (same_ref and entry["repo"].lower() == source["repo"].lower()
-            and pin["path"] == source["path"])
+    return (pin["ref"] == source["commit"] or not entry.get("pin")
+            and source["ref_kind"] == "tag" and pin["ref"] == source["ref"])
 
 
-def matches(data, pid, release, entry=None):
+def matches(data, pid, release, entry=None, *, verified_tag=False):
     """A released tree has the same manifest id, verified contents and upstream."""
     if (release["source"].get("kind") != "link" or pid != release["id"] or not release.get("files")
             or p.fingerprint(target(pid)) != release["files"]):
@@ -90,17 +94,18 @@ def matches(data, pid, release, entry=None):
         return False
     if base and base["source"].get("kind") == "link":
         old = base["source"]
-        if old["repo"].lower() == src["repo"].lower() and old["path"] == src["path"]:
-            return True
+        return old["repo"].lower() == src["repo"].lower() and old["path"] == src["path"]
+    if verified_tag:
+        return src["ref_kind"] == "tag" and market_origin(pid, src, entry)
     if entry is None:
         import loam_marketplace
         entry = next((e for e in loam_marketplace.read()["plugins"] if e["id"] == pid), None)
     return market_pin(pid, src, entry)
 
 
-def adopt(data, pid, release, *, entry=None, by=None, confirmed=False):
+def adopt(data, pid, release, *, entry=None, by=None, confirmed=False, verified_tag=False):
     """Reclassify an existing tree under the install lock. Never swap or start it."""
-    if not matches(data, pid, release, entry):
+    if not matches(data, pid, release, entry, verified_tag=verified_tag):
         return False
     previous = data["plugins"].get(pid, {})
     record = data.get("copies", {}).get(pid, {})
@@ -113,9 +118,13 @@ def adopt(data, pid, release, *, entry=None, by=None, confirmed=False):
     if target(pid) == p.copy_folder(pid) and "underlay" not in line:
         line["underlay"] = previous
     # Recognising existing files grants no new access. Keep the previous ceiling.
-    prior = record.get("confirmed") or previous.get("declaration") or p.declaration(
-        {"touches": {}, "overrides": []}, {})
     declaration = release["declaration"]
+    prior = record.get("confirmed") or previous.get("declaration")
+    if prior is None:
+        # An exact older built release establishes what the existing code
+        # already uses, so only access added by the update needs a new yes.
+        prior = declaration if verified_tag and not previous else p.declaration(
+            {"touches": {}, "overrides": []}, {})
     if not confirmed and p.added(prior, declaration):
         declaration = prior
     if snapshot(target(pid), pid) != release["files"]:
