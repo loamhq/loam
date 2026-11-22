@@ -79,7 +79,6 @@ sys.path.insert(0, str(AGENTS / "lib"))
 import loam_plugins as lp  # noqa: E402
 import loam_contributions as c  # noqa: E402
 import loam_keys as k  # noqa: E402
-import loam_syncthing as st  # noqa: E402
 
 results = []
 
@@ -325,89 +324,9 @@ async def routes():
 
 asyncio.run(routes())
 
-# -- local provider source, from an install preview through recovery ---------------
-class SyncGUI(http.server.BaseHTTPRequestHandler):
-    accepted = "fixture-daemon-key"
-
-    def do_GET(self):
-        self.send_response(200 if self.headers.get("X-API-Key") == self.accepted else 403)
-        self.end_headers()
-
-    def log_message(self, *args):
-        pass
-
-
-daemon = http.server.ThreadingHTTPServer(("127.0.0.1", 0), SyncGUI)
-threading.Thread(target=daemon.serve_forever, daemon=True).start()
-home = TMP / "owner"
-config = home / ".config" / "syncthing" / "config.xml"
-config.parent.mkdir(parents=True)
-gui_port = daemon.server_address[1]
-
-
-def write_gui(key, address=f"localhost:{gui_port}"):
-    config.write_text(f"<configuration><gui><address>{address}</address>"
-                      f"<apikey>{key}</apikey></gui></configuration>")
-
-
-def fetch_syncthing(src, work):
-    head = ""
-    if src["ref"] == "v1.1.0":
-        head = f"keys: [{{\"provider\": \"syncthing\", \"source\": {json.dumps(st.SOURCE)}}}]\n"
-    plugin("syncthing", head, layer=work)
-    folder = work / "syncthing"
-    return {"folder": folder, "source": {**src, "owner": "fixture", "repo": "fixture/syncthing",
-                                        "path": "", "ref_kind": "tag", "commit": "1" * 40,
-                                        "url": "https://github.com/fixture/syncthing"}}
-
-
-old_link = {"url": "https://github.com/fixture/syncthing/tree/v1.0.0"}
-new_link = {"url": "https://github.com/fixture/syncthing/tree/v1.1.0"}
-write_gui(SyncGUI.accepted)
-with patch.object(Path, "home", return_value=home), patch.object(lp, "fetch", fetch_syncthing), \
-        patch.object(st, "read_source", wraps=st.read_source) as read_source:
-    old = lp.install(old_link)
-    lp.install({**old_link, "confirm": old["confirm"]})
-    new = lp.install(new_link)
-    check("the update preview discloses the exact local source and leaves it unread",
-          new["added"]["keys"][0]["source"] == st.SOURCE and not read_source.called)
-    try:
-        lp.install({**new_link, "confirm": new["confirm"]},
-                   automatic={"id": "syncthing", "base": old["source"], "commit": "1" * 40})
-        auto_refused = False
-    except lp.PluginError as exc:
-        auto_refused = exc.status == 409
-    check("an automatic update cannot approve a new source", auto_refused and not read_source.called)
-    lp.install({**new_link, "confirm": new["confirm"]})
-    local = k.one("syncthing")
-    check("confirmed install imports the legacy GUI config and passes a canonical loopback URL",
-          read_source.call_count == 1 and local["set"] and local["source"] == "saved"
-          and SyncGUI.accepted not in json.dumps(local)
-          and c.secret_for("syncthing", st.KEY) == SyncGUI.accepted
-          and c.secret_for("syncthing", st.GUI) == f"http://127.0.0.1:{gui_port}")
-    k.sync(refresh_sources=True)
-    check("reconcile leaves a key the daemon accepts in place", read_source.call_count == 1)
-    SyncGUI.accepted = "fixture-rotated-key"
-    write_gui(SyncGUI.accepted)
-    k.sync(refresh_sources=True)
-    check("reconcile recovers a daemon-rejected key without the owner pasting it",
-          read_source.call_count == 2 and c.secret_for("syncthing", st.KEY) == SyncGUI.accepted)
-    SyncGUI.accepted = "fixture-manual-key"
-    k.set_shared("syncthing", {"value": SyncGUI.accepted})
-    check("the imported key is replaceable in API keys",
-          c.secret_for("syncthing", st.KEY) == SyncGUI.accepted)
-    k.forget_shared("syncthing")
-    write_gui("fixture-local-key", f"0.0.0.0:{gui_port}")
-    k.sync(refresh_sources=True)
-    check("a wildcard GUI is refused with a plain message and no key",
-          not k.one("syncthing")["set"] and "127.0.0.1" in k.one("syncthing")["refused"]["why"])
-    # A locally edited source declaration cannot authorize a box read.
-    row_without_consent = {**row("syncthing"), "installed": {}}
-    previous_reads = read_source.call_count
-    k.sync([row_without_consent], refresh_sources=True)
-    check("reconcile cannot read a source without install consent", read_source.call_count == previous_reads)
-daemon.shutdown()
-daemon.server_close()
+check("stock providers are OpenAI and Google Gemini only",
+      {pid for pid, prov in k.PROVIDERS.items() if prov.get("check")} == {"openai", "google"},
+      sorted(k.PROVIDERS))
 
 # -- the shipped plugins --------------------------------------------------------------
 for name in ("read-aloud", "dictation"):

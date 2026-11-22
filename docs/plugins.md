@@ -576,8 +576,6 @@ a plugin declares them or a provider configured on this host has a saved key.
 new provider asks again, as a new network host does. The page says each as
 "Uses your OpenAI key: …".
 
-The Syncthing provider can declare `source: {path: "~/.local/state/syncthing/config.xml", fallback: "~/.config/syncthing/config.xml", xml: gui/apikey}`. The install card shows the read and the paths, and Loam saves the key only after confirmation, rereading the settings if the key is missing or rejected. The same API keys page shows and replaces it. Adding the source to an installed plugin requires a new confirmation.
-
 **Where a key comes from**, for each provider a plugin declared, first found:
 
 1. **its own key**, set in API keys under that provider ("use a different

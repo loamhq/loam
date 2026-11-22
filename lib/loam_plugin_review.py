@@ -425,9 +425,6 @@ def finish(data, pid, record, confirm):
         exchange(live, previous)
         raise
     plugin = p.one(pid)["plugin"]
-    if any(k.get("source") for k in plugin.get("keys", [])):
-        import loam_keys
-        loam_keys.sync(refresh_sources=True)
     p._servers_follow(pid, restart=True)
     if plugin.get("contributes") or reviewed.get("prior_contributes"):
         p._contributions_follow(f"{pid} updated with owner approval")

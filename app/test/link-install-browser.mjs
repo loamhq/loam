@@ -99,14 +99,14 @@ try {
       assert.equal(await sheet.locator('.market-unreviewed').textContent(), 'Nobody at Loam has looked at this. A theme changes only how Loam looks.', `${label}: a theme from a link says nobody reviewed it`)
       await shot('6-found-theme')
       await sheet.locator('.market-link-back', { hasText: 'Pick another' }).click()
-      await sheet.locator('.market-link-pick', { hasText: 'Syncthing' }).click()
-      await sheet.locator('.sheet-title', { hasText: 'Install Syncthing?' }).waitFor()
+      await sheet.locator('.market-link-pick', { hasText: 'Vault Sync' }).click()
+      await sheet.locator('.sheet-title', { hasText: 'Install Vault Sync?' }).waitFor()
       await sheet.locator('.market-install-head img.market-tile-img').waitFor()
       assert.equal(await sheet.locator('.market-unreviewed').textContent(), 'Nobody at Loam has looked at this. Once installed, it can do anything you can on this machine.', `${label}: before the yes, it says nobody reviewed it`)
       await shot('7-found-extension')
       await sheet.locator('.pillbtn.primary', { hasText: 'Install' }).click()
       await sheet.locator('.market-install-done').waitFor()
-      assert.deepEqual(posts().at(-1).body, { url: 'loamhq/plugins', path: 'syncthing', ref: 'syncthing-v1.0.0', via: 'link', confirm: 'ok-syncthing-syncthing-v1.0.0' }, `${label}: the yes names exactly what was shown`)
+      assert.deepEqual(posts().at(-1).body, { url: 'loamhq/plugins', path: 'vault-sync', ref: 'vault-sync-v1.0.0', via: 'link', confirm: 'ok-vault-sync-vault-sync-v1.0.0' }, `${label}: the yes names exactly what was shown`)
       await shot('8-installed')
       await sheet.locator('.pillbtn', { hasText: 'See it in Plugins' }).click()
 
@@ -118,8 +118,8 @@ try {
       const fromLink = page.getByRole('region', { name: 'From a link', exact: true })
       await fromLink.waitFor()
       const marked = await fromLink.locator('.setrow-title').allTextContents()
-      assert.deepEqual(marked, ['Syncthing'], `${label}: only the plugin from a link is marked`)
-      await page.locator('.plugin-list-item', { hasText: 'Syncthing' }).scrollIntoViewIfNeeded()
+      assert.deepEqual(marked, ['Vault Sync'], `${label}: only the plugin from a link is marked`)
+      await page.locator('.plugin-list-item', { hasText: 'Vault Sync' }).scrollIntoViewIfNeeded()
       await shot('10-marked')
 
       // A branch: installed at its commit, said in a line.

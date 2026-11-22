@@ -27,7 +27,7 @@ export async function linkPlugins() {
     { path: 'dictation', id: 'dictation', name: 'Dictation', version: '1.0.0', kind: ['extension'], description: 'Speak instead of typing: what you say is written into the composer.', tag: 'dictation-v1.0.0',
       declaration: { touches: { network: [{ host: 'generativelanguage.googleapis.com', why: 'Sends recorded microphone audio for transcription and cleanup' }], record: 'read', memory: 'none', server: false,
         keys: [{ provider: 'google', name: 'Google', why: 'Transcribes and tidies what you record' }] }, overrides: [], page_code: true }, pictures: {} },
-    { path: 'syncthing', id: 'syncthing', name: 'Syncthing', version: '1.0.0', kind: ['extension'], description: 'Keeps the vault in step with your other devices.', tag: 'syncthing-v1.0.0',
+    { path: 'vault-sync', id: 'vault-sync', name: 'Vault Sync', version: '1.0.0', kind: ['extension'], description: 'Keeps the vault in step with your other devices.', tag: 'vault-sync-v1.0.0',
       declaration: { touches: { network: [{ host: 'your own devices', why: 'syncs vault files between them' }], record: 'none', memory: 'none', server: true }, overrides: [], page_code: false },
       pictures: { icon: SYNC_ICON } },
   ]

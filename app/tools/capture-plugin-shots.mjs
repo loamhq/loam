@@ -145,22 +145,6 @@ if (picture) {
   })
 }
 
-// ---------------------------------------------------------------- Syncthing
-await run('syncthing', { plugins: ['syncthing'], title: 'Notes on my phone', messages: [
-  { id: 'm1', author: 'you', text: 'I’d like my notes on my phone too. Its Syncthing ID is MFZWI3D-BONSGYC-YLTMRWG-C43ENR5-QXGZDMM-FZWI3DP-BONSGYY-LTMRWAD.' },
-  { id: 'm2', author: 'sprout', engine: 'claude-code', did: [{ label: 'Checked Syncthing on your server' }, { label: 'Paired your phone and shared the vault' }],
-    text: 'Done. Your phone is paired, and your vault is shared with it.\n\n**On your phone, in Syncthing:**\n\n1. Accept **this server** when it asks to connect.\n2. Accept the folder **vault**, and choose where it lives.\n\nThe first sync takes a few minutes. Ask me any time how it’s going.' },
-  { id: 'm3', author: 'you', text: 'How is it going?' },
-  { id: 'm4', author: 'sprout', engine: 'claude-code', did: [{ label: 'Read Syncthing’s status' }],
-    text: 'All in step: your laptop and your phone are both up to date, and the last change arrived a minute ago.' },
-] }, async ({ page, shot, open, showFrom }) => {
-  await open()
-  await showFrom('m2', 140)
-  await shot('pair', "() => document.querySelector('[data-message-id=\"m2\"]')", { align: 'top', pad: 70 })
-  await showFrom('m3', 70)
-  await shot('status', "() => document.querySelector('[data-message-id=\"m3\"]')", { align: 'top', pad: 16 })
-})
-
 // ---------------------------------------------------------------- Dictation
 const GARDEN = [
   { id: 'm1', author: 'you', text: 'Could we plan the spring garden? Somewhere for tomatoes, and a corner for sunflowers.' },

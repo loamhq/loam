@@ -2659,9 +2659,6 @@ def install(body: dict, by: str | None = None, *, automatic: dict | None = None)
                 else:
                     os.replace(target, folder)
                 raise
-        if any(k.get("source") for k in manifest.get("keys", [])):
-            import loam_keys  # noqa: PLC0415
-            loam_keys.sync(refresh_sources=True)
         server = _servers_follow(pid, restart=True)
         out = one(pid)
         if (mine or {}).get("contributes") or (out.get("plugin") or {}).get("contributes"):

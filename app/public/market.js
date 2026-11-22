@@ -278,12 +278,7 @@ export function plainTouches(declaration, kind = null, additionsOnly = false) {
   if (t.settings?.length) out.push({ glyph: 'tool', text: 'Adds settings', sub: t.settings.join(', ') })
   if (t.drift_check) out.push({ glyph: 'server', text: 'Runs a check on your server', sub: '' })
   for (const key of t.keys ?? []) {
-    if (key.source) {
-      const files = [key.source.path, key.source.fallback].filter(Boolean).join(' or ')
-      out.push({ glyph: 'key', text: `Loam reads the ${key.name} API key from its settings on this server`, sub: files })
-    } else {
-      out.push({ glyph: 'key', text: `Uses your ${key.name} key${key.optional ? ' if you have one' : ''}`, sub: key.why || 'From API keys, in Settings › Connections.' })
-    }
+    out.push({ glyph: 'key', text: `Uses your ${key.name} key${key.optional ? ' if you have one' : ''}`, sub: key.why || 'From API keys, in Settings › Connections.' })
   }
   if (t.secrets?.length) out.push({ glyph: 'key', text: 'Asks for a key of its own', sub: 'You paste it in its settings; agents never see it.' })
   if (t.vault?.length) out.push({ glyph: 'record', text: 'Writes files into your vault', sub: t.vault.join(', ') })
