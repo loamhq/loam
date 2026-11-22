@@ -199,6 +199,97 @@ class Updates(unittest.TestCase):
         self.assertEqual(row["source"]["via"], "market")
         self.tell.assert_not_called()
 
+    def test_nightly_updates_a_built_copy_of_an_earlier_tag(self):
+        folder = self.yours / "notes"
+        folder.mkdir(parents=True)
+        access = "touches: {record: write}\n"
+        self.git("tag", "first-edition", self.release("1.0.1", access))
+        self.git("tag", "-d", "v1.0.1")
+        shutil.copy2(self.repo / "PLUGIN.md", folder)
+        self.release("1.1.0", access)
+        self.listing("1.1.0")
+        with patch.object(updates, "market_tag", side_effect=AssertionError("tag fetch on page load")):
+            result = updates.check()
+        self.assertFalse(result["errors"] or result["plugins"])
+        self.assertEqual(plugins.one("notes")["plugin"]["source"]["kind"], "built")
+        result = updates.check(nightly=True)
+        self.assertFalse(result["errors"] or result["plugins"])
+        self.assertEqual(result["adopted"], ["notes"])
+        self.assert_adopted(folder)
+        row = plugins.one("notes")["plugin"]
+        self.assertEqual(row["source"]["via"], "market")
+        self.assertFalse(row["on"] or row["updates_paused"])
+        self.tell.assert_not_called()
+
+    def check_earlier_link(self, automatic):
+        self.listfile.write_text('{"plugins":[]}')
+        self.install("link")
+        plugins.set_auto_update("notes", automatic)
+        self.assertEqual(updates.check()["market_state"], "empty")
+        self.release("1.1.0")
+        self.listing("1.1.0")
+        with patch.object(updates.time, "time", return_value=updates.time.time() + updates.DAY + 1):
+            result = updates.check(nightly=True)
+        self.assertFalse(result["errors"])
+        self.assertEqual(result["adopted"], ["notes"])
+        row = plugins.one("notes")["plugin"]
+        self.assertEqual(row["source"]["via"], "market")
+        self.assertEqual(row["version"], "1.1.0" if automatic else "1.0.0")
+        self.assertEqual(row["auto_update"], automatic)
+        self.assertTrue(row["on"])
+        self.assertFalse(row["edited"] or row["updates_paused"])
+        self.tell.assert_not_called()
+        return result["plugins"]
+
+    def test_link_copy_of_an_earlier_tag_updates_from_the_market(self):
+        self.assertFalse(self.check_earlier_link(automatic=True))
+
+    def test_link_copy_of_an_earlier_tag_keeps_manual_updates(self):
+        offer = self.check_earlier_link(automatic=False)["notes"]
+        self.assertEqual((offer["via"], offer["version"], offer["held"]), ("market", "1.1.0", False))
+
+    def test_link_to_the_newly_listed_tag_joins_the_market(self):
+        self.listfile.write_text('{"plugins":[]}')
+        self.install("link")
+        self.listing("1.0.0")
+        result = updates.check(nightly=True)
+        self.assertFalse(result["errors"])
+        self.assertEqual(result["adopted"], ["notes"])
+        self.assertEqual(plugins.one("notes")["plugin"]["source"]["via"], "market")
+        self.assertFalse(plugins.load_list().get("update_history"))
+        self.tell.assert_not_called()
+
+    def test_edited_earlier_tag_stays_with_the_agent(self):
+        self.listfile.write_text('{"plugins":[]}')
+        self.install("link")
+        edit = self.yours / "notes" / "draft.txt"
+        edit.write_text("mine")
+        self.release("1.1.0")
+        self.listing("1.1.0")
+        result = updates.check(nightly=True)
+        self.assertFalse(result["errors"] or result["adopted"])
+        self.assertTrue(result["plugins"]["notes"]["personal"])
+        self.assertEqual(edit.read_text(), "mine")
+        row = plugins.one("notes")["plugin"]
+        self.assertEqual((row["source"]["via"], row["version"]), ("link", "1.0.0"))
+        self.assertTrue(row["edited"] and row["updates_paused"])
+        self.tell.assert_called_once()
+
+    def test_same_id_and_bytes_from_another_repository_stay_linked(self):
+        other = self.repo.parent / "other"
+        shutil.copytree(self.repo, other)
+        request = {"url": "maker/other", "ref": "v1.0.0", "via": "link"}
+        preview = plugins.install(request)
+        plugins.install({**request, "confirm": preview["confirm"]})
+        self.release("1.1.0")
+        self.listing("1.1.0")
+        result = updates.check(nightly=True)
+        self.assertFalse(result["adopted"] or result["errors"])
+        row = plugins.one("notes")["plugin"]
+        self.assertEqual((row["source"]["repo"], row["source"]["via"], row["version"]),
+                         ("maker/other", "link", "1.0.0"))
+        self.tell.assert_not_called()
+
     def test_direct_install_adopts_built_copy_only_from_its_listing(self):
         folder = self.yours / "notes"
         folder.mkdir(parents=True)
@@ -314,6 +405,7 @@ class Updates(unittest.TestCase):
         self.tell.assert_not_called()
 
     def test_link_release_that_adds_access_waits_for_confirmation(self):
+        self.listfile.write_text('{"plugins":[]}')
         self.install("link")
         self.release("1.1.0", "touches: {record: write}\n")
         found = updates.check(nightly=True)["plugins"]["notes"]
@@ -366,6 +458,7 @@ class Updates(unittest.TestCase):
         self.assertFalse(restored["auto_update"])
 
     def test_existing_install_can_disable_then_apply_without_waiting_for_another_check(self):
+        self.listfile.write_text('{"plugins":[]}')
         self.install("link")
         data = plugins.load_list()
         del data["plugins"]["notes"]["auto_update"]
