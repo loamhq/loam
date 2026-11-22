@@ -173,6 +173,23 @@ def removed(thread_id):
     return gone
 
 
+def existing_documents(pid):
+    """Yield materialized documents for an enabled extension's scheduled work."""
+    with threads.locked(threads.STATE):
+        _spec(pid)
+        rows = list(_bindings().get(pid, {}).items())
+    for tid, row in rows:
+        path = _path(row["path"])
+        try:
+            if not stat.S_ISREG(path.lstat().st_mode):
+                continue
+            raw = path.read_bytes()
+        except FileNotFoundError:
+            continue
+        yield tid, {"path": row["path"], "markdown": raw.decode("utf-8"),
+                    "revision": revisions.revision(raw)}
+
+
 def document(pid, thread_id, payload=None):
     with threads.locked(threads.STATE):
         spec = _spec(pid)

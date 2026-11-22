@@ -766,6 +766,7 @@ PAGE_RELAY: dict[str, list[str] | str] = {
         "thread.members.remove", "thread.engine", "thread.model",
         "thread.pinned", "thread.archived", "thread.seen", "thread.board",
         "thread.create", "thread.delete"],
+    r"/^\/threads\/([a-zA-Z0-9_-]+)\/files\/([a-z0-9-]+)$/": "read or edit a contributed Markdown document",
     "rest === '/threads/events'": "a stream",
     "rest === '/threads/imported'": "a read: which thread a classic chat was "
                                     "imported as (2026-11-11)",

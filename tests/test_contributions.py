@@ -40,6 +40,7 @@ GOOD = {
     "box.listener": [{"process": "hellod", "why": "a test"}],
     "settings.secret": [{"name": "HELLO_API_KEY", "label": "Hello's key", "check": "builtin:gemini"}],
     "vault.folder": [{"setting": "greeting"}],
+    "thread.file": [{"label": "checklist"}],
     "engineer.job": [{"run": "python3 job.py", "projects": ["acme"]}],
     "web.door": [{"why": "visitors by a link reach one doc"}],
     "made.up": [{"x": 1}],
@@ -89,7 +90,7 @@ check("the declaration says what it adds, computed",
       and t["agents"]["prompt"] == ["persona", "reviewer"]
       and t["schedule"] == ["tick: daily at 05:00 PT"]
       and t["secrets"] == ["HELLO_API_KEY", "HELLO_KEY"] and t["inbound"] == ["hellod: a test"]
-      and t["vault"] == ["(its greeting setting)"]
+      and t["vault"] == ["(its greeting setting)", "Manages a Markdown file for each thread"]
       and t["engineer_job"] == ["python3 job.py (acme)"]
       and t["open_web"] == "visitors by a link reach one doc", t)
 later = dict(manifest)
