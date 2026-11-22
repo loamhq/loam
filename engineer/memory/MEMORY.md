@@ -2825,3 +2825,30 @@ listener for immediate notification in an open page.
   `quick-actions` on or off directly by `folder_has_substance()` on the
   configured inbox and daily folders. New installs seed only `About me.md`,
   `<projects>/Loam/Start here.html`, `README.md`, and Loam files.
+
+## 2026-11-22 — Plugin timers failing (`Unit to trigger vanished`) across landings and re-applies
+
+- **Root cause of the 15:21:45 / 15:37:23 failures (`Unit to trigger vanished`, `Result: resources`).**
+  `loam_contributions.real_layer()` only checked `yours_root() == YOURS_DEFAULT`.
+  When a test set a scratch `LOAM_CONFIG` without `LOAM_PLUGINS_DIR` or `paths.home`
+  (specifically `tests/test_files_redesign.py` calling `lp.set_on("quick-actions", True)`),
+  `YOURS_DEFAULT` resolved to the scratch plugins dir so `real_layer()` returned `True`,
+  while `lc.USER_UNIT_DIR` still pointed at the host's `~/.config/systemd/user/`.
+  Inside `loam_worktree.platform_argv()` during landings, `lc.RUNTIME_DIR` was sealed
+  (so `systemctl --user disable --now` failed silently) while `lc.USER_UNIT_DIR` was
+  not sealed, so `apply_units()` unlinked all 11 non-reviewer plugin unit files on disk
+  without telling systemd. Moments later, `bin/session-services reconcile --eager-api`
+  ran `systemctl --user daemon-reload`, causing all five active plugin timers to fail
+  with `Unit to trigger vanished`.
+- **Additional `apply_units()` / `arm_timer()` defects fixed in `3141a69`.**
+  - `real_layer()` and `loam_plugin_servers.managed()` now require `lc.is_install_config()`
+    and refuse inside test processes (`loam_offline.offline()`) or when
+    `LOAM_PLUGIN_UNITS=0`; `loam_worktree.sealed_paths()` now also seals `lc.USER_UNIT_DIR`.
+  - `apply_units()` now removes timers/boot units (`disable --now`) strictly before
+    unlinking `.service` files, cleans `.wants/` symlinks, calls `reset-failed` on
+    removed units, writes `.service` files atomically before `.timer` files, serializes
+    live applies with `units.lock`, and recovers any wanted timer found `failed` or
+    `inactive`.
+  - `loam_units.arm_timer()` calls `reset-failed` before moving a failed timer aside for
+    `daemon-reload`; without it, systemd kept the failed unit pinned in memory with its
+    old `InactiveExitTimestampMonotonic`, causing immediate off-schedule triggers on restart.
