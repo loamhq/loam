@@ -1220,7 +1220,7 @@ def land_job(project: eng.Project, job_id: str, record: dict, title: str,
             # Outside the merge lock. The controller locks again and compares
             # the actual serving revisions to the checkout then present.
             proc = subprocess.run([sys.executable, str(AGENTS / "bin/session-services"),
-                                   "reconcile"], capture_output=True, text=True)
+                                   "reconcile", "--eager-api"], capture_output=True, text=True)
             result["session_services"] = (proc.stdout + proc.stderr).strip()[-1200:] or f"exit {proc.returncode}"
             landing_say(p)(result["session_services"])
     return result

@@ -74,6 +74,39 @@ class ThreadFileTest(TestCase):
         self.assertNotIn(b["id"], files._bindings()["checklists"])
         self.assertEqual(list(files.existing_documents("checklists")), [])
 
+    def test_legacy_boards_config_and_turn_prompt_resilience(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            from unittest.mock import patch
+            with patch.multiple(threads, VAULT=root / "vault", STATE=root / "state",
+                                AI_LABS=root / "people"), \
+                    patch.object(threads, "roster", return_value=[]), \
+                    patch.dict("os.environ", {"LOAM_PLUGINS_DIR": str(root / "plugins")}), \
+                    patch.dict(threads.lc.VAULT_FOLDERS,
+                               {"inbox": "00_INBOX", "boards": "00_INBOX/boards"}):
+                entries = contributions.contributes_of({"thread.file": [{
+                    "label": "board", "suffix": " — board", "initial": "# {title}"}]}, None, [])
+                files.configure([{"id": "boards", "contributes": entries}])
+                t = threads.create(title="Design", thread_id="t-design")
+                # Migrated Boards/ path is accepted even if loam.toml still says 00_INBOX/boards.
+                files._save_bindings({"boards": {
+                    t["id"]: {"path": "Boards/Design — board.md", "title": "Design"},
+                }})
+                loc = files.locations(t)["boards"]["path"]
+                self.assertTrue(loc.endswith("Boards/Design — board.md"), loc)
+                self.assertIn(loc, threads.turn_prompt(t, "tester", [], True))
+                # An out-of-bounds binding still fails document() with 409,
+                # but never prevents turn_prompt() from starting a persona turn.
+                files._save_bindings({"boards": {
+                    t["id"]: {"path": "Outside/Design — board.md", "title": "Design"},
+                }})
+                with self.assertRaises(threads.ThreadError) as fail:
+                    files.document("boards", t["id"])
+                self.assertEqual(fail.exception.status, 409)
+                prompt = threads.turn_prompt(t, "tester", [], True)
+                self.assertIn('Loam thread "Design"', prompt)
+                self.assertNotIn("Outside/Design", prompt)
+
 
 if __name__ == "__main__":
     main()

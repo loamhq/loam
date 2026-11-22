@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import time
 
 import loam_config as lc
@@ -197,42 +198,24 @@ def record_change(path, record):
     tmp.replace(path)
 
 
-def replace(mode):
-    """Called under the live checkout lock. Return the units that actually moved."""
-    marker = units.split_marker()
-    for guarded, name in ((True, "replacing-host.json"), (False, "replacing-api.json")):
-        pending = marker.parent / name
-        if pending.exists():
-            with fence.admission(exclusive=True) if guarded else nullcontext(True) as acquired:
-                if not acquired:
-                    raise Deferred("another session operation owns admission")
-                previous = json.loads(pending.read_text())
-                restore(previous["was_split"], previous["split"], previous["old"],
-                        set(previous["chosen"]), previous["saved"])
-                pending.unlink()
-    was_split = marker.exists()
-    split = was_split if mode != "combined" else False
-    if mode == "split":
-        split = True
-    view = loam_live.broker_live()
-    if not view or not view.get("api_pid"):
-        raise Deferred("the running API cannot identify its session owner")
-    old = {API: view["api_pid"], HOST: view["host_pid"]}
-    if was_split != (old[API] != old[HOST]):
-        raise Deferred("the installed and running session topology disagree")
-    changing = split != was_split
-    if changing or mode == "host":
-        chosen = {API, HOST} if changing else {HOST}
-    elif mode == "api":
-        chosen = {API}
-    else:
-        chosen = selected(view, update.head())
-    if not chosen:
-        return "no session service reads the change"
-    guard = HOST in chosen or not was_split
-    if not split:
-        chosen = {API, HOST}
-    saved_units = chosen if was_split else {API}
+def _finish_pending_cleanup():
+    """Run any vault migration deferred while an older session-broker was live."""
+    marker = lc.STATE / "files" / "pending-cleanup.json"
+    if not marker.is_file():
+        return
+    try:
+        import loam_vault_cleanup as cleanup  # noqa: PLC0415
+        report = cleanup.run_pending_migration()
+        if report:
+            summary = cleanup.format_report(report)
+            if summary:
+                print(summary, flush=True)
+    except Exception as exc:  # noqa: BLE001 -- never roll back a healthy broker
+        print(f"pending vault cleanup failed after broker restart: {exc}",
+              file=sys.stderr, flush=True)
+
+
+def _apply_replace(was_split, split, changing, guard, chosen, saved_units, view, old, marker):
     with fence.admission(exclusive=True) if guard else nullcontext(True) as acquired:
         if not acquired:
             raise Deferred("an admission or a thread turn is in flight")
@@ -263,5 +246,55 @@ def replace(mode):
         else:
             marker.unlink(missing_ok=True)
         pending.unlink()
-        return (f"restarted {', '.join(sorted(chosen if split else {API}))}, "
-                f"API PID {after['api_pid']}, host PID {after['host_pid']}")
+    if API in chosen:
+        _finish_pending_cleanup()
+    return (f"restarted {', '.join(sorted(chosen if split else {API}))}, "
+            f"API PID {after['api_pid']}, host PID {after['host_pid']}")
+
+
+def replace(mode, *, eager_api=False):
+    """Called under the live checkout lock. Return the units that actually moved."""
+    marker = units.split_marker()
+    for guarded, name in ((True, "replacing-host.json"), (False, "replacing-api.json")):
+        pending = marker.parent / name
+        if pending.exists():
+            with fence.admission(exclusive=True) if guarded else nullcontext(True) as acquired:
+                if not acquired:
+                    raise Deferred("another session operation owns admission")
+                previous = json.loads(pending.read_text())
+                restore(previous["was_split"], previous["split"], previous["old"],
+                        set(previous["chosen"]), previous["saved"])
+                pending.unlink()
+    was_split = marker.exists()
+    split = was_split if mode != "combined" else False
+    if mode == "split":
+        split = True
+    view = loam_live.broker_live()
+    if not view or not view.get("api_pid"):
+        raise Deferred("the running API cannot identify its session owner")
+    old = {API: view["api_pid"], HOST: view["host_pid"]}
+    if was_split != (old[API] != old[HOST]):
+        raise Deferred("the installed and running session topology disagree")
+    changing = split != was_split
+    if changing or mode == "host":
+        chosen = {API, HOST} if changing else {HOST}
+    elif mode == "api":
+        chosen = {API}
+    else:
+        chosen = selected(view, update.head())
+    if not chosen:
+        _finish_pending_cleanup()
+        return "no session service reads the change"
+    guard = HOST in chosen or not was_split
+    if not split:
+        chosen = {API, HOST}
+    saved_units = chosen if was_split else {API}
+    if eager_api and mode == "reconcile" and was_split and split and chosen == {API, HOST}:
+        try:
+            return _apply_replace(was_split, split, False, True, chosen, saved_units, view, old, marker)
+        except Deferred as exc:
+            # In split mode after a landing, a live provider session holds HOST
+            # back but must not leave the API running stale code.
+            api_msg = _apply_replace(was_split, split, False, False, {API}, {API}, view, old, marker)
+            raise Deferred(f"{exc} ({api_msg}; {HOST} deferred)") from exc
+    return _apply_replace(was_split, split, changing, guard, chosen, saved_units, view, old, marker)

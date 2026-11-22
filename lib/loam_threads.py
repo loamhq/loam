@@ -26,6 +26,7 @@ import json
 import os
 import re
 import secrets
+import sys
 import tempfile
 import time
 from contextlib import contextmanager
@@ -1721,7 +1722,12 @@ def turn_prompt(meta: dict, persona: str, msgs: list[dict], fresh: bool,
     except (ThreadError, KeyError, OSError):
         record_file = None
     mine = summary_path(persona, meta["id"])
-    files = thread_files.locations(meta)
+    try:
+        files = thread_files.locations(meta)
+    except (ThreadError, KeyError, OSError) as exc:
+        print(f"threads: {meta['id']}: skipping thread file locations in turn prompt: {exc}",
+              file=sys.stderr, flush=True)
+        files = {}
     file_lines = [f"The {f['label']} is {f['path']}." for f in files.values()]
     head = (f"[Loam thread \"{meta['title']}\" (id {meta['id']}). Members: {names}; "
             f"{answers}.{' ' if file_lines else ''}{' '.join(file_lines)}]\n"

@@ -118,4 +118,42 @@ with tempfile.TemporaryDirectory() as td:
                 {"plugins/_listed/reader/PLUGIN.md": "updated copy"}, old, set())
     check("shipped plugin changes retain their API refresh",
           {"plugins/reader/PLUGIN.md": "updated builtin"}, old, {services.API})
+
+    # Reconciling split services when HOST is busy:
+    # - default (eager_api=False, used by loam update) defers without touching either unit
+    # - eager_api=True (used by engineer-job landings) still replaces API so it never stays stale
+    from unittest.mock import patch
+    marker = Path(td) / "split-mode"
+    marker.touch()
+    view = {"api_pid": 100, "host_pid": 200, "api_revision": old, "host_revision": old}
+    restarted_calls = []
+
+    def fake_apply(was_split, split, changing, guard, chosen, saved_units, v, o, m):
+        restarted_calls.append((guard, set(chosen)))
+        if guard:
+            raise services.Deferred("ada/11111111 within its 600s idle window")
+        return f"restarted {', '.join(sorted(chosen))}, API PID 101, host PID 200"
+
+    with patch.object(services.units, "split_marker", return_value=marker), \
+            patch.object(services.loam_live, "broker_live", return_value=view), \
+            patch.object(services, "selected", return_value={services.API, services.HOST}), \
+            patch.object(services, "_apply_replace", side_effect=fake_apply):
+        try:
+            services.replace("reconcile", eager_api=False)
+            raise AssertionError("expected Deferred")
+        except services.Deferred as exc:
+            assert "within its 600s idle window" in str(exc)
+        assert restarted_calls == [(True, {services.API, services.HOST})], restarted_calls
+
+        restarted_calls.clear()
+        try:
+            services.replace("reconcile", eager_api=True)
+            raise AssertionError("expected Deferred")
+        except services.Deferred as exc:
+            assert services.API in str(exc) and services.HOST in str(exc), str(exc)
+        assert restarted_calls == [
+            (True, {services.API, services.HOST}),
+            (False, {services.API}),
+        ], restarted_calls
+
 print("ok: session service selection across Git revisions")

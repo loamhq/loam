@@ -56,20 +56,32 @@ def _save_bindings(rows):
     threads._write_atomic(_binding_file(), json.dumps(rows, ensure_ascii=False) + "\n")
 
 
+def _boards_folder() -> str:
+    """Resolve the vault folder for boards, matching vault cleanup when an
+    older install's loam.toml still points boards under the inbox."""
+    inbox = lc.vault_folder("inbox").strip("/")
+    boards = lc.vault_folder("boards").strip("/")
+    if not boards or boards == f"{inbox}/boards":
+        return lc._VAULT_DEFAULTS["boards"]
+    return boards
+
+
 def _allowed_roots() -> tuple[Path, ...]:
     """Vault folders that may hold thread files: Boards, System (Loam files),
     and the configured inbox for legacy bindings."""
     roots = []
-    for key in ("boards", "system", "inbox"):
-        folder = lc.vault_folder(key)
+    for folder in (_boards_folder(), lc.vault_folder("boards"),
+                   lc.vault_folder("system"), lc.vault_folder("inbox")):
         if folder:
-            roots.append(threads.VAULT / folder)
+            root = threads.VAULT / folder
+            if root not in roots:
+                roots.append(root)
     return tuple(roots)
 
 
 def _folder_for(pid: str) -> Path:
     if pid == "boards":
-        return Path(lc.vault_folder("boards"))
+        return Path(_boards_folder())
     return Path(lc.vault_folder("system")) / pid
 
 

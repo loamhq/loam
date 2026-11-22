@@ -25,6 +25,7 @@ import re
 import shutil
 import subprocess
 import sys
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -168,6 +169,7 @@ def migrate_boards(vault: Path, *, inbox_folder: str | None = None,
     ``thread-files.json`` bindings. Leaves bindings outside ``<inbox>/boards/``
     (such as a legacy general comms note) untouched."""
     import loam_thread_files as tf  # noqa: PLC0415
+    import loam_threads as threads  # noqa: PLC0415
 
     inbox = (inbox_folder or lc.vault_folder("inbox")).strip("/")
     boards = (boards_folder or lc.vault_folder("boards")).strip("/")
@@ -178,83 +180,86 @@ def migrate_boards(vault: Path, *, inbox_folder: str | None = None,
         return []
 
     bpath = bindings_path or tf._binding_file()
-    bindings: dict = {}
-    if bpath.is_file():
-        try:
-            bindings = json.loads(bpath.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            bindings = {}
+    lock_ctx = (threads.locked(threads.STATE)
+                if not dry_run and bindings_path is None else nullcontext())
+    with lock_ctx:
+        bindings: dict = {}
+        if bpath.is_file():
+            try:
+                bindings = json.loads(bpath.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                bindings = {}
 
-    moved: list[dict] = []
-    updated_bindings = False
-    group = bindings.get("boards") if isinstance(bindings.get("boards"), dict) else {}
+        moved: list[dict] = []
+        updated_bindings = False
+        group = bindings.get("boards") if isinstance(bindings.get("boards"), dict) else {}
 
-    def _free_dest(name: str) -> str:
-        cand = f"{boards}/{name}"
-        if not (vault / cand).exists():
+        def _free_dest(name: str) -> str:
+            cand = f"{boards}/{name}"
+            if not (vault / cand).exists():
+                return cand
+            stem, dot, ext = name.rpartition(".")
+            if not dot:
+                stem, ext = name, ""
+            for i in range(2, 1000):
+                alt = f"{boards}/{stem} ({i}).{ext}" if ext else f"{boards}/{stem} ({i})"
+                if not (vault / alt).exists():
+                    return alt
             return cand
-        stem, dot, ext = name.rpartition(".")
-        if not dot:
-            stem, ext = name, ""
-        for i in range(2, 1000):
-            alt = f"{boards}/{stem} ({i}).{ext}" if ext else f"{boards}/{stem} ({i})"
-            if not (vault / alt).exists():
-                return alt
-        return cand
 
-    seen_src: set[str] = set()
-    for tid, row in sorted(group.items()):
-        if not isinstance(row, dict):
-            continue
-        rel = row.get("path")
-        if not isinstance(rel, str) or not rel.startswith(old_prefix):
-            continue
-        name = rel[len(old_prefix):]
-        if "/" in name or not name:
-            continue
-        src = vault / rel
-        target_rel = f"{boards}/{name}"
-        if (vault / target_rel).exists() and src.exists() and not (vault / target_rel).samefile(src):
-            target_rel = _free_dest(name)
-        dst = vault / target_rel
-        method = "binding-only"
-        if src.is_file():
-            seen_src.add(rel)
-            if not dry_run:
-                method = _move_preserving_history(vault, src, dst)
-            else:
-                method = "would-move"
-        if not dry_run:
-            row["path"] = target_rel
-            if isinstance(row.get("moving_to"), str) and row["moving_to"].startswith(old_prefix):
-                row["moving_to"] = f"{boards}/{row['moving_to'][len(old_prefix):]}"
-            updated_bindings = True
-        moved.append({"from": rel, "to": target_rel, "thread": tid, "how": method})
-
-    # Move any remaining unreferenced .md files in <inbox>/boards/ too.
-    old_dir = vault / inbox / "boards"
-    if old_dir.is_dir():
-        for entry in sorted(old_dir.iterdir()):
-            if entry.name.startswith(".") or not entry.is_file():
+        seen_src: set[str] = set()
+        for tid, row in sorted(group.items()):
+            if not isinstance(row, dict):
                 continue
-            rel = f"{old_prefix}{entry.name}"
-            if rel in seen_src:
+            rel = row.get("path")
+            if not isinstance(rel, str) or not rel.startswith(old_prefix):
                 continue
-            target_rel = _free_dest(entry.name)
+            name = rel[len(old_prefix):]
+            if "/" in name or not name:
+                continue
+            src = vault / rel
+            target_rel = f"{boards}/{name}"
+            if (vault / target_rel).exists() and src.exists() and not (vault / target_rel).samefile(src):
+                target_rel = _free_dest(name)
             dst = vault / target_rel
+            method = "binding-only"
+            if src.is_file():
+                seen_src.add(rel)
+                if not dry_run:
+                    method = _move_preserving_history(vault, src, dst)
+                else:
+                    method = "would-move"
             if not dry_run:
-                method = _move_preserving_history(vault, entry, dst)
-            else:
-                method = "would-move"
-            moved.append({"from": rel, "to": target_rel, "thread": None, "how": method})
-        if not dry_run:
-            _remove_empty_dir_chain(old_dir, vault / inbox)
+                row["path"] = target_rel
+                if isinstance(row.get("moving_to"), str) and row["moving_to"].startswith(old_prefix):
+                    row["moving_to"] = f"{boards}/{row['moving_to'][len(old_prefix):]}"
+                updated_bindings = True
+            moved.append({"from": rel, "to": target_rel, "thread": tid, "how": method})
 
-    if updated_bindings and not dry_run:
-        bpath.parent.mkdir(parents=True, exist_ok=True)
-        tmp = bpath.with_suffix(".tmp")
-        tmp.write_text(json.dumps(bindings, ensure_ascii=False) + "\n", encoding="utf-8")
-        os.replace(tmp, bpath)
+        # Move any remaining unreferenced .md files in <inbox>/boards/ too.
+        old_dir = vault / inbox / "boards"
+        if old_dir.is_dir():
+            for entry in sorted(old_dir.iterdir()):
+                if entry.name.startswith(".") or not entry.is_file():
+                    continue
+                rel = f"{old_prefix}{entry.name}"
+                if rel in seen_src:
+                    continue
+                target_rel = _free_dest(entry.name)
+                dst = vault / target_rel
+                if not dry_run:
+                    method = _move_preserving_history(vault, entry, dst)
+                else:
+                    method = "would-move"
+                moved.append({"from": rel, "to": target_rel, "thread": None, "how": method})
+            if not dry_run:
+                _remove_empty_dir_chain(old_dir, vault / inbox)
+
+        if updated_bindings and not dry_run:
+            bpath.parent.mkdir(parents=True, exist_ok=True)
+            tmp = bpath.with_name(f".{bpath.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(bindings, ensure_ascii=False) + "\n", encoding="utf-8")
+            os.replace(tmp, bpath)
 
     return moved
 
@@ -426,11 +431,65 @@ def migrate_quick_actions(vault: Path, *, dry_run: bool = False) -> dict:
     return plan
 
 
-def run_update_migration(vault: Path | None = None, *, dry_run: bool = False) -> dict:
-    """Run all Files-redesign vault migrations in order and return a report."""
+def pending_marker() -> Path:
+    return lc.STATE / "files" / "pending-cleanup.json"
+
+
+def _running_broker_rejects_boards(vault: Path) -> bool:
+    """True when a live session-broker on this install is still running a
+    pre-Boards revision whose ``loam_thread_files`` rejects paths outside the
+    configured inbox."""
+    if vault.resolve() != lc.VAULT.resolve():
+        return False
+    import loam_live  # noqa: PLC0415
+    import loam_update  # noqa: PLC0415
+
+    view = loam_live.broker_live(timeout=2)
+    if not view:
+        return False
+    rev = view.get("api_revision")
+    if not rev:
+        return True
+    src = loam_update.show(rev, loam_update.prefix() + "lib/loam_thread_files.py")
+    return src is not None and "def _allowed_roots(" not in src
+
+
+def run_update_migration(vault: Path | None = None, *, dry_run: bool = False,
+                         allow_stale_broker: bool = False) -> dict:
+    """Run all Files-redesign vault migrations in order and return a report.
+
+    When the live session-broker is still running a pre-Boards revision (such
+    as during ``bin/library install`` before the updater restarts the broker),
+    defer the migration and write a marker so the post-restart hook runs it
+    once the new broker is serving.
+    """
     import loam_contributions as contrib  # noqa: PLC0415
 
     vroot = (vault or lc.VAULT).resolve()
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if not dry_run and not allow_stale_broker and _running_broker_rejects_boards(vroot):
+        marker = pending_marker()
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        tmp = marker.with_name(f".{marker.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps({
+            "ts": now_iso,
+            "vault": str(vroot),
+            "reason": "running session-broker predates Boards/ thread-file support",
+        }, indent=2) + "\n", encoding="utf-8")
+        os.replace(tmp, marker)
+        return {
+            "ts": now_iso,
+            "vault": str(vroot),
+            "dry_run": False,
+            "deferred": True,
+            "reason": "running session-broker predates Boards/ thread-file support",
+            "boards_moved": [],
+            "failure_log_moved": [],
+            "folders_removed": [],
+            "folders_kept": [],
+            "quick_actions": {"status": "deferred"},
+        }
+
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     daily_vals = contrib.setting_values("daily-notes")
     extra = tuple(x for x in (
@@ -444,7 +503,7 @@ def run_update_migration(vault: Path | None = None, *, dry_run: bool = False) ->
     quick = migrate_quick_actions(vroot, dry_run=dry_run)
 
     report = {
-        "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "ts": now_iso,
         "vault": str(vroot),
         "dry_run": dry_run,
         "boards_moved": boards,
@@ -455,6 +514,8 @@ def run_update_migration(vault: Path | None = None, *, dry_run: bool = False) ->
     }
 
     if not dry_run:
+        if vroot == lc.VAULT.resolve():
+            pending_marker().unlink(missing_ok=True)
         try:
             out_path = lc.STATE / "files" / "last-cleanup.json"
             out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -465,7 +526,16 @@ def run_update_migration(vault: Path | None = None, *, dry_run: bool = False) ->
     return report
 
 
+def run_pending_migration() -> dict | None:
+    """Finish a vault migration that was deferred until session-broker restarted."""
+    if not pending_marker().is_file():
+        return None
+    return run_update_migration()
+
+
 def format_report(report: dict) -> str:
+    if report.get("deferred"):
+        return "Deferred vault cleanup until session-broker restarts on the new release."
     lines = []
     if report["boards_moved"]:
         lines.append(f"Moved {len(report['boards_moved'])} board(s) out of Inbox into Boards:")

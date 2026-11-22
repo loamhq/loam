@@ -153,6 +153,9 @@ def main(argv=None, *, wait=wait_idle, lock=None, restart=None,
             return DEFERRED
         migrate = args.when_idle and upgrading_session_units()
         status = restart()
+        if status == 0 and not migrate:
+            from loam_session_services import _finish_pending_cleanup  # noqa: PLC0415
+            _finish_pending_cleanup()
         return finish_upgrade() if migrate and status == 0 else status
 
 

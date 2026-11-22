@@ -10,10 +10,12 @@ from loam_session_services import Deferred, replace
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=["reconcile", "api", "host", "split", "combined"])
+    parser.add_argument("--eager-api", action="store_true",
+                        help="when reconciling split services, restart the API even if HOST is deferred")
     args = parser.parse_args()
     try:
         with loam_lock.live("Loam", "session-services"):
-            print(replace(args.mode), flush=True)
+            print(replace(args.mode, eager_api=args.eager_api), flush=True)
     except Deferred as exc:
         print(f"session restart deferred: {exc}", file=sys.stderr)
         sys.exit(75)

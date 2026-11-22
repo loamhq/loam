@@ -582,6 +582,39 @@ check(
     contrib.vault_folders(),
 )
 
+# ---------------------------------------------------------------------------
+# 9. Migration defers when a live pre-Boards broker is running, then completes
+# ---------------------------------------------------------------------------
+from unittest.mock import patch  # noqa: E402
+def_vault = TMP / "deferred-vault"
+(def_vault / "Inbox" / "boards").mkdir(parents=True)
+(def_vault / "Inbox" / "boards" / "t-def.md").write_text("# Deferred board\n", encoding="utf-8")
+tf_path.write_text(json.dumps({
+    "boards": {"t-def": {"path": "Inbox/boards/t-def.md", "title": "Deferred"}}
+}), encoding="utf-8")
+with patch.object(cleanup, "_running_broker_rejects_boards", return_value=True):
+    deferred = cleanup.run_update_migration(def_vault, dry_run=False)
+check(
+    "migration deferral: stale broker defers migration, preserves Inbox/boards, writes marker",
+    deferred.get("deferred") is True
+    and (def_vault / "Inbox" / "boards" / "t-def.md").is_file()
+    and json.loads(tf_path.read_text())["boards"]["t-def"]["path"] == "Inbox/boards/t-def.md"
+    and cleanup.pending_marker().is_file(),
+    deferred,
+)
+with patch.object(cleanup.lc, "VAULT", def_vault), \
+        patch.object(cleanup, "_running_broker_rejects_boards", return_value=False):
+    finished = cleanup.run_pending_migration()
+check(
+    "migration deferral: post-restart hook completes migration and clears marker",
+    finished is not None
+    and not finished.get("deferred")
+    and (def_vault / "Boards" / "t-def.md").is_file()
+    and json.loads(tf_path.read_text())["boards"]["t-def"]["path"] == "Boards/t-def.md"
+    and not cleanup.pending_marker().exists(),
+    finished,
+)
+
 passed = sum(results)
 total = len(results)
 print(f"\n{passed}/{total} passed")
