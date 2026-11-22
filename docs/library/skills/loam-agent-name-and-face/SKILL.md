@@ -26,7 +26,7 @@ soul and other files, in the vault, and in other agents' workspaces. Tell
 the owner in plain words where it still names the agent.
 
 Wait for the owner's direct yes to those edits. That yes covers the name
-in the owner's soul file and in another agent's workspace. If they ask
+in that agent's soul and in other agents' workspaces. If they ask
 you to rename the agent “everywhere,” they have already given it. Change
 only references to the agent in current text. Leave other uses of the word
 and history, including thread records and receipts, as written. Say what
