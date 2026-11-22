@@ -234,7 +234,9 @@ def test_wake_names_the_night():
         check("wake: all three refused lanes are in the log",
               sum(1 for line in log.splitlines() if line.startswith("- `") and
                   "account_refused" in line) == 3)
-        check("wake: no account-refused nightly fact is queued", not facts(), facts())
+        refused = [f.split("'s ", 1)[0] for f in facts() if "account_refused" in f]
+        check("wake: attention receives each affected lane and the account refusal",
+              sorted(refused) == ["juno", "pax", "wren"], facts())
         check("wake: and no public post", comms == "", comms)
         records = [json.loads(l) for l in
                    (root / "logs" / "wake-pax.jsonl").read_text().splitlines()]
@@ -249,8 +251,8 @@ def test_wake_names_the_night():
               otto == 5 and "**otto** — reflection identity preflight "
               "refused: soul.md content is not in the composed context "
               "(expected 'YES NO' for real/decoy, got 'NO NO')" in log, log)
-        check("wake: a persona's own failure is told to nobody but it (its next turn)",
-              comms == "" and not any("otto" in f for f in facts()), facts())
+        check("wake: an identity refusal reaches attention with its own cause",
+              comms == "" and any("otto" in f and "identity:" in f for f in facts()), facts())
         iris = wake_once(root, "iris", "YES NO", Done(
             1, json.dumps({"subtype": "error_during_execution"}), "boom"))
         check("wake: a genuine non-zero exit is still the CLI's failure",

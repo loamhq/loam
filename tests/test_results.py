@@ -18,6 +18,7 @@ from pathlib import Path
 
 AGENTS = Path(__file__).resolve().parent.parent
 TMP = Path(tempfile.mkdtemp(prefix="loam-results-"))
+os.environ["LOAM_ATTENTION_DIR"] = str(TMP / "attention")
 os.environ["LOAM_WAITERS_DIR"] = str(TMP / "waiters")
 os.environ["LOAM_LOCK_DIR"] = str(TMP / "locks")
 os.environ["LOAM_SCHEDULE_STATE"] = str(TMP / "schedules")
@@ -254,7 +255,11 @@ try:
     check("kick_for: a run's record starts its persona's drain; a thread's does not",
           (lr.kick_for("20261119-140000-00001111"), lr.kick_for("20261119-140000-00002222"),
            started) == ("started", None, [AGENT]), started)
-    check("kick_all: one per persona owed by a run", lr.kick_all() == {AGENT: "started"})
+    import loam_attention
+    from unittest.mock import patch
+    with patch.object(loam_attention, "persona", return_value="fixture-attention"):
+        check("kick_all: one drain for the result and one for the previously refused run",
+              lr.kick_all() == {AGENT: "started", "fixture-attention": "started"})
     rec = json.loads(w._path("20261119-140000-00002222").read_text())
     lr.to_headless(rec, "thread gone")
     moved = json.loads(w._path("20261119-140000-00002222").read_text())
