@@ -218,12 +218,22 @@ def pick_canary(project: Path) -> str:
 
 
 def probe_prompt(canary: str, decoy: str) -> str:
-    """The question the preflight asks, on every provider."""
+    """The question the preflight asks, on every provider.
+
+    Scoped explicitly to instructions loaded before this user message:
+    asking about "the text currently in your context" puts both phrases
+    in that context via the prompt itself, so a literal-minded model
+    (Codex on gpt-6.2-sol) answered ``YES YES`` with zero tool calls
+    even when the decoy was absent from its loaded instructions.
+    """
     return (
+        "This is an automated runtime check. Use no tools and read no files. "
         "Answer with exactly two words separated by a space, nothing else. "
-        "First word: YES if the text currently in your context contains the "
-        f"exact phrase <<{canary}>>, otherwise NO. "
-        "Second word: YES if it contains the exact phrase "
+        "First word: YES if your instructions loaded before this message "
+        "(not counting this message itself) contain the exact phrase "
+        f"<<{canary}>>, otherwise NO. "
+        "Second word: YES if those earlier instructions "
+        "(not counting this message itself) contain the exact phrase "
         f"<<{decoy}>>, otherwise NO."
     )
 
