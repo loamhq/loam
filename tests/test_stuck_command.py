@@ -10,6 +10,7 @@ import os
 import sys
 import tempfile
 import time
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -93,20 +94,19 @@ def run_stub(tmp: Path, shape: str, mode: str):
     stub = tmp / "stub.py"
     stub.write_text(STUB, encoding="utf-8")
     pidfile = job / "helper.pid"
-    calls: list[tuple[dict, int]] = []
     argv = [sys.executable, str(stub), shape, str(pidfile), mode]
     began = time.monotonic()
     if shape == "agy":
         code, run, timed_out = agy_job.run(
             argv, str(tmp), 60, job, job / "stderr.log",
-            on_stop=lambda record, n: calls.append((record, n)))
+            stop_quiet_commands=True)
     else:
         code, run, timed_out = codex_job.run(
             argv, str(tmp), 60, job, job / "stderr.log",
-            on_stop=lambda record, n: calls.append((record, n)))
+            stop_quiet_commands=True)
     took = time.monotonic() - began
     helper = int(pidfile.read_text())
-    return job, code, run, timed_out, took, calls, helper
+    return job, code, run, timed_out, took, helper
 
 
 def main() -> int:
@@ -115,7 +115,14 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="stuck-") as name:
         tmp = Path(name)
 
-        job, code, run, timed_out, took, calls, helper = run_stub(tmp, "agy", "own-group")
+        # New engineer calls use resumable shells. Even an active command
+        # event must never arm the old process-tree kill timer.
+        with patch.object(loam_stuck, "Watch", side_effect=AssertionError("watch armed")):
+            for runner in (agy_job, codex_job):
+                rc, _, _ = runner.run(["/bin/true"], str(tmp), 10, tmp, tmp / "err")
+                check(f"{runner.__name__}: engineer runs without a kill timer", rc, 0)
+
+        job, code, run, timed_out, took, helper = run_stub(tmp, "agy", "own-group")
         stops = loam_stuck.read_stops(job)
         check("agy: the engine finished on its own", (code, timed_out), (0, False))
         check("agy: well inside its 60 s ceiling", took < 30, True)
@@ -127,13 +134,12 @@ def main() -> int:
               ("bash -c sleep 600; echo slept", "SIGTERM (group)"))
         check("agy: the stop names what the engine said it ran",
               stops[0]["command"] if stops else None, "sleep 600")
-        check("agy: on_stop called once, with the job's count", [n for _, n in calls], [1])
         check("agy: the helper started before it was not touched (killed by the stub at its end only)",
               "helper" not in json.dumps(stops), True)
         stream = (job / agy_job.STREAM).read_text(encoding="utf-8")
         check("agy: the stream went on past the stop", '"status": "SUCCESS"' in stream, True)
 
-        job, code, run, timed_out, took, calls, helper = run_stub(tmp, "codex", "same-group")
+        job, code, run, timed_out, took, helper = run_stub(tmp, "codex", "same-group")
         stops = loam_stuck.read_stops(job)
         check("codex: the engine finished on its own", (code, timed_out), (0, False))
         check("codex: one stop, by subtree (it shares the engine's group)",
@@ -142,9 +148,9 @@ def main() -> int:
               '"exit_code": -15' in (job / codex_job.STREAM).read_text(encoding="utf-8")
               or '"exit_code": 143' in (job / codex_job.STREAM).read_text(encoding="utf-8"), True)
 
-        job, code, run, timed_out, took, calls, helper = run_stub(tmp, "agy", "background")
+        job, code, run, timed_out, took, helper = run_stub(tmp, "agy", "background")
         check("background: a silence after the command returned stops nothing",
-              (loam_stuck.read_stops(job), calls), ([], []))
+              loam_stuck.read_stops(job), [])
 
         check("receipt: no stops, no paragraph", loam_stuck.receipt_text(job), "")
         sample = tmp / "agy-own-group"
@@ -167,6 +173,15 @@ def main() -> int:
         spec = importlib.util.spec_from_loader(loader.name, loader)
         job_mod = importlib.util.module_from_spec(spec)
         loader.exec_module(job_mod)
+        for platform in (False, True):
+            project = job_mod.eng.Project(
+                "sample", tmp, tmp / "jobs", platform=platform, record={})
+            settings = job_mod.claude_job_settings(project, "20261117-120000-abcdef01")
+            groups = settings["hooks"]["PreToolUse"]
+            check("Claude job keeps its original guard source",
+                  job_mod.GUARD_SETTINGS["hooks"]["PreToolUse"][0] in groups, not platform)
+            check("Claude job sets its Bash foreground adapter", groups[-1]["matcher"], "Bash")
+
         now = datetime(2026, 11, 17, 12, 0, tzinfo=timezone.utc)
         check("status: a working job says its last event",
               job_mod.quiet_words({"last_activity": "2026-11-17T11:57:00Z"}, now),
@@ -177,31 +192,6 @@ def main() -> int:
         check("status: a stuck one says so, with its stops",
               words, "NO ACTIVITY FOR 13 h 9 min (last engine event 2026-11-16T22:51:00Z); "
                      "it may be stuck; the launcher stopped 1 command that never returned")
-
-        # A repeated watchdog stop produces one fact for the system persona.
-        told, posted = [], []
-        fake = type(sys)("loam_attention")
-        fake.tell = lambda text, **kw: told.append((text, kw)) or "told"
-        threads_fake = type(sys)("loam_threads")
-        threads_fake.append = lambda *a, **kw: posted.append(a)
-        sys.modules["loam_attention"] = fake
-        sys.modules["loam_threads"] = threads_fake
-        try:
-            on_stop = job_mod.stuck_stopped({}, {"thread": "t-1", "title": "Polish"}, "j1")
-            record = {"pid": 7, "quiet_minutes": 30, "argv": "bash -c node --test",
-                      "command": "node --test test/x.test.js"}
-            on_stop(record, 1)
-            check("first stop: nothing told", told, [])
-            on_stop(record, 2)
-            on_stop(record, 3)
-            check("second stop: one fact, and only one", len(told), 1)
-            check("...keyed on the job", told[0][1].get("key"), "stuck:j1")
-            check("...naming the job and the command",
-                  "“Polish”" in told[0][0] and "node --test test/x.test.js" in told[0][0], True)
-            check("nothing is posted in the briefing thread", posted, [])
-        finally:
-            sys.modules.pop("loam_attention", None)
-            sys.modules.pop("loam_threads", None)
 
         sessions = tmp / "sessions"
         (sessions / "sid" / "subagents").mkdir(parents=True)

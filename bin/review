@@ -705,7 +705,7 @@ def run(pinned: str | None) -> int:
             before_files = agy_files.snapshot()
             returncode, agy_run, timed_out = agy_job.run(
                 agy_argv(run_dir, prompt), str(workdir), WALL_SECONDS, run_dir,
-                run_dir / "session-stderr.log")
+                run_dir / "session-stderr.log", stop_quiet_commands=True)
             envelope = {"session_id": agy_run.conversation_id,
                         "subtype": "success" if not agy_run.failed else "error",
                         "num_turns": agy_run.num_turns}
@@ -721,7 +721,8 @@ def run(pinned: str | None) -> int:
             (run_dir / "runtime").write_text("codex\n", encoding="utf-8")
             returncode, codex_run, timed_out = codex_job.run(
                 codex_argv(prompt, outbox), str(workdir), WALL_SECONDS, run_dir,
-                run_dir / "session-stderr.log", max_turns=MAX_TURNS or 0, record_stream=False)
+                run_dir / "session-stderr.log", max_turns=MAX_TURNS or 0, record_stream=False,
+                stop_quiet_commands=True)
             envelope = {"session_id": codex_run.thread_id, "num_turns": codex_run.turns}
         else:
             result = subprocess.run(

@@ -1,43 +1,7 @@
-"""A command that never returns, stopped so its engine can carry on (2026-11-17).
+"""Legacy command-stop records and the reviewer's quiet-command watcher.
 
-Caused on 2026-11-16: an Antigravity job ran ``node --test`` on a test that
-left a retrying fetch loop alive, so the command never exited. ``agy`` has no
-per-command timeout; the job sat for 13 hours with its heartbeat ticking (the
-launcher writes the heartbeat, not the engine), and nothing said it was stuck.
-It was unblocked by killing the node child by hand, and Antigravity, given the
-command's death, carried on.
-
-So, for an engine whose stream the launcher reads line by line (Codex and
-Antigravity; ``lib/loam_codex_job.py``, ``lib/loam_agy_job.py``): when the
-engine has written nothing for ``CHILD_STOP_MINUTES`` and its last event says
-a command is running, the launcher stops that command -- not the engine, not
-the job -- and the engine gets an error back.
-
-Which processes are "the command" is read from two places that must agree:
-
-- **the engine's own word**: its last event says a command started and has
-  not finished (Antigravity: a ``step_update`` whose state is ``ACTIVE`` on a
-  tool step; Codex: ``item.started`` on a ``command_execution``). A silence
-  after a command finished -- the model thinking, the API retrying -- is never
-  acted on, so a server the job started in the background is never touched;
-- **the process tree**: the topmost descendants of the engine's process that
-  started no earlier than the event before the last one. The engine itself,
-  its language server and its MCP servers started before that and are never
-  candidates.
-
-Each is stopped by its own process group when it leads one (Antigravity runs
-every command as ``bash -c`` in a group of its own, caused 2026-11-17), else by
-signalling its subtree pid by pid, so a command that shares the engine's group
-can never take the engine with it: SIGTERM, then SIGKILL after
-``GRACE_SECONDS``. Caused 2026-11-17 on agy 1.5.9: a ``sleep`` killed this
-way came back to the model as "Command was terminated by signal or canceled",
-and the run went on to its result.
-
-Every stop is a line of ``child-stops.jsonl`` in the job directory, which the
-receipt's launcher half reads. A Claude Code engine needs none of this: its
-Bash tool ends a command at its own timeout (two minutes by default, ten at
-most; this box sets neither variable), and a background command returns at
-once, so no command can hold a Claude session for thirty minutes.
+Engineer jobs yield through their shell tools. Only the reviewer opts into
+this watcher. Historical engineer receipts still read child-stops.jsonl.
 """
 
 from __future__ import annotations
@@ -136,11 +100,10 @@ class Watch:
 
     The reader calls ``line`` for every line it writes to the stream; the
     thread ``start`` begins calls ``check`` every ``check_seconds``.
-    ``on_stop(record, stops_so_far)`` is called after each stop, with the
-    count across the whole job (a quota retry is the same job)."""
+    The reviewer opts in at launch."""
 
     def __init__(self, root_pid: int, busy: Callable[[dict], str | None],
-                 job_dir: Path, on_stop: Callable[[dict, int], None] | None = None,
+                 job_dir: Path,
                  limit_minutes: float | None = None,
                  check_seconds: float | None = None,
                  clock: Callable[[], float] = time.time,
@@ -148,7 +111,6 @@ class Watch:
         self.root = root_pid
         self.busy = busy
         self.job_dir = job_dir
-        self.on_stop = on_stop
         self.limit = (CHILD_STOP_MINUTES if limit_minutes is None else limit_minutes) * 60
         self.check_seconds = CHECK_SECONDS if check_seconds is None else check_seconds
         self.clock = clock
@@ -218,11 +180,6 @@ class Watch:
             except OSError:
                 pass
             made.append(record)
-            if self.on_stop:
-                try:
-                    self.on_stop(record, len(read_stops(self.job_dir)))
-                except Exception:  # noqa: BLE001 - a watcher never ends a job
-                    pass
         return made
 
     def _stop(self, pid: int) -> str:

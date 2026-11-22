@@ -200,6 +200,15 @@ try:
     check("env: API key and Claude login out",
           ("GEMINI_API_KEY" in env, "CLAUDE_CODE_OAUTH_TOKEN" in env, env["A"]),
           (False, False, "1"))
+    check("env: without command_scratch, no bash handoff shim",
+          ("LOAM_COMMAND_SCRATCH" in env, "LOAM_COMMAND_PATH_SHIM" in env),
+          (False, False))
+    senv = aj.env({"PATH": "/usr/bin:/bin", "LOAM_WALL_PATH": "/usr/bin:/bin"},
+                  command_scratch=jd / "scratch")
+    check("env: with command_scratch, shim leads PATH and LOAM_WALL_PATH",
+          (senv["PATH"].split(":")[0], senv["LOAM_WALL_PATH"].split(":")[0],
+           senv["LOAM_COMMAND_SCRATCH"], senv["LOAM_COMMAND_STREAM"]),
+          (str(aj.SHIM_DIR), str(aj.SHIM_DIR), str(jd / "scratch"), "1"))
 
     # -- the stream --------------------------------------------------------
     usage = {"input_tokens": 100, "output_tokens": 7, "thinking_tokens": 3,

@@ -135,6 +135,8 @@ try:
     check("argv: no connector apps, browser, desktop, plugins",
           {"apps", "browser_use", "computer_use", "plugins"} <= disabled,
           True)
+    check("argv: shell waits have resumable sessions", "unified_exec" in argv, True)
+    check("argv: blocking clock sleep is disabled", "sleep_tool" in disabled, True)
     check("argv: user config ignored", "--ignore-user-config" in argv, True)
     check("argv: no bypass of the sandbox", "dangerously" in joined, False)
     check("argv: instructions as a TOML string",
