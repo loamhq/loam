@@ -287,6 +287,15 @@ def log_line(agent: str, payload: dict) -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     with (LOG_DIR / f"wake-{agent}.jsonl").open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(payload) + "\n")
+    # The attention lane already retains failed deliveries for retry. Reporting
+    # its own refusal back into that queue would generate a second incident.
+    lane = payload.get("lane") or "reflection"
+    if payload.get("ok") is False and lane != "attention" and payload.get("stage") != "not_enabled":
+        import loam_attention
+        import loam_lane_notice
+        reason = loam_lane_notice.cause_of(payload)
+        loam_attention.tell(f"{agent}'s {loam_lane_notice.lane_label(lane)} failed: {reason}",
+                            by="wake", evidence=str(LOG_DIR / f"wake-{agent}.jsonl"))
 
 
 def account_refused(agent: str, vault: Path, started: str, lane: str,

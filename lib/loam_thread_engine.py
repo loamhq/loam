@@ -2271,6 +2271,10 @@ class ThreadEngine:
         self._marks_save()
         steps.log(f"{thread_id} {persona or '-'}: mark: {text}")
         self.publish(thread_id, {"type": "turn.mark", **row})
+        if persona:
+            import loam_attention
+            loam_attention.tell(text, by=f"thread {thread_id}/{persona}",
+                                evidence=f"thread {thread_id}")
         return row
 
     def clear_mark(self, thread_id: str, persona: str) -> None:

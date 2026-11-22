@@ -14,7 +14,8 @@ const results = []
 try {
   for (const width of [390, 1440]) for (const theme of ['light', 'dark']) {
     const app = await oneProductFixture()
-    const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 }, colorScheme: theme, isMobile: width === 390, hasTouch: width === 390, reducedMotion: 'reduce' })
+    app.routes['GET /v1/settings/composer'] = (_, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ send_key: 'modifier' })) }
+    const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 }, colorScheme: theme, isMobile: width === 390, ...(width === 390 ? { userAgent: 'Mozilla/5.0 (Linux; Android 15) Chrome/140.0 Mobile Safari/537.36' } : {}), hasTouch: width === 390, reducedMotion: 'reduce' })
     await context.route('**/app.js', (route) => route.fulfill({ contentType: 'text/javascript', body: source + '\nglobalThis.__mention = { threads, goChats };' }))
     const page = await context.newPage(), errors = [], captures = [], geometry = {}
     page.on('pageerror', (error) => errors.push(error.message))
@@ -36,8 +37,12 @@ try {
       await pair('inserted', async () => { await thread(); await draft.fill(''); await hit(toggle); await opened(); assert.equal(await text(), '@'); assert.equal(await draft.evaluate((el) => document.activeElement === el), true) })
       await pair('removed', async () => { await thread(); await draft.fill(''); await hit(toggle); await opened(); await draft.pressSequentially('qui'); assert.equal(await text(), '@qui'); await hit(toggle); await closed(); assert.equal(await text(), '') })
       await pair('chosen', async () => { await thread(); await draft.fill(''); await hit(toggle); await hit(list.getByRole('option').filter({ hasText: 'Quill' })); await closed(); assert.equal(await text(), '@quill '); await draft.pressSequentially('A thought to share.'); assert.equal(await text(), '@quill A thought to share.') })
-      await pair('hint', async () => { await thread(); await draft.fill(''); assert.equal(await page.locator('.thread-dock .hint').count(), width === 390 ? 0 : 1); if (width === 1440) assert.doesNotMatch(await page.locator('.thread-dock .hint').innerText(), /@| · /) })
-      assert.match(await page.locator('.thread-dock .hint').innerText(), /Sprout asks before anything irreversible/)
+      await pair('hint', async () => {
+        await thread(); await draft.fill('')
+        const hint = page.locator('.thread-dock .hint')
+        await hint.waitFor()
+        assert.equal(await hint.innerText(), width === 390 ? 'Return adds a new line' : 'Ctrl+↩ to send')
+      })
       await thread(); await draft.fill('before after')
       await draft.evaluate(async (el) => { const { setMarkdown } = await import('/compose.js'); el.focus(); setMarkdown(el, el.value, 6) })
       await hit(toggle); await opened(); assert.equal(await text(), 'before @ after')

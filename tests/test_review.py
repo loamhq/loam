@@ -37,8 +37,10 @@ def load_review():
 
 
 def main() -> int:
-    rv = load_review()
     tmp = Path(tempfile.mkdtemp(prefix="review-test-"))
+    os.environ["LOAM_ATTENTION_DIR"] = str(tmp / "attention")
+    os.environ["LOAM_RESULTS_KICK"] = "0"
+    rv = load_review()
     saved = {k: getattr(rv, k) for k in ("AI_LABS", "COMMONS", "STATE", "RUNS", "MEMORY", "NOTES", "INBOX",
                                          "VAULT", "LOG", "REVIEWER", "WAKE_STATE", "PROVIDER",
                                          "MODEL", "EFFORT", "MCP_FILE")}
@@ -223,6 +225,10 @@ def refusals_reach_the_failure_log(rv, tmp: Path, check) -> None:
     stages = [json.loads(l)["stage"] for l in rv.LOG.read_text().splitlines()]
     check(stages == ["preflight"] * 2 + ["lock_timeout"] * 2,
           "each refusal is also in the reviewer's own log")
+    import loam_attention
+    facts = [row["fact"] for row in loam_attention.pending() if row["by"] == "reviewer"]
+    check(any("preflight refused" in f for f in facts) and any("run lock" in f for f in facts),
+          "both kinds of reviewer refusal reach the attention queue")
     comms = rv.VAULT / "00_INBOX" / "from-agents" / "Owner notes.md"
     check(not comms.exists(), "and none of them posts a comms line")
 

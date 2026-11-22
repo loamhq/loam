@@ -12,6 +12,8 @@ from pathlib import Path
 
 AGENTS = Path(__file__).resolve().parent.parent
 TMP = Path(tempfile.mkdtemp())
+os.environ["LOAM_ATTENTION_DIR"] = str(TMP / "attention")
+os.environ["LOAM_RESULTS_KICK"] = "0"
 os.environ["LOAM_VAULT"] = str(TMP / "vault")
 os.environ["LOAM_AI_LABS"] = str(TMP / "ai-labs")
 os.environ["LOAM_THREADS_STATE"] = str(TMP / "state")
@@ -370,6 +372,10 @@ async def main():
     check("...a mark on Ada's turn says it ended",
           [(m["persona"], m["text"]) for m in server.threads.marks_for(tid)],
           [("ada", "Ada's turn ended: its session exited")])
+    import loam_attention
+    check("...the attention run receives the same failure and its thread",
+          any(r["fact"] == "Ada's turn ended: its session exited" and r["evidence"] == f"thread {tid}"
+              for r in loam_attention.pending()), True)
     done = [e["message"] for e in w.items() if e["type"] == "message.done"]
     marked = [e.get("text") for e in w.items() if e["type"] == "turn.mark"]
     check("...the stream says the same, and no placeholder anywhere",

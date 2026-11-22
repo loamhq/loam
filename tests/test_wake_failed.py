@@ -13,6 +13,9 @@ LOG = lc.LOGS / f"wake-{AGENT}.jsonl"
 # Put the schedule fire log in the fixture's schedule state directory.
 os.environ["LOAM_SCHEDULE_STATE"] = tempfile.mkdtemp(prefix="loam-wake-failed-sched-")
 
+attention = Path(os.environ["LOAM_SCHEDULE_STATE"]) / "attention"
+os.environ["LOAM_ATTENTION_DIR"] = str(attention)
+os.environ["LOAM_RESULTS_KICK"] = "0"
 fails = 0
 
 
@@ -88,6 +91,9 @@ try:
         check("kept the dead run's own start time",
               log and log[0].get("ts") == "2026-08-30T10:00:11Z", str(log))
         check("reached the vault the dead run was using", len(note_bullets(vault)) == 1)
+        facts = [json.loads(p.read_text())["fact"] for p in attention.glob("2*.json")]
+        check("the attention run receives both the refused and killed wake",
+              any("preflight" in fact for fact in facts) and any("died_mid_run" in fact for fact in facts))
         check("consumed the marker", not STATE.exists(),
               "a surviving marker makes the next failure look unrecorded too")
     cleanup()

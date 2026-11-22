@@ -19,7 +19,7 @@ LIMIT_CHARS = 10_000
 
 # The earlier warning, kept beside the limit so the two cannot drift apart.
 # A file between this and LIMIT_CHARS is reported -- one line in the failure
-# log, no comms line, at most one per night -- and the run proceeds exactly
+# log, at most one per night -- and the run proceeds exactly
 # as it would have. Nothing refuses at this number; the edit-time guard in
 # hooks/boundary_guard.py knows only LIMIT_CHARS.
 #
