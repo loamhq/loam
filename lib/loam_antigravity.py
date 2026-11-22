@@ -6,6 +6,7 @@ Render workspace instructions in the format this provider loads.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import subprocess
@@ -60,6 +61,39 @@ PROVIDER_LINE = ("You are running on Antigravity through Loam's broker: the "
 # argv string is capped at 128 KiB by the kernel (MAX_ARG_STRLEN).
 ARG_MAX_CHARS = 100_000
 PROMPTS_DIR = cfg.STATE_DIR / "antigravity" / "prompts"
+
+# Keep video tool input under the inline media budget, including room for
+# encoding overhead. The account-backed CLI has no Files API input block.
+VIDEO_INPUT_MAX_BYTES = 16 * 1024 * 1024
+
+
+def video_preview(source: str, output: Path) -> bool:
+    """Make a smaller MP4 of the whole video for agy's read_file tool."""
+    formats = ["-protocol_whitelist", "file,pipe", "-format_whitelist", "mov,matroska,webm"]
+    try:
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", *formats, "-show_entries", "format=duration",
+             "-of", "csv=p=0", source], capture_output=True, check=True, timeout=15)
+        # A WebM recorded to a stream can lack a duration in its header.
+        # Use a conservative bitrate in that case and check the result below.
+        duration = 300 if probe.stdout.strip() == b"N/A" else float(probe.stdout)
+        if not math.isfinite(duration) or duration <= 0:
+            return False
+        bits_per_second = min(2_400_000, int(VIDEO_INPUT_MAX_BYTES * 8 * .88 / duration))
+        audio_rate = min(64_000, max(8_000, bits_per_second // 4))
+        video_rate = max(1_000, bits_per_second - audio_rate)
+        subprocess.run(
+            ["ffmpeg", "-v", "error", "-nostdin", "-threads", "2", *formats, "-i", source,
+             "-map", "0:V:0", "-map", "0:a:0?", "-sn", "-dn", "-map_metadata", "-1",
+             "-vf", "scale=w=min(1280\\,iw):h=min(720\\,ih):force_original_aspect_ratio=decrease:force_divisible_by=2,fps=12",
+             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "25",
+             "-maxrate", str(video_rate), "-bufsize", str(max(1, video_rate // 2)),
+             "-c:a", "aac", "-ac", "2", "-b:a", str(audio_rate), "-threads", "2",
+             "-movflags", "+faststart", str(output)], stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=300)
+        return 0 < output.stat().st_size <= VIDEO_INPUT_MAX_BYTES
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
 
 
 def env(base: dict | None = None) -> dict:

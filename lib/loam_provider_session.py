@@ -14,6 +14,7 @@ import os
 import shlex
 import signal
 import sys
+import tempfile
 import time
 import uuid
 from datetime import datetime, timezone
@@ -2479,6 +2480,7 @@ class AntigravitySession(Session):
     # Each turn runs in a separate process without an interactive stdin. Queue incoming
     # messages for the next turn.
     STEERS = False
+    _video_preparers = asyncio.Semaphore(2)
 
     async def steer(self, text: str,
                     attachments: list[dict] | None = None, *,
@@ -2490,8 +2492,9 @@ class AntigravitySession(Session):
                            dispatch_id: str | None = None) -> int:
         if self.state != "running":
             raise BrokerError(409, f"session {self.id} is not running")
-        if self.proc is not None and self.proc.returncode is None:
+        if self._turn_active or (self.proc is not None and self.proc.returncode is None):
             raise BrokerError(409, f"session {self.id} has a turn in flight")
+        self._turn_active = True
         attachments = attachments or []
         event = {"type": "broker.user_message", "session_id": self.id,
                  "text": text}
@@ -2499,18 +2502,44 @@ class AntigravitySession(Session):
             event["dispatch_id"] = dispatch_id
         if attachments:
             event["attachments"] = attachments
-        await self.emit(event)
+        try:
+            await self.emit(event)
+        except (OSError, asyncio.CancelledError):
+            self._turn_active = False
+            raise
+        previews = None
         lines = [self._timed(text)] if text or self.tell_time else []
         if attachments:
             lines.append("Attached to this message (files on disk):")
-            for item in attachments:
+            for position, item in enumerate(attachments, 1):
                 lines.append(f"- {item['path']} ({item['type']}, "
                              f"{human_size(item['size'])})")
-                if (item.get("type") or "").startswith("video/"):
+                if not (item.get("type") or "").startswith("video/"):
+                    continue
+                if item['size'] <= agy.VIDEO_INPUT_MAX_BYTES:
                     lines.append("Use read_file on this video to see its contents.")
+                    continue
+                try:
+                    if previews is None:
+                        previews = tempfile.TemporaryDirectory(prefix="loam-video-")
+                    preview = Path(previews.name) / f"attachment-{position}.mp4"
+                    async with self._video_preparers:
+                        ready = await asyncio.to_thread(agy.video_preview, item['path'], preview)
+                except OSError:
+                    ready = False
+                if self._stop_requested:
+                    if previews is not None:
+                        previews.cleanup()
+                    self._turn_active = False
+                    raise BrokerError(409, "This turn was stopped while preparing the video.")
+                if ready:
+                    lines.append(f"Use read_file on {preview} to watch a smaller copy "
+                                 "covering the full duration of the video above.")
+                else:
+                    lines.append("Loam could not make a smaller copy for read_file. "
+                                 "Keep the original path available and tell the user if you cannot watch it.")
         prompt = agy.prompt_arg(self.id, "\n".join(lines))
         self.last_activity = time.time()
-        self._turn_active = True
         if self.title is None:
             self.title = first_words(
                 text or (f"Attached {attachments[0]['name']}"
@@ -2531,12 +2560,21 @@ class AntigravitySession(Session):
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 env=env, start_new_session=True, limit=16 * 1024 * 1024)
         except OSError as exc:
+            if previews is not None:
+                previews.cleanup()
             await Session._handle(self, self._agy.result(
                 {"status": "ERROR", "error": f"agy did not start: {exc}"}))
             return event["seq"]
-        asyncio.create_task(self._pump_stdout())
+        asyncio.create_task(self._pump_turn(previews))
         asyncio.create_task(self._pump_stderr())
         return event["seq"]
+
+    async def _pump_turn(self, previews) -> None:
+        try:
+            await self._pump_stdout()
+        finally:
+            if previews is not None:
+                previews.cleanup()
 
     async def _handle(self, obj: dict) -> None:
         if obj.get("type") == "broker.exit":   # an unparsable line, as is

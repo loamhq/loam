@@ -2,6 +2,8 @@
 // token. Everything above it speaks to these functions; the browser speaks to
 // the routes in server.js, never to the broker, and never sees the token.
 
+import http from 'node:http'
+import https from 'node:https'
 import { Readable } from 'node:stream'
 
 export class BrokerNotConfigured extends Error {
@@ -77,6 +79,36 @@ export function createBroker(config, { fetchImpl = fetch } = {}) {
         contentType: res.headers.get('content-type') ?? 'application/json',
         body: text,
       }
+    },
+
+    // The broker can refuse a video from its headers while the client is
+    // still sending. Relay the answer as soon as it arrives and let the
+    // request stream apply backpressure while the broker writes to disk.
+    uploadVideo(path, { body, signal }) {
+      const target = new URL(url(path))
+      const transport = target.protocol === 'https:' ? https : http
+      return new Promise((resolve, reject) => {
+        const upstream = transport.request(target, {
+          method: 'PUT', signal,
+          headers: headers({ 'content-length': body.headers['content-length'], 'content-type': 'application/octet-stream' }),
+        }, async (res) => {
+          body.unpipe(upstream)
+          body.resume()
+          try {
+            let text = ''
+            res.setEncoding('utf8')
+            for await (const chunk of res) text += chunk
+            resolve({ status: res.statusCode, contentType: res.headers['content-type'] ?? 'application/json', body: text })
+          } catch (error) { reject(error) }
+          finally { upstream.destroy() }
+        })
+        upstream.setTimeout(130_000, () => upstream.destroy(new Error('The video connection timed out.')))
+        upstream.on('error', reject)
+        const lost = error => upstream.destroy(error)
+        body.on('error', lost)
+        upstream.once('close', () => body.off('error', lost))
+        body.pipe(upstream)
+      })
     },
 
     // A file's bytes, for a download. The status, the type, the name the host

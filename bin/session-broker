@@ -24,10 +24,12 @@ import pty
 import re
 import signal
 import sys
+import tempfile
 import termios
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import parse_qs, unquote
 
 # lib/ beside this file, not the canonical path: a test that loads this
 # script from a clone elsewhere then exercises that clone's modules.
@@ -991,6 +993,8 @@ JSON_BODY_MAX = 4 * 1024 * 1024
 # wire body is allowed a little more than the file itself. The app in front of
 # this one allows itself the same slack (loam-ui, src/server.js).
 MULTIPART_SLACK = 8 * 1024
+VIDEO_UPLOAD_IDLE_S = 120
+VIDEO_UPLOAD_CHUNK = 256 * 1024
 
 
 def parse_multipart(content_type: str, body: bytes) -> list[dict]:
@@ -1110,6 +1114,21 @@ class Server:
                 break
             key, _, value = line.decode("utf-8", "replace").partition(":")
             headers[key.strip().lower()] = value.strip()
+        path, _, query = target.partition("?")
+        video_upload = (re.fullmatch(r"/v1/threads/([^/]+)/attachments", path)
+                        if method == "PUT" else None)
+        if video_upload:
+            if headers.get("authorization", "") != f"Bearer {self.broker.token}":
+                writer.write(response(401, {"error": "bearer token required"}))
+            else:
+                try:
+                    item = await self.store_video(unquote(video_upload[1]), query, headers, reader)
+                    writer.write(response(201, {"attachments": [item]}))
+                except (BrokerError, threads_rec.ThreadError) as exc:
+                    writer.write(response(exc.status, {"error": exc.message}))
+            await writer.drain()
+            return
+
         # An upload is the one body on this interface that is not JSON, and the
         # one that can be megabytes. Both facts are decided here, before a byte
         # of it is kept: how much may be read, and whether it is parsed at all.
@@ -1129,7 +1148,6 @@ class Server:
         elif length:
             body = await reader.readexactly(length)
 
-        path, _, query = target.partition("?")
         params = dict(
             part.split("=", 1) if "=" in part else (part, "")
             for part in query.split("&") if part
@@ -1207,6 +1225,7 @@ class Server:
         if parts == ["v1", "limits"] and method == "GET":
             writer.write(response(200, {
                 "attachment_max_bytes": cfg.ATTACHMENT_MAX_BYTES,
+                "video_attachment_max_bytes": cfg.VIDEO_ATTACHMENT_MAX_BYTES,
                 "inline_image_max_bytes": cfg.INLINE_IMAGE_MAX_BYTES,
                 "attachment_types": sorted(set(cfg.ATTACHMENT_TYPES.values())),
                 # Files' Upload: the same cap, its own list of extensions.
@@ -2630,6 +2649,55 @@ class Server:
         target.write_bytes(data)
         return {"path": str(target), "name": target.name,
                 "size": len(data), "type": media_type}
+
+    async def store_video(self, thread_id: str, query: str, headers: dict,
+                          reader: asyncio.StreamReader) -> dict:
+        """Accept one video as bytes and only publish the file after EOF at its declared size."""
+        params = parse_qs(query)
+        name = cfg.sanitise_name(params.get("name", [""])[0])
+        media_type = cfg.attachment_type(name)
+        if not media_type or not media_type.startswith("video/"):
+            raise BrokerError(415, "Choose an MP4, MOV or WebM video.")
+        length = headers.get("content-length", "")
+        if headers.get("transfer-encoding") or not re.fullmatch(r"[0-9]{1,16}", length):
+            raise BrokerError(400, "The upload did not say how big the video is.")
+        size = int(length)
+        if size > cfg.VIDEO_ATTACHMENT_MAX_BYTES:
+            raise BrokerError(413, f"Videos can be up to {human_size(cfg.VIDEO_ATTACHMENT_MAX_BYTES)} each.")
+        if size == 0:
+            raise BrokerError(400, "This video is empty.")
+        with fence.admission() as admitted:
+            if not admitted:
+                raise BrokerError(503, "Loam is updating. Try attaching the video again shortly.")
+            threads_rec.read(thread_id)
+
+        directory = cfg.attachment_dir(params.get("app", ["loam-ui"])[0])
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(dir=directory, prefix=".video-", suffix=".tmp") as staged:
+                remaining = size
+                while remaining:
+                    async with asyncio.timeout(VIDEO_UPLOAD_IDLE_S):
+                        chunk = await reader.read(min(remaining, VIDEO_UPLOAD_CHUNK))
+                    if not chunk:
+                        raise BrokerError(400, "The connection closed before the video finished uploading.")
+                    await asyncio.to_thread(staged.write, chunk)
+                    remaining -= len(chunk)
+                await asyncio.to_thread(staged.flush)
+                os.fchmod(staged.fileno(), 0o644)
+                with fence.admission() as admitted:
+                    if not admitted:
+                        raise BrokerError(503, "Loam is updating. Try attaching the video again shortly.")
+                    threads_rec.read(thread_id)
+                    target = cfg.free_path(directory, name)
+                    os.link(staged.name, target)
+        except TimeoutError:
+            raise BrokerError(400, "The connection paused too long. Try attaching the video again.") from None
+        except OSError as exc:
+            if exc.errno in (errno.ENOSPC, errno.EDQUOT):
+                raise BrokerError(503, "There is not enough space in the vault for this video.") from None
+            raise
+        return {"path": str(target), "name": target.name, "size": size, "type": media_type}
 
     async def files_route(self, method: str, tail: list[str], params: dict,
                           payload: dict, writer: asyncio.StreamWriter,

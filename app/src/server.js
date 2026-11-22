@@ -82,7 +82,10 @@ export function createApp({
   const content = createContent({ origin: config.filesContentOrigin, broker })
   const contentHost = config.filesContentOrigin ? new URL(config.filesContentOrigin).host : null
 
-  const server = http.createServer(async (req, res) => {
+  // A 512 MB video takes over an hour at 1 Mbps. Keep the header timeout
+  // and give the request body time to finish. The video relay also watches
+  // for an idle connection, independently of the total request time.
+  const server = http.createServer({ requestTimeout: 2 * 60 * 60 * 1000 }, async (req, res) => {
     for (const [k, v] of Object.entries(securityHeaders)) res.setHeader(k, v)
     // The one page this app frames itself (2026-11-19): a theme's preview
     // scene (public/theme-scene.html), drawn in the Market and Settings.
@@ -348,8 +351,8 @@ export function createApp({
       const [, id, action] = threadRoute
       const allowed = !id ? ['GET', 'POST'].includes(method)
         : ['events', 'steps'].includes(action) ? method === 'GET'
-        : action === 'messages' ? ['POST', 'PUT'].includes(method)
-        : ['attachments', 'answer'].includes(action) ? method === 'POST'
+        : ['attachments', 'messages'].includes(action) ? ['POST', 'PUT'].includes(method)
+        : action === 'answer' ? method === 'POST'
         : action === 'board' ? ['GET', 'PUT'].includes(method)
         : ['GET', 'PATCH', 'DELETE'].includes(method)
       if (!allowed) return sendJson(res, 405, { error: 'This operation is not available for threads.' })
@@ -359,6 +362,25 @@ export function createApp({
       }
       const target = `/v1/threads${id ? `/${encodeURIComponent(dec(id))}` : ''}${action ? `/${action}` : ''}${query.size ? `?${query}` : ''}`
       if (action === 'events') return await relayEvents(req, res, target)
+      if (action === 'attachments' && method === 'PUT') {
+        const length = req.headers['content-length'] ?? ''
+        if (!/^[0-9]{1,16}$/.test(length)) return sendJson(res, 400, { error: 'The upload did not say how big the video is.' })
+        const params = new URLSearchParams({ name: url.searchParams.get('name') ?? '' })
+        const abort = new AbortController()
+        const disconnected = () => abort.abort()
+        res.once('close', disconnected)
+        try {
+          const out = await broker.uploadVideo(`/v1/threads/${encodeURIComponent(dec(id))}/attachments?${params}`, { body: req, signal: abort.signal })
+          noteBrokerError(res, out)
+          res.writeHead(out.status, { 'content-type': out.contentType, 'cache-control': 'no-store' })
+          return res.end(out.body)
+        } catch {
+          if (!abort.signal.aborted) return sendJson(res, 502, { error: 'The upload lost its connection. Try attaching the video again.' })
+        } finally {
+          res.off('close', disconnected)
+        }
+        return
+      }
       if (action === 'attachments') {
         const raw = await readRaw(req, FILES_UPLOAD_BODY)
         if (!raw) return sendJson(res, 413, { error: 'Attachments can be up to 10 MiB each.' })
@@ -814,6 +836,7 @@ export function createApp({
     res.writeHead(out.status, headers)
     if (!out.stream) return res.end()
     out.stream.on('error', () => res.destroy())
+    res.once('close', () => out.stream.destroy())
     out.stream.pipe(res)
   }
 
@@ -1131,11 +1154,7 @@ function sendJson(res, status, value) {
   send(res, status, 'application/json; charset=utf-8', JSON.stringify(value))
 }
 
-// The bytes, whole. A file upload is the one body this app does not read as
-// JSON and the one that can be megabytes; it is held in memory for as long as
-// it takes to hand it to the broker, and it is not measured here, because the
-// number it would be measured against is the host's and the host applies it to
-// the same bytes a moment later.
+// The bytes of a bounded, legacy multipart upload. Videos use the stream relay.
 //
 // With a `limit`, a body over it is read to its end and dropped, and the answer
 // is `null`: the page gets a sentence rather than a connection cut under it.
