@@ -69,6 +69,7 @@ KEEP_RE = re.compile(
     r"\.(X11|ICE|XIM|font|Test)-unix$)")
 
 JOB_ID_RE = re.compile(r"[0-9]{8}-[0-9]{6}-[0-9a-f]{4,16}")
+JOB_SCRATCH_RE = re.compile(rf"^loam-job-{JOB_ID_RE.pattern}$")
 
 
 def running_jobs(running: Path = RUNNING) -> set[str]:
@@ -194,9 +195,25 @@ def candidates(hours: float, root: Path = ROOT, uid: int | None = None,
     return remove, kept
 
 
-def remove(path: str) -> bool:
-    return subprocess.run(["rm", "-rf", "--one-file-system", "--", path],
-                          capture_output=True, check=False).returncode == 0
+def is_job_scratch(path: str, root: Path | None = None) -> bool:
+    p = Path(path)
+    base = ROOT if root is None else root
+    return (p.parent == base
+            and bool(JOB_SCRATCH_RE.match(p.name))
+            and not p.is_symlink())
+
+
+def remove(path: str, *, allow_sudo: bool = False) -> bool:
+    res = subprocess.run(["rm", "-rf", "--one-file-system", "--", path],
+                         capture_output=True, check=False)
+    if res.returncode == 0:
+        return True
+    if not allow_sudo or not is_job_scratch(path):
+        return False
+    return subprocess.run(
+        ["sudo", "-n", "rm", "-rf", "--one-file-system", "--", path],
+        capture_output=True, check=False,
+    ).returncode == 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -222,7 +239,7 @@ def main(argv: list[str] | None = None) -> int:
         if row["name"] in live:
             kept.append({**row, "kept": "live process"})
             continue
-        if remove(row["path"]):
+        if remove(row["path"], allow_sudo=(args.root == ROOT)):
             removed.append(row)
             freed += row["bytes"]
         else:

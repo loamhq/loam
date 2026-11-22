@@ -233,8 +233,12 @@ def remove_scratch(job_id: str, root: Path | None = None) -> None:
     if os.path.lexists(path):
         subprocess.run(["chmod", "-R", "u+w", "--", str(path)],
                        capture_output=True, check=False)
-        subprocess.run(["rm", "-rf", "--one-file-system", "--", str(path)],
-                       capture_output=True, check=False)
+        res = subprocess.run(["rm", "-rf", "--one-file-system", "--", str(path)],
+                             capture_output=True, check=False)
+        if (res.returncode != 0 and root is None
+                and not path.is_symlink() and os.path.lexists(path)):
+            subprocess.run(["sudo", "-n", "rm", "-rf", "--one-file-system", "--", str(path)],
+                           capture_output=True, check=False)
 
 
 # ---------------------------------------------------------------------------
