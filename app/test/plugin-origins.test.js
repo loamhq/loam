@@ -57,3 +57,32 @@ test('extensions group in origin order and About uses the Market author and list
   loader.st.rows = [builtIn]
   assert.deepEqual(all(view(), 'plugin-origin-title').map(text), ['Built into Loam'])
 })
+
+test('Settings > Plugins distinguishes non-held updates from held updates needing approval', async () => {
+  installDom()
+  const row = (id, fields) => ({ id, key: id, name: id, version: '1.2.1', effective: true, layer: 'yours', kind: ['extension'], switch: 'plugin', auto_update: true, source: { kind: 'link', via: 'market', repo: `example/${id}`, ref: 'v1.2.1', path: '' }, ...fields })
+  const unheld = row('dictation', { name: 'Dictation' })
+  const held = row('reader', { name: 'Reader' })
+  const loader = { st: { loaded: true, rows: [unheld, held], failures: new Map(), writing: new Set() }, refresh: async () => {} }
+  const updates = {
+    market_state: 'listed',
+    entries: {},
+    plugins: {
+      dictation: { via: 'market', version: '1.2.5', link: 'https://github.com/example/dictation/tree/abc', held: false },
+      reader: { via: 'market', version: '1.3.0', link: 'https://github.com/example/reader/tree/def', held: true },
+    },
+  }
+  const ui = createPluginSettings({ loader, theme: { value: { theme: 'latte' } }, host: {
+    marketState: { loadedAt: Date.now(), list: { state: 'listed', plugins: [] } },
+    settingsHead: text => h('h2', { text }), settingsBack() {},
+    openMarketInstall() {}, openLinkInstall() {},
+    api: async (_method, path) => path === '/plugin-updates' ? updates : { plugin: ui.st.selected },
+  } })
+  await ui.checkUpdates()
+  const view = () => h('div', {}, ui.view())
+  assert.deepEqual(all(view(), 'plugin-update-line').map(text), ['Update available · 1.2.5', 'Update needs your yes · 1.3.0'])
+  await ui.open(unheld)
+  assert.ok(all(view(), 'pillbtn').map(text).includes('Update'))
+  await ui.open(held)
+  assert.ok(all(view(), 'pillbtn').map(text).includes('Review update'))
+})

@@ -579,12 +579,178 @@ class Updates(unittest.TestCase):
         for key, value in (("record", "write"), ("memory", "write"), ("server", True),
                            ("network", [{"host": "example.invalid", "why": "Reads notes"}]),
                            ("inbound", ["notes: receive notes"]), ("keys", [{"provider": "example"}]),
-                           ("agents", {"tools": ["read (persona)", "sync (persona)"], "prompt": []})):
-            after = {**before, "touches": {**before["touches"], key: value}}
-            self.assertIn(key, plugins.added(before, after))
+                           ("secrets", ["EXAMPLE_API_KEY"]),
+                           ("schedule", ["tick: daily at 05:00 PT"]),
+                           ("vault", ["Notes"]),
+                           ("open_web", "Public links"),
+                           ("facts", ["agents"]),
+                           ("drift_check", True),
+                           ("engineer_env", ["EXAMPLE_MODE"]),
+                           ("engineer_job", ["python3 job.py (every project)"]),
+                           ("agents", {"tools": ["read (persona)", "sync (persona)"], "prompt": []}),
+                           ("agents", {"tools": ["read (persona)"], "prompt": ["persona"]})):
+            after = {**before, "touches": {**before["touches"], key: value,
+                                           "settings": ["tip-dismissed"]}}
+            got = plugins.added(before, after)
+            self.assertIn(key, got)
+            self.assertNotIn("settings", got)
             self.assertFalse(plugins.added(after, before))
         self.assertEqual(plugins.added(before, {**before, "page_code": True}), {"page_code": True})
         self.assertEqual(plugins.added(before, {**before, "overrides": ["core.rail"]}), {"overrides": ["core.rail"]})
+        settings_only = {**before, "touches": {**before["touches"], "settings": ["tip-dismissed"]}}
+        self.assertEqual(plugins.added(before, settings_only), {})
+        more_settings = {**before, "touches": {**before["touches"], "settings": ["tip-dismissed", "theme"]}}
+        self.assertEqual(plugins.added(settings_only, more_settings), {})
+
+    def test_settings_entry_only_update_is_not_held_and_auto_updates(self):
+        self.install()
+        setting_v1 = ("contributes:\n  settings.entry:\n"
+                      "    - key: gemini-suggestion\n"
+                      "      label: Hide browser speech tip\n"
+                      "      choices: [show, hide]\n"
+                      "      default: show\n")
+        commit = self.release("1.2.5", setting_v1)
+        self.listing("1.2.5")
+        preview = plugins.install({"url": f"https://github.com/maker/notes/tree/{commit}", "via": "market"})
+        self.assertEqual(preview["declaration"]["touches"]["settings"], ["gemini-suggestion"])
+        self.assertEqual(preview["added"], {})
+        status = updates.check()["plugins"]["notes"]
+        self.assertEqual(status["version"], "1.2.5")
+        self.assertFalse(status["held"])
+        self.tell.assert_not_called()
+        result = updates.check(nightly=True)
+        self.assertFalse(result["errors"] or result["plugins"])
+        self.assertEqual(plugins.one("notes")["plugin"]["version"], "1.2.5")
+        self.assertEqual(plugins.one("notes")["plugin"]["declaration"]["touches"]["settings"],
+                         ["gemini-suggestion"])
+        self.assertEqual([(e["from_version"], e["version"]) for e in plugins.load_list()["update_history"]],
+                         [("1.0.0", "1.2.5")])
+        self.tell.assert_not_called()
+
+        setting_v2 = setting_v1 + ("    - key: auto-clean\n"
+                                   "      label: Auto clean\n"
+                                   "      choices: [on, off]\n"
+                                   "      default: on\n")
+        self.release("1.2.6", setting_v2)
+        self.listing("1.2.6")
+        with patch.object(updates.time, "time", return_value=updates.time.time() + updates.DAY + 1):
+            result = updates.check(nightly=True)
+        self.assertFalse(result["errors"] or result["plugins"])
+        self.assertEqual(plugins.one("notes")["plugin"]["version"], "1.2.6")
+        self.tell.assert_not_called()
+
+    def test_real_capability_updates_still_hold_and_notify(self):
+        cases = [
+            ("network", "touches:\n  network:\n    - host: api.example.invalid\n      why: Syncs notes\n", None),
+            ("keys", "keys:\n  - provider: openai\n    why: Summarizes notes\n", None),
+            ("secrets", "contributes:\n  settings.secret:\n    - name: NOTES_TOKEN\n      label: Notes token\n", None),
+            ("record", "touches:\n  record: write\n", None),
+            ("memory", "touches:\n  memory: read\n", None),
+            ("server", "touches:\n  server: true\n", None),
+            ("page_code", "", ("page/main.js", "export function activate() {}\n")),
+            ("agent.tool", "contributes:\n  agent.tool:\n    - name: notes\n      run: python3 tool.py\n", None),
+            ("agent.prompt", "contributes:\n  agent.prompt:\n    - text: Use notes.\n", None),
+            ("schedule", "contributes:\n  schedule.kind:\n    - name: sync\n      schedule: daily at 05:00 PT\n      run: python3 sync.py\n", None),
+            ("vault", "contributes:\n  vault.folder:\n    - path: Notes\n", None),
+            ("thread.file", "contributes:\n  thread.file:\n    - label: checklist\n", None),
+            ("inbound", "contributes:\n  box.listener:\n    - process: notesd\n      why: Accepts sync connections\n", None),
+            ("open_web", "contributes:\n  web.door:\n    - why: Serves shared notes\n", None),
+            ("facts", "touches:\n  facts:\n    - agents\n", None),
+            ("drift.check", "contributes:\n  drift.check:\n    - run: python3 check.py\n", None),
+            ("engineer.env", "contributes:\n  engineer.env:\n    - name: NOTES_MODE\n      value: on\n", None),
+            ("engineer.job", "contributes:\n  engineer.job:\n    - run: python3 env.py\n", None),
+            ("overrides", "overrides:\n  - core.rail\n", None),
+        ]
+        for idx, (label, manifest_extra, extra_file) in enumerate(cases, start=1):
+            with self.subTest(capability=label):
+                self.setUp()
+                self.install()
+                if extra_file:
+                    rel, body = extra_file
+                    target = self.repo / rel
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(body)
+                    self.git("add", rel)
+                if "contributes:\n" in manifest_extra:
+                    more = manifest_extra + "  settings.entry:\n    - key: tip\n      label: Tip\n"
+                else:
+                    more = manifest_extra + "contributes:\n  settings.entry:\n    - key: tip\n      label: Tip\n"
+                self.release(f"1.{idx}.0", more)
+                self.listing(f"1.{idx}.0")
+                result = updates.check(nightly=True)
+                self.assertFalse(result["errors"])
+                found = result["plugins"]["notes"]
+                self.assertTrue(found["held"], label)
+                self.assertEqual(found["version"], f"1.{idx}.0")
+                self.assertEqual(plugins.one("notes")["plugin"]["version"], "1.0.0")
+                self.tell.assert_called_once()
+
+    def test_cached_settings_only_hold_is_reevaluated_and_notice_withdrawn(self):
+        self.install()
+        setting = ("contributes:\n  settings.entry:\n"
+                   "    - key: gemini-suggestion\n"
+                   "      label: Hide browser speech tip\n"
+                   "      choices: [show, hide]\n"
+                   "      default: show\n")
+        commit = self.release("1.2.5", setting)
+        self.listing("1.2.5")
+        line = plugins.load_list()["plugins"]["notes"]
+        preview = plugins.install({"url": f"https://github.com/maker/notes/tree/{commit}", "via": "market"})
+        stale_cache = {
+            "checked": updates.time.time(),
+            "market_state": "listed",
+            "review_format": 3,
+            "entries": {},
+            "errors": {},
+            "plugins": {
+                "notes": {
+                    "base": line["source"],
+                    "via": "market",
+                    "candidate": {
+                        "id": "notes",
+                        "version": "1.2.5",
+                        "source": {**preview["source"], "via": "market"},
+                        "files": preview["files"],
+                        "declaration": preview["declaration"],
+                    },
+                    "commit": commit,
+                    "version": "1.2.5",
+                    "link": preview["source"]["url"],
+                    "confirm": preview["confirm"],
+                    "held": True,
+                    "added": {"settings": ["gemini-suggestion"]},
+                    "notified": True,
+                }
+            },
+        }
+        cache_path = updates.loam_plugin_servers.state_dir() / "updates.json"
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps(stale_cache))
+        attention = updates.loam_attention
+        self.real_tell(
+            "notes 1.2.5 needs your yes. Review the update in Settings › Plugins.",
+            by="plugin-updates", key=f"notes-{commit}", evidence=preview["source"]["url"],
+            detail=json.dumps({"settings": ["gemini-suggestion"]}), kick=False)
+        self.real_tell("Other plugin update", by="plugin-updates", key="other-commit", kick=False)
+        self.assertEqual(len(attention.pending()), 2)
+
+        # Prompt re-evaluation on non-nightly check without waiting DAY.
+        checked = updates.check()
+        self.assertFalse(checked["errors"])
+        self.assertEqual(checked["plugins"]["notes"]["version"], "1.2.5")
+        self.assertFalse(checked["plugins"]["notes"]["held"])
+        saved_cache = json.loads(cache_path.read_text())
+        self.assertEqual(saved_cache["review_format"], updates.REVIEW_FORMAT)
+        self.assertFalse(saved_cache["plugins"]["notes"]["held"])
+        self.assertEqual(saved_cache["plugins"]["notes"]["added"], {})
+        self.assertEqual([r["key"] for r in attention.pending()], ["plugin-updates:other-commit"])
+        self.tell.assert_not_called()
+
+        # Nightly housekeeping then applies the update automatically.
+        applied = updates.check(nightly=True)
+        self.assertFalse(applied["errors"] or applied["plugins"])
+        self.assertEqual(plugins.one("notes")["plugin"]["version"], "1.2.5")
+        self.tell.assert_not_called()
 
     def test_missing_consent_and_unverifiable_files_fail_closed(self):
         self.install()
