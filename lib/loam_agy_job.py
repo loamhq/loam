@@ -52,6 +52,7 @@ was written down:
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import threading
@@ -182,11 +183,31 @@ def argv(*, prompt: str, job_dir: Path, conversation: str | None,
     return out
 
 
-def env(base: dict | None = None) -> dict:
+SHIM_DIR = Path(__file__).resolve().parent.parent / "bin" / "engineer-path"
+
+
+def env(base: dict | None = None,
+        command_scratch: Path | None = None) -> dict:
     """``loam_antigravity.env`` (API keys out, so the owner's login bills),
-    less the Claude login wake.env mounts."""
+    less the Claude login wake.env mounts. When ``command_scratch`` is given
+    (an engineer job, never a persona or the reviewer), prepend the bash
+    handoff shim so ``run_command`` hands long-running foreground commands
+    back to the engineer at ten minutes without killing them."""
     out = agy.env(base)
     out.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+    if command_scratch is not None:
+        shim = str(SHIM_DIR)
+        for key in ("PATH", "LOAM_WALL_PATH"):
+            current = out.get(key)
+            if current:
+                parts = [p for p in current.split(os.pathsep) if p != shim]
+                out[key] = os.pathsep.join([shim, *parts])
+            elif key == "PATH":
+                out[key] = os.pathsep.join([shim, "/usr/bin", "/bin"])
+        out["LOAM_COMMAND_SHELL"] = "/bin/bash"
+        out["LOAM_COMMAND_SCRATCH"] = str(command_scratch)
+        out["LOAM_COMMAND_PATH_SHIM"] = shim
+        out["LOAM_COMMAND_STREAM"] = "1"
     return out
 
 
@@ -281,7 +302,9 @@ class Run:
 
 
 def run(command: list[str], cwd: str, timeout: int | None, job_dir: Path,
-        stderr: Path, on_thread=None, on_stop=None, resumed: str | None = None
+        stderr: Path, on_thread=None, resumed: str | None = None, *,
+        stop_quiet_commands: bool = False,
+        command_scratch: Path | None = None
         ) -> tuple[int, Run, bool]:
     """Run ``agy``: (returncode, Run, timed_out). The stream goes to
     ``agy.jsonl`` line by line, which is what the heartbeat reads; the
@@ -293,7 +316,8 @@ def run(command: list[str], cwd: str, timeout: int | None, job_dir: Path,
             open(stream, "a", encoding="utf-8") as out:
         proc = subprocess.Popen(command, cwd=cwd, stdin=subprocess.DEVNULL,
                                 stdout=subprocess.PIPE, stderr=err, text=True,
-                                env=env(), start_new_session=True)
+                                env=env(command_scratch=command_scratch),
+                                start_new_session=True)
         timed_out = threading.Event()
 
         def clock():
@@ -303,15 +327,14 @@ def run(command: list[str], cwd: str, timeout: int | None, job_dir: Path,
 
         watcher = threading.Thread(target=clock, daemon=True)
         watcher.start()
-        # A command that never returns is stopped, not the job
-        # (lib/loam_stuck.py, since 2026-11-17).
-        stuck = loam_stuck.Watch(proc.pid, loam_stuck.agy_busy, job_dir,
-                                 on_stop=on_stop).start()
+        stuck = (loam_stuck.Watch(proc.pid, loam_stuck.agy_busy, job_dir).start()
+                 if stop_quiet_commands else None)
         assert proc.stdout is not None
         for line in proc.stdout:
             out.write(line)
             out.flush()
-            stuck.line(line)
+            if stuck:
+                stuck.line(line)
             had = state.conversation_id
             state.read(line)
             if state.conversation_id and not had and on_thread:
@@ -321,7 +344,8 @@ def run(command: list[str], cwd: str, timeout: int | None, job_dir: Path,
                 state.capped = True
                 codex_job.end(proc)
         returncode = proc.wait()
-        stuck.stop()
+        if stuck:
+            stuck.stop()
     if returncode == 0 and not state.seen_result and not state.failed:
         state.failed = "no result event (the stream ended without one)"
     if state.resumed_other and not state.failed:

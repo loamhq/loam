@@ -180,6 +180,9 @@ def argv(*, workdir: Path, tree: Path, job_dir: Path, prompt: str,
         "-c", f"model_reasoning_effort={toml_string(effort or eng.CODEX_ENGINEER_EFFORT)}",
         "-c", 'approval_policy="never"',
         *sandbox,
+        # The native clock sleep can block a headless turn for hours. A
+        # shell sleep uses the same resumable terminal as any other command.
+        "--enable", "unified_exec", "--disable", "sleep_tool",
         *[f for name in DISABLED_FEATURES for f in ("--disable", name)],
         # Codex's own memory, off (first release L8): a job ignores the home
         # config the broker pins it in, so the pins ride this line. Each key
@@ -259,8 +262,9 @@ class Run:
 
 
 def run(command: list[str], cwd: str, timeout: int | None, job_dir: Path,
-        stderr: Path, on_thread=None, on_stop=None, *,
-        max_turns: int | None = None, record_stream: bool = True) -> tuple[int, Run, bool]:
+        stderr: Path, on_thread=None, *,
+        max_turns: int | None = None, record_stream: bool = True,
+        stop_quiet_commands: bool = False) -> tuple[int, Run, bool]:
     """Run ``codex exec``: (returncode, Run, timed_out). The stream goes to
     ``codex.jsonl`` line by line, which is what the heartbeat reads; the
     process is ended by group, because ``codex`` is a node wrapper whose
@@ -284,15 +288,14 @@ def run(command: list[str], cwd: str, timeout: int | None, job_dir: Path,
 
         watcher = threading.Thread(target=clock, daemon=True)
         watcher.start()
-        # A command that never returns is stopped, not the job
-        # (lib/loam_stuck.py, since 2026-11-17).
-        stuck = loam_stuck.Watch(proc.pid, loam_stuck.codex_busy, job_dir,
-                                 on_stop=on_stop).start()
+        stuck = (loam_stuck.Watch(proc.pid, loam_stuck.codex_busy, job_dir).start()
+                 if stop_quiet_commands else None)
         assert proc.stdout is not None
         for line in proc.stdout:
             out.write(line)
             out.flush()
-            stuck.line(line)
+            if stuck:
+                stuck.line(line)
             had = state.thread_id
             state.read(line)
             if state.thread_id and not had and on_thread:
@@ -301,7 +304,8 @@ def run(command: list[str], cwd: str, timeout: int | None, job_dir: Path,
                 state.capped = True
                 end(proc)
         returncode = proc.wait()
-        stuck.stop()
+        if stuck:
+            stuck.stop()
     return returncode, state, timed_out.is_set()
 
 

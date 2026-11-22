@@ -1,0 +1,336 @@
+#!/usr/bin/python3
+"""Engineer shell adapter. The caller waits. The worker owns the command.
+
+The real shell receives the provider's argv, including its cwd bookkeeping.
+Only the worker inherits its input. Output goes to job-private files so even
+a descendant holding stdout open cannot hold the caller's pipes open.
+"""
+import json
+import os
+import select
+import shlex
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+from contextlib import contextmanager, nullcontext
+from pathlib import Path
+
+HANDOFF = 600
+WAIT_SECONDS = 300
+STOP_WAIT = 2.0
+PREVIEW = 1500  # Leave room for the handle in the CLI’s inline result.
+PROGRAM = str(Path(__file__).resolve())
+
+
+def clean_env(base=None):
+    """Strip the PATH shim and streaming marker before running child commands."""
+    env = dict(os.environ if base is None else base)
+    shim = env.pop("LOAM_COMMAND_PATH_SHIM", "")
+    env.pop("LOAM_COMMAND_STREAM", None)
+    if shim:
+        target = os.path.normpath(shim)
+        for key in ("PATH", "LOAM_WALL_PATH"):
+            val = env.get(key)
+            if val:
+                parts = [p for p in val.split(os.pathsep) if os.path.normpath(p) != target]
+                env[key] = os.pathsep.join(parts)
+    return env
+
+
+@contextmanager
+def control_path(task):
+    # sockaddr_un has a 108-byte pathname even on installs with long paths.
+    directory = os.open(task, os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        yield f"/proc/self/fd/{directory}/control"
+    finally:
+        os.close(directory)
+
+
+def session_members(sid):
+    # Bash job control gives foreground pipelines process groups of their
+    # own. The worker keeps the session leader unreaped while stopping, so
+    # its session ID cannot be recycled underneath a control request.
+    for stat in Path("/proc").glob("[0-9]*/stat"):
+        try:
+            fields = stat.read_bytes().rsplit(b")", 1)[1].split()
+            if int(fields[3]) == sid and fields[0] not in (b"Z", b"X"):
+                yield int(stat.parent.name)
+        except (FileNotFoundError, ProcessLookupError, PermissionError, IndexError):
+            continue
+
+
+def signal_session(sid, sig):
+    for pid in session_members(sid):
+        try:
+            fd = os.pidfd_open(pid)
+        except ProcessLookupError:
+            continue
+        try:
+            # The member may have exited between the scan and pidfd_open.
+            if os.getsid(pid) == sid:
+                signal.pidfd_send_signal(fd, sig)
+        except ProcessLookupError:
+            pass
+        except PermissionError as exc:
+            print(f"Could not signal command process {pid}: {exc}", file=sys.stderr, flush=True)
+        finally:
+            os.close(fd)
+
+
+def supervise(argv, owner, control):
+    child = subprocess.Popen(argv, start_new_session=True)
+    child_fd = os.pidfd_open(child.pid)
+    watched = [child_fd, control, owner]
+    stopping = False
+    try:
+        while True:
+            # Once the shell has exited, keep the handle usable for live
+            # children that ignored TERM. Only a control request signals them.
+            shell_exited = child_fd not in watched
+            if shell_exited and (not stopping or not any(session_members(child.pid))):
+                break
+            ready, _, _ = select.select(watched, [], [], 0.25 if shell_exited else None)
+            if owner in ready:
+                if owner.recv(1) != b"D":
+                    stopping = True
+                    signal_session(child.pid, signal.SIGKILL)
+                watched.remove(owner)
+            if control in ready:
+                action = control.recv(16)
+                if action in (b"stop", b"kill"):
+                    stopping = True
+                    sig = signal.SIGTERM if action == b"stop" else signal.SIGKILL
+                    signal_session(child.pid, sig)
+            if child_fd in ready:
+                watched.remove(child_fd)
+    finally:
+        os.close(child_fd)
+    code = child.wait()
+    return 128 - code if code < 0 else code
+
+
+def worker(task, fd, argv):
+    code = 1
+    with socket.socket(fileno=fd) as owner, socket.socket(
+            socket.AF_UNIX, socket.SOCK_DGRAM) as control:
+        try:
+            with control_path(task) as path:
+                control.bind(path)
+            code = supervise(argv, owner, control)
+        finally:
+            # Publish before closing the socket, including on a launch error.
+            try:
+                (task / "result.tmp").write_text(str(code))
+                (task / "result.tmp").replace(task / "result")
+            except OSError:
+                pass
+    return code
+
+
+def output(task, partial):
+    for name, dest in (("stdout", sys.stdout.buffer), ("stderr", sys.stderr.buffer)):
+        path = task / name
+        if path.exists():
+            with path.open("rb") as src:
+                size = os.fstat(src.fileno()).st_size
+                left = min(PREVIEW, size) if partial else size
+                src.seek(size - left)
+                while left:
+                    chunk = src.read(min(left, 65536))
+                    if not chunk:
+                        break
+                    dest.write(chunk)
+                    left -= len(chunk)
+            dest.flush()
+
+
+def _pump(files, offsets, limit=None):
+    """Forward newly written bytes from task output files to stdout/stderr."""
+    for path, dest in files:
+        try:
+            size = path.stat().st_size
+        except FileNotFoundError:
+            continue
+        pos = offsets[path]
+        if size <= pos:
+            continue
+        to_read = size - pos
+        if limit is not None and to_read > limit:
+            pos = size - limit
+            to_read = limit
+        with path.open("rb") as src:
+            src.seek(pos)
+            while to_read > 0:
+                chunk = src.read(min(to_read, 65536))
+                if not chunk:
+                    break
+                dest.write(chunk)
+                pos += len(chunk)
+                to_read -= len(chunk)
+        dest.flush()
+        offsets[path] = pos
+
+
+def handoff_line(task):
+    return (
+        f"Still running. Handle {task.name}. Full output in {task}.\n"
+        f"Check with {shlex.quote(PROGRAM)} status {task.name}. "
+        "Use wait to wait again, stop to send TERM, or kill to send KILL."
+    )
+
+
+def running(task):
+    print(handoff_line(task), flush=True)
+    output(task, partial=True)
+
+
+def start(argv, scratch, seconds=HANDOFF, stream=False):
+    scratch.mkdir(parents=True, exist_ok=True)
+    task = Path(tempfile.mkdtemp(prefix="command-", dir=scratch))
+    detached = False
+    try:
+        merged = os.path.samestat(os.fstat(1), os.fstat(2))
+        caller, peer = socket.socketpair()
+        child_env = clean_env()
+        with caller, peer, (task / "stdout").open("wb") as out:
+            # Keep the interleaving when the provider combines both streams.
+            with (nullcontext(out) if merged else (task / "stderr").open("wb")) as err:
+                proc = subprocess.Popen(
+                    [PROGRAM, "--worker", str(task), str(peer.fileno()), *argv],
+                    pass_fds=(peer.fileno(),), stdout=out, stderr=err,
+                    env=child_env, start_new_session=True)
+            peer.close()
+            if stream:
+                files = [(task / "stdout", sys.stdout.buffer)]
+                if not merged:
+                    files.append((task / "stderr", sys.stderr.buffer))
+                offsets = {path: 0 for path, _ in files}
+                proc_fd = os.pidfd_open(proc.pid)
+                timed_out = True
+                deadline = time.monotonic() + seconds
+                try:
+                    while True:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            break
+                        ready, _, _ = select.select([proc_fd], [], [], min(0.1, remaining))
+                        _pump(files, offsets)
+                        if proc_fd in ready:
+                            timed_out = False
+                            break
+                finally:
+                    os.close(proc_fd)
+                if not timed_out:
+                    code = proc.wait()
+                    _pump(files, offsets)
+                    return code
+                try:
+                    caller.sendall(b"D")
+                except BrokenPipeError:
+                    code = proc.wait()
+                    _pump(files, offsets)
+                    return code
+                detached = True
+                _pump(files, offsets, limit=PREVIEW)
+                prefix = "\n" if any(offsets.values()) else ""
+                print(prefix + handoff_line(task), flush=True)
+                return 0
+            try:
+                code = proc.wait(timeout=seconds)
+            except subprocess.TimeoutExpired:
+                try:
+                    caller.sendall(b"D")
+                except BrokenPipeError:
+                    code = proc.wait()
+                else:
+                    detached = True
+                    running(task)
+                    return 0
+            output(task, partial=False)
+            return code
+    finally:
+        if not detached:
+            shutil.rmtree(task, ignore_errors=True)
+
+
+def _send_control(task, action):
+    deadline = time.monotonic() + 1.0
+    while True:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
+            try:
+                with control_path(task) as path:
+                    sock.sendto(action.encode(), path)
+                return
+            except FileNotFoundError:
+                if (task / "result").exists() or time.monotonic() >= deadline:
+                    return
+                time.sleep(0.05)
+            except ConnectionRefusedError:
+                if (task / "result").exists():
+                    return
+                raise
+
+
+def control(action, task, wait_seconds=None):
+    if action in ("stop", "kill") and not (task / "result").exists():
+        _send_control(task, action)
+        print(f"Requested {action} for {task.name}.", flush=True)
+        deadline = time.monotonic() + STOP_WAIT
+        while not (task / "result").exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+    if action == "wait":
+        limit = WAIT_SECONDS if wait_seconds is None else wait_seconds
+        deadline = time.monotonic() + limit
+        while not (task / "result").exists() and time.monotonic() < deadline:
+            time.sleep(0.1)
+    if (task / "result").exists():
+        code = int((task / "result").read_text())
+        print(f"{task.name} exited {code}. Full output in {task}.", flush=True)
+        output(task, partial=True)
+        return code
+    running(task)
+    return 0
+
+
+def main(args):
+    if args == ["--tool-timeout"]:
+        # Keep the native Bash timer outside our handoff, even for an
+        # explicit short timeout. Leave permission decisions to the CLI.
+        tool = json.load(sys.stdin)["tool_input"]
+        if "timeout" in tool and tool["timeout"] < (HANDOFF + 60) * 1000:
+            print(json.dumps({"hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "updatedInput": {**tool, "timeout": (HANDOFF + 60) * 1000}}}))
+        return 0
+    if args[:1] == ["--worker"]:
+        return worker(Path(args[1]), int(args[2]), args[3:])
+    scratch = Path(os.environ["LOAM_COMMAND_SCRATCH"])
+    if (len(args) == 2 and args[0] in ("status", "wait", "stop", "kill")) or (
+            len(args) == 3 and args[0] == "wait"):
+        handle = args[1]
+        if Path(handle).name != handle or not handle.startswith("command-"):
+            sys.exit("Invalid command handle")
+        task = scratch / handle
+        if not task.is_dir():
+            sys.exit("Unknown command handle in this job")
+        wait_seconds = None
+        if len(args) == 3:
+            try:
+                wait_seconds = max(1.0, min(float(args[2]), float(HANDOFF - 30)))
+            except ValueError:
+                sys.exit("Invalid wait duration")
+        return control(args[0], task, wait_seconds=wait_seconds)
+    shell = os.environ.get("LOAM_COMMAND_SHELL", "/bin/bash")
+    if not any(a.startswith("-") and not a.startswith("--") and "c" in a[1:] for a in args[:2]):
+        os.execve(shell, [shell, *args], clean_env())
+    stream = os.environ.get("LOAM_COMMAND_STREAM") == "1"
+    return start([shell, *args], scratch, stream=stream)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

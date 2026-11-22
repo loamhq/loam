@@ -274,6 +274,18 @@ overwrites a change of theirs. A job that changes how Loam works updates
 this library in the same job, so these pages stay the one description of
 Loam.
 
+When a shell command takes time, its engineer gets control back in the same
+job without the command being killed, and can check its output, keep waiting,
+or stop it through the returned handle. Antigravity and Claude Code detach a
+still-running foreground command after about ten minutes through
+`engineer-bash` and keep its full output in job scratch (Antigravity also
+streams output under a background task ID during those ten minutes, then hands
+back the detached handle so waiting never stalls). Codex uses resumable
+`unified_exec` sessions that return a terminal handle within seconds, with its
+blocking clock-sleep tool turned off; a Codex engineer can tee a verbose build
+into scratch to keep its full log. No timer kills an engineer’s command. A
+quiet transcript can still appear as stalled while the engineer waits.
+
 Find the nightly reviewer’s instructions and choose its provider and model in
 Settings › Agents › Nightly reviewer. The reviewer plugin’s Runs on row
 opens the same page. Automatic picks the connected provider used by the fewest

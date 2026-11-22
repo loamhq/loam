@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import signal
 import subprocess
 import sys
@@ -77,6 +78,33 @@ GUARD_SETTINGS = {"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [{
     "command": f"/usr/bin/python3 {AGENTS}/hooks/boundary_guard.py",
     "timeout": 15,
     "onFailure": "block"}]}]}}
+
+
+def claude_job_settings(project: eng.Project, job_id: str) -> dict:
+    # The native background timeout can kill a shell later. The adapter
+    # returns before it, inside the same permissions and mount namespace.
+    shell = os.environ.get("CLAUDE_CODE_SHELL") or os.environ.get("SHELL") or "/bin/bash"
+    if Path(shell).name not in {"bash", "zsh"} or not os.access(shell, os.X_OK):
+        shell = "/bin/bash"
+    adapter = Path(__file__).resolve().parent / f"engineer-{Path(shell).name}"
+    settings = {"env": {
+        "CLAUDE_CODE_SHELL": str(adapter),
+        "LOAM_COMMAND_SHELL": shell,
+        "LOAM_COMMAND_SCRATCH": str(eng.scratch_dir(job_id)),
+        "BASH_DEFAULT_TIMEOUT_MS": "660000",
+        "BASH_MAX_TIMEOUT_MS": "660000",
+    }}
+    hooks = []
+    if not project.platform:
+        # The platform project already carries the guard in its settings.
+        import loam_commit_identity
+        settings.update(loam_commit_identity.CLI_SETTINGS)
+        hooks.extend(GUARD_SETTINGS["hooks"]["PreToolUse"])
+    hooks.append({"matcher": "Bash", "hooks": [{
+        "type": "command", "command": f"{shlex.quote(str(adapter))} --tool-timeout",
+        "timeout": 15, "onFailure": "block"}]})
+    settings["hooks"] = {"PreToolUse": hooks}
+    return settings
 
 
 def probe_seconds() -> int:
@@ -1365,31 +1393,6 @@ def quota_fallback(project: eng.Project, runtime: str, choice: dict) -> tuple[di
     return down, ""
 
 
-def stuck_stopped(p: dict[str, Path], meta: dict, job_id: str):
-    """Record the command stopped by the watchdog so status and the receipt can explain the
-    interruption."""
-    def on_stop(record: dict, count: int) -> None:
-        print(f"engineer-job: stopped a command that did not return "
-              f"(pid {record['pid']}, {record['quiet_minutes']} min quiet): "
-              f"{record['argv']}", file=sys.stderr, flush=True)
-        if count != 2:
-            return
-        title = meta.get("title") or job_id
-        text = (f"The engineer job {job_id} (“{title}”, briefed by "
-                f"{meta.get('briefed_by') or 'unknown'}) hung on a command a "
-                f"second time: `{record['command'][:160]}` gave no answer for "
-                f"{record['quiet_minutes']} minutes, and Loam stopped it again "
-                f"so the job could carry on. The job is still running.")
-        try:
-            import loam_attention  # noqa: PLC0415
-            loam_attention.tell(text, by="engineer-job", key=f"stuck:{job_id}",
-                                evidence=str(p["dir"]) if "dir" in p else None)
-        except Exception as exc:  # noqa: BLE001 - telling never ends a job
-            print(f"engineer-job: the second stop was not told: {exc}",
-                  file=sys.stderr)
-    return on_stop
-
-
 def run_antigravity(project: eng.Project, runtime: str, choice: dict, argv_for,
                     argv: list[str], workdir: str, meta: dict, p: dict[str, Path],
                     resume_from: str | None, prompt: str):
@@ -1402,10 +1405,10 @@ def run_antigravity(project: eng.Project, runtime: str, choice: dict, argv_for,
 
     before = agy_files.snapshot()
     convs: list[str] = []
-    on_stop = stuck_stopped(p, meta, p["dir"].name)
+    scratch = eng.scratch_dir(p["dir"].name)
     returncode, agy_run, timed_out = agy_job.run(
         argv, workdir, ceiling_seconds(meta), p["dir"], p["stderr"],
-        on_thread=on_thread, resumed=resume_from, on_stop=on_stop)
+        on_thread=on_thread, resumed=resume_from, command_scratch=scratch)
     convs.append(agy_run.conversation_id)
     if agy_run.quota and not timed_out and not p["cancelled"].is_file():
         down, why = quota_fallback(project, runtime, choice)
@@ -1422,7 +1425,7 @@ def run_antigravity(project: eng.Project, runtime: str, choice: dict, argv_for,
             write_engine(p, runtime, argv, down["tier"])
             returncode, agy_run, timed_out = agy_job.run(
                 argv, workdir, ceiling_seconds(meta), p["dir"], p["stderr"],
-                on_thread=on_thread, resumed=resume_from, on_stop=on_stop)
+                on_thread=on_thread, resumed=resume_from, command_scratch=scratch)
             convs.append(agy_run.conversation_id)
     try:
         agy_files.write_record(p["dir"], agy_files.attribute(
@@ -2518,6 +2521,24 @@ def run_inner(project: eng.Project, job_id: str) -> int:
 
     note = tree_note(project, record, meta["title"])
     note += SCRATCH_NOTE.format(scratch=eng.scratch_dir(job_id))
+    note += ("\nWhen a command returns \"Still running\" (or a live task/session handle), "
+             "it is still alive detached in this job — no timer killed it. Inspect what it "
+             "printed so far and choose: keep waiting on that handle, check its status later, "
+             "or stop it through the handle.")
+    if codex:
+        note += (" Use exec_command for waits. Poll its session_id with write_stdin, "
+                 "or send Ctrl-C through that handle. "
+                 "For a complete verbose build log, tee output into job scratch with pipefail.")
+    if antigravity:
+        note += (" Before ten minutes, run_command backgrounds long tasks under a task ID "
+                 "(inspect or stop with manage_task). At about ten minutes a still-running "
+                 "command detaches and returns an engineer-bash command-* handle whose full "
+                 "output stays in job scratch; use that handle's status, wait, stop, or kill.")
+    if runtime == "claude":
+        note += (" At about ten minutes a foreground Bash call detaches and returns an "
+                 "engineer-bash command-* handle (status, wait, stop, or kill) with full "
+                 "output in job scratch. Submit a potentially long foreground Bash call on "
+                 "its own so other Bash calls do not queue behind it.")
     vault_dir = project.vault_write_dir()
     vault_dirs = [vault_dir] if vault_dir else []
     if vault_dir:
@@ -2575,14 +2596,8 @@ def run_inner(project: eng.Project, job_id: str) -> int:
             # read the brief it was working from. Its own receipt is in there
             # too; the prompt says that one is filed and not to be rewritten.
             argv += ["--add-dir", str(paths(project, continue_job)["dir"])]
-        # The guard, which a project's portable settings do not name: it is
-        # this box's rule, so it arrives with the job, as the job directory
-        # does. The platform engineer's settings already carry it.
-        settings = dict(GUARD_SETTINGS)
-        # Apply repository attribution to commits and pull requests.
-        import loam_commit_identity  # noqa: PLC0415
-        settings.update(loam_commit_identity.CLI_SETTINGS)
-        argv += ["--settings", json.dumps(settings)]
+    if runtime == "claude":
+        argv += ["--settings", json.dumps(claude_job_settings(project, job_id))]
     # Supply enabled plugins' servers and instructions at launch.
     plugin_words = contributions.lane_prompt("engineer")
     # Non-Claude platform sessions receive the platform instructions and write boundaries
@@ -2682,8 +2697,7 @@ def run_inner(project: eng.Project, job_id: str) -> int:
                 returncode, codex_run, timed_out = codex_job.run(
                     argv, str(workdir), ceiling_seconds(meta), p["dir"],
                     p["stderr"], on_thread=lambda tid: p["session"].write_text(
-                        tid + "\n", encoding="utf-8"),
-                    on_stop=stuck_stopped(p, meta, job_id))
+                        tid + "\n", encoding="utf-8"))
                 envelope = {"session_id": codex_run.thread_id,
                             "result": codex_run.failed}
             elif antigravity:
