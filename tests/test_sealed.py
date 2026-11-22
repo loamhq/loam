@@ -37,7 +37,8 @@ for name, path in (("vault", lc.VAULT), ("workspaces", lc.WORKSPACES),
                    ("reviewer_state", lc.REVIEWER_STATE)):
     check(f"paths.{name} is inside the scratch folder", scratch in path.parents, True)
 for var in ("LOAM_LOCK_DIR", "LOAM_SCHEDULE_STATE", "LOAM_HOST_SETTINGS",
-            "LOAM_THREADS_STATE", "LOAM_VAULT", "LOAM_WAITERS_DIR"):
+            "LOAM_THREADS_STATE", "LOAM_VAULT", "LOAM_WAITERS_DIR",
+            "LOAM_ATTENTION_DIR"):
     check(f"{var} is inside the scratch folder",
           scratch in Path(os.environ[var]).parents, True)
 check("the workspaces hold the starter agent and the shared folders only",

@@ -113,6 +113,27 @@ def key_of(fact: str) -> str:
     return re.sub(r"\d+", "#", head)[:KEY_CHARS]
 
 
+def _live_state_dir() -> Path:
+    """The host install's live attention directory, independent of LOAM_CONFIG."""
+    return lc.install_state_dir() / "attention"
+
+
+def _is_live_state(path: Path | None = None) -> bool:
+    target = (STATE if path is None else path).resolve()
+    live = _live_state_dir().resolve()
+    return target == live or live in target.parents
+
+
+def _guard_state(what: str = "attention store", path: Path | None = None) -> None:
+    """Refuse to read or write the host install's live attention store from a test."""
+    import loam_offline  # noqa: PLC0415
+    if loam_offline.offline() and _is_live_state(path):
+        target = STATE if path is None else path
+        raise loam_offline.Offline(
+            f"refused in a test: {what} points at the live store ({target}); "
+            "run through tests/run-all or set LOAM_ATTENTION_DIR to a temp folder")
+
+
 def _load_seen() -> dict:
     try:
         data = json.loads((STATE / SEEN).read_text(encoding="utf-8"))
@@ -122,6 +143,7 @@ def _load_seen() -> dict:
 
 
 def _write(path: Path, data: dict) -> None:
+    _guard_state("attention write", path.parent)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{os.getpid()}")
     tmp.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
@@ -130,6 +152,7 @@ def _write(path: Path, data: dict) -> None:
 
 @contextmanager
 def _queue_lock():
+    _guard_state("attention store")
     STATE.mkdir(parents=True, exist_ok=True)
     fd = os.open(STATE, os.O_RDONLY | os.O_DIRECTORY)
     try:
@@ -141,7 +164,10 @@ def _queue_lock():
 
 def withdraw(keys: set[str]) -> None:
     """Cancel these queued notices, including any retry of a claimed notice."""
-    if not keys or not STATE.is_dir():
+    if not keys:
+        return
+    _guard_state("attention withdraw")
+    if not STATE.is_dir():
         return
     with _queue_lock():
         cancelled = [r for r in pending() if r.get("key") in keys]
@@ -166,6 +192,7 @@ def tell(fact: str, *, by: str = "loam", key: str | None = None,
     log, a command. ``detail`` is longer text the fact comes with, kept
     as written (an update's notice, which says what its release asks)."""
     try:
+        _guard_state("attention write")
         fact = " ".join(str(fact).split())[:FACT_CHARS]
         if not fact:
             return "failed: no fact"
@@ -213,6 +240,7 @@ def pending() -> list[dict]:
     """Facts not yet heard, oldest first. A record being heard carries
     ``given``; one found ``given`` later belonged to a run that died after
     its input went in, and is not given again (``stale_given``)."""
+    _guard_state("attention read")
     import loam_claim_start
     if loam_claim_start.unclaimed():
         return []
@@ -280,6 +308,9 @@ def failed(records: list[dict], at: float | None = None) -> None:
 
 
 def done(records: list[dict]) -> None:
+    if not records:
+        return
+    _guard_state("attention done")
     for record in records:
         try:
             (STATE / f"{record['id']}.json").unlink(missing_ok=True)

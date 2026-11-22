@@ -241,6 +241,30 @@ try:
 
     # -- 6: kicks -------------------------------------------------------------
     check("kicks are off under a scratch records directory", lr.kicks_enabled() is False)
+    import loam_offline  # noqa: PLC0415
+    from unittest.mock import patch  # noqa: PLC0415
+    with patch.dict(os.environ, {"LOAM_RESULTS_KICK": "1"}, clear=False):
+        saved_vars = {k: os.environ.pop(k, None)
+                      for k in ("LOAM_WAITERS_DIR", "LOAM_ATTENTION_DIR", "LOAM_CONFIG")}
+        try:
+            with patch.object(lr.subprocess, "run") as run_spy:
+                check("kicks stay off inside a test even with LOAM_RESULTS_KICK=1 and no scratch env",
+                      lr.kicks_enabled() is False and lr.kick(AGENT) == "off"
+                      and run_spy.call_count == 0,
+                      (lr.kicks_enabled(), run_spy.call_count))
+            with patch.object(loam_offline, "offline", return_value=False):
+                check("outside tests, LOAM_RESULTS_KICK=1 opts in", lr.kicks_enabled() is True)
+                os.environ.pop("LOAM_RESULTS_KICK", None)
+                check("outside tests with no scratch overrides, kicks are enabled",
+                      lr.kicks_enabled() is True)
+                for var in ("LOAM_WAITERS_DIR", "LOAM_ATTENTION_DIR", "LOAM_CONFIG"):
+                    with patch.dict(os.environ, {var: str(TMP / "x")}, clear=False):
+                        check(f"outside tests, {var} disables kicks by default",
+                              lr.kicks_enabled() is False)
+        finally:
+            for k, v in saved_vars.items():
+                if v is not None:
+                    os.environ[k] = v
     started = []
     real_kick = lr.kick
     lr.kick = lambda agent: started.append(agent) or "started"
@@ -256,7 +280,6 @@ try:
           (lr.kick_for("20261119-140000-00001111"), lr.kick_for("20261119-140000-00002222"),
            started) == ("started", None, [AGENT]), started)
     import loam_attention
-    from unittest.mock import patch
     with patch.object(loam_attention, "persona", return_value="fixture-attention"):
         check("kick_all: one drain for the result and one for the previously refused run",
               lr.kick_all() == {AGENT: "started", "fixture-attention": "started"})

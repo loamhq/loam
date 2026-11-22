@@ -201,6 +201,49 @@ try:
                             "--by", "sandbox"], capture_output=True, text=True, env=env).stdout.strip()
             for _ in range(2)]
     check("loam tell: told, then repeat", outs == ["told", "repeat"], outs)
+
+    # -- 6: tests never touch the host's live attention store -----------------
+    import loam_offline  # noqa: PLC0415
+    import loam_results  # noqa: PLC0415
+    from unittest.mock import patch  # noqa: PLC0415
+    live_dir = lc.install_state_dir() / "attention"
+    saved_state = la.STATE
+    try:
+        la.STATE = live_dir
+        with patch.object(loam_results, "kick") as kick_spy:
+            refused = la.tell("fixture leak", by="test", kick=True)
+            check("tell refuses the live attention store in a test and never kicks",
+                  refused.startswith("failed: refused in a test:") and kick_spy.call_count == 0,
+                  (refused, kick_spy.call_count))
+        for label, fn in (
+            ("pending", la.pending),
+            ("withdraw", lambda: la.withdraw({"k"})),
+            ("done", lambda: la.done([{"id": "x"}])),
+            ("mark_given", lambda: la.mark_given([{"id": "x"}])),
+            ("failed", lambda: la.failed([{"id": "x"}])),
+        ):
+            try:
+                fn()
+                ok = False
+            except loam_offline.Offline:
+                ok = True
+            check(f"{label} refuses the live attention store in a test", ok)
+        la.STATE = live_dir / "nested"
+        nested = la.tell("nested leak", by="test", kick=False)
+        check("nested path under the live store is refused too",
+              nested.startswith("failed: refused in a test:"), nested)
+    finally:
+        la.STATE = saved_state
+
+    child_env = {k: v for k, v in os.environ.items()
+                 if k not in ("LOAM_ATTENTION_DIR", "LOAM_CONFIG")}
+    child_env["PYTHONDONTWRITEBYTECODE"] = "1"
+    child = subprocess.run([str(AGENTS / "bin" / "loam"), "tell", "child fixture leak",
+                            "--by", "test"], capture_output=True, text=True, env=child_env)
+    check("a child process spawned by a test refuses the live attention store",
+          child.returncode == 1 and child.stdout.strip().startswith("failed: refused in a test:"),
+          (child.returncode, child.stdout, child.stderr))
+
     lc.LEAD_AGENT = lead
 finally:
     shutil.rmtree(TMP, ignore_errors=True)

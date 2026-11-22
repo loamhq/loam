@@ -143,6 +143,7 @@ def sealed_env(scratch: Path) -> dict[str, str]:
     env["LOAM_VAULT"] = str(scratch / "vault")
     # Tests that manage plugin units must opt in and provide their own stub.
     env.setdefault("LOAM_PLUGIN_UNITS", "0")
+    env["LOAM_RESULTS_KICK"] = "0"
     env.pop("LOAM_LIVE_LOCKS", None)
     if not os.environ.get("LOAM_TEST_INSTALL_CONFIG"):
         env["LOAM_CONFIG"] = fixture_config(scratch)

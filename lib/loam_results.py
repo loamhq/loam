@@ -30,13 +30,19 @@ def workspace(agent: str) -> Path | None:
 
 
 def kicks_enabled() -> bool:
-    """Only for the install's own records. A test with a scratch
-    ``LOAM_WAITERS_DIR`` would otherwise start a real unit that drains the
-    real records; ``LOAM_RESULTS_KICK=1`` lets a proof that means it."""
+    """Only for the install's own records. A test run (lib/loam_offline.py) or
+    a scratch LOAM_WAITERS_DIR, LOAM_ATTENTION_DIR or LOAM_CONFIG would
+    otherwise start a real unit that drains the real records or notifies a live
+    agent; ``LOAM_RESULTS_KICK=1`` lets a manual proof outside the test suite."""
+    import loam_offline  # noqa: PLC0415
+    if loam_offline.offline():
+        return False
     said = os.environ.get("LOAM_RESULTS_KICK")
     if said is not None:
         return said == "1"
-    return not os.environ.get("LOAM_WAITERS_DIR")
+    return not (os.environ.get("LOAM_WAITERS_DIR")
+                or os.environ.get("LOAM_ATTENTION_DIR")
+                or os.environ.get("LOAM_CONFIG"))
 
 
 def kick(agent: str) -> str:
