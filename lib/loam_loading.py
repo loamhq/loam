@@ -37,6 +37,16 @@ OWNER_PAGE_SEED = (
 # in it, and the agent's to keep or cut.
 MAP_SEED = "# Map\n\nWhat loads with me on every run. It points to things; it does not hold them.\n"
 
+
+def display_name_line(workspace: Path) -> str:
+    """Give a run the current name even if its files predate a rename."""
+    from loam_agents import card
+    from loam_profile import display_name
+    agent = workspace.name
+    name = display_name(agent, card(agent, workspace.parent))
+    return f"Your current name in Loam is “{name}”."
+
+
 def ensure_owner_page() -> bool:
     """Make the shared owner's page if there is none. Never rewrites one.
     Returns whether it was made."""

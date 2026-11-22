@@ -7,7 +7,7 @@ import { h, icon, kept, blob } from "../ui.js"
 import { settingsNav, segmentedControl, settingsRow } from "../chat-ui.js"
 import { emptyState } from "../empty-state.js"
 import { connectedCount, providerRows, providerDetail, loginView } from "../providers.js"
-import { nameOf as fileNameOf, ROOT_LOOK } from "../files.js"
+import { ROOT_LOOK } from "../files.js"
 import { agentLook, createAgents, providerGlyph } from "../sessions.js"
 import { providerMark } from "../marks.js"
 import { githubNotice, orgApps, offersOrgs, orgView, githubView } from "../integrations.js"
@@ -367,13 +367,17 @@ function settingsFiles({ back = true } = {}) {
     folderCard('inbox', 'Inbox folder', 'New inbox notes are saved here.'),
     h('section', { class: 'settings-section', 'aria-label': 'Shortcuts' },
       h('h3', { class: 'kicker', text: 'Shortcuts' }),
-      shortcuts.length ? h('div', { class: 'rows' }, ...shortcuts.map(shortcut =>
-        h('div', { class: 'setrow', key: `${shortcut.root}:${shortcut.path}` },
-          h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: shortcut.label || fileNameOf(shortcut.path) || ROOT_LOOK[shortcut.root]?.name || shortcut.root }),
-            h('div', { class: 'setrow-sub', text: `${ROOT_LOOK[shortcut.root]?.name ?? shortcut.root} / ${shortcut.path}` })),
-          h('button', { class: 'iconbtn content-mark', 'aria-label': `Remove shortcut to ${shortcut.path || shortcut.root}`, onclick: () => {
+      shortcuts.length ? h('div', { class: 'rows' }, ...shortcuts.map(shortcut => {
+        const path = host.files.pathLabels(shortcut.root, shortcut.path)
+        const root = ROOT_LOOK[shortcut.root]?.name ?? shortcut.root
+        const name = shortcut.label || path.at(-1) || root
+        return h('div', { class: 'setrow', key: `${shortcut.root}:${shortcut.path}` },
+          h('div', { class: 'setrow-who' }, h('div', { class: 'setrow-title', text: name }),
+            h('div', { class: 'setrow-sub', text: [root, ...path].join(' / ') })),
+          h('button', { class: 'iconbtn content-mark', 'aria-label': `Remove shortcut to ${name}`, onclick: () => {
             host.store.files = toggleFileShortcut(host.store.files, host.files.st.roots.shortcuts, shortcut.root, shortcut.path, shortcut.kind); host.schedule()
-          } }, icon.close(12)))))
+          } }, icon.close(12)))
+      }))
         : h('p', { class: 'note', text: 'Add shortcuts from a file or folder’s menu.' })),
     h('section', { class: 'settings-section', 'aria-label': 'Your data' },
       h('h3', { class: 'kicker', text: 'Your data' }),

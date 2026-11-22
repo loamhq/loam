@@ -2188,7 +2188,7 @@ def main() -> None:
         _card = _card if isinstance(_card, dict) else {}
     except (OSError, ValueError):
         _card = {}
-    # Workspace files retain the original name. A profile rename changes the display name.
+    # Provision with the original name. Launchers tell the agent its current display name.
     import loam_profile  # noqa: PLC0415
     own_name = loam_profile.self_name(name, _card)
     shape = skills_shape(workspace)

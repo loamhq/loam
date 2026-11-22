@@ -392,6 +392,27 @@ async def main():
         out = await cli(port, "set", "agent.display", "Violet", "--target", "iris")
         check("bin/settings set agent.display: read back",
               out.get("ok") and out.get("value") == "Violet", out)
+        status, body = await http(port, "GET", "/v1/files/list?root=spaces")
+        space = next((row for row in body.get("entries", []) if row["path"] == "iris"), {})
+        check("Files lists the new name at the original workspace address",
+              status == 200 and space.get("name") == "Violet"
+              and space.get("link") == "/files/spaces/iris", body)
+        status, body = await http(port, "GET", "/v1/files/list?root=spaces&path=iris")
+        check("the workspace opened by its original ID has the new name",
+              status == 200 and body["folder"]["name"] == "Violet", body)
+        status, body = await http(port, "GET", "/v1/files/read?root=spaces&path=iris/soul.md")
+        check("a file locates the renamed workspace and returns its original text",
+              status == 200 and body["workspace_name"] == "Violet"
+              and body["name"] == "soul.md" and body["text"] == "iris soul.md\n", body)
+        status, body = await http(port, "GET", "/v1/files/list?root=spaces&path=iris/skills")
+        check("a nested folder gives the current workspace name for its location",
+              status == 200 and body["folder"]["workspace_name"] == "Violet"
+              and body["folder"]["name"] == "skills", body)
+        old_card = LABS / "cleo" / "agent.json"
+        old_card.write_text(json.dumps({"name": "Legacy name", "archived": "2026-11-20"}))
+        status, body = await http(port, "GET", "/v1/files/stat?root=spaces&path=cleo")
+        check("an archived workspace without a display falls back to its ID's name",
+              status == 200 and body["name"] == "Cleo" and body["path"] == "cleo", body)
         out = await cli(port, "describe", "agent.provider")
         check("describe agent.provider lists the engines",
               out.get("setting", {}).get("allowed") == list(threads.ENGINES), out)

@@ -27,6 +27,12 @@ An agent is made in a conversation, on the owner's yes, as a character and
 not a job (see `loam-making-an-agent`). Its face is drawn by the theme until
 the owner uploads a picture.
 
+An agent's current name appears in the app, including its space in Files,
+and Loam tells it that name when its session loads. A rename keeps the same
+workspace address. The owner can ask an agent to carry the name into current
+documents (`loam-agent-name-and-face`). Saved messages, including the first
+chat's greeting, keep the words they were written with.
+
 **Providers.** Connect an account in Settings › Connections. A provider
 is ready when its CLI is installed and its sign-in is usable. One
 connected provider is enough for the first hello and any agent that uses

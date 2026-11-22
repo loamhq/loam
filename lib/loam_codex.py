@@ -382,10 +382,12 @@ def instruction_sources(workspace: Path) -> list[Path]:
 
 def instructions(workspace: Path, provider_line: str = PROVIDER_LINE) -> str:
     """Render the same instruction files for every lane on Codex."""
+    from loam_loading import display_name_line
     parts = [provider_line]
     for source in instruction_sources(workspace):
         text = source.read_text(encoding="utf-8")
         parts.append(f"Contents of {source}:\n\n{text.strip()}")
+    parts.append(display_name_line(workspace))
     return "\n\n".join(parts) + "\n"
 
 

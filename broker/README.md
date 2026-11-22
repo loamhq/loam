@@ -3192,6 +3192,9 @@ swapped for a link between a listing and a read is refused at the read
 ```
 
 `kind` is `file` or `folder` (`size` and `media_type` null on a folder).
+For an agent workspace, `name` shows the agent's display name while `path`
+and `link` use the workspace ID. A listing's folder, stat or read result
+inside the workspace also carries `workspace_name` for location labels.
 `capabilities` is what the owner may do here through this interface, decided on
 the host; the page draws from it and never infers from a name. `write` means a
 text save in place; `create` (folders only) means new files and folders in it;

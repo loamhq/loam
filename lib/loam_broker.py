@@ -1140,19 +1140,14 @@ def agent_card(name: str) -> dict:
     """Return id, name and face only. Prefer the configured display name and use the
     capitalized ID as fallback. A null face tells the client to use its theme.
     """
-    try:
-        config = json.loads(
-            (AI_LABS / name / "agent.json").read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        config = {}
-    display = config.get("display")
     import loam_agents  # noqa: PLC0415
+    from loam_profile import display_name
+    config = loam_agents.card(name, AI_LABS)
     return {
         "id": name,
-        "name": display if isinstance(display, str) and display.strip()
-        else name.capitalize(),
+        "name": display_name(name, config),
         # An uploaded face (2026-11-14): over any theme's.
-        "face": loam_agents.face_of(name, config) if isinstance(config, dict) else None,
+        "face": loam_agents.face_of(name, config),
     }
 
 

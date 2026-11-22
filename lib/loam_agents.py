@@ -724,7 +724,7 @@ def make(agent: str, draft: dict, wake: str, *, provision=None) -> dict:
     if draft.get("provider"):
         config["provider"] = draft["provider"]
     if draft["name"] != agent.capitalize():
-        # The original display name in workspace files survives later display-only renames.
+        # Keep the name at creation for provisioning and fleet clause matching.
         config["self_name"] = draft["name"]
     _write_agent(agent, config)
     try:

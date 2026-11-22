@@ -89,19 +89,9 @@ def roster() -> list[str]:
 def display(persona: str) -> str:
     if lc.is_owner(persona):
         return lc.OWNER_NAME
-    try:
-        card = json.loads((AI_LABS / persona / "agent.json").read_text("utf-8"))
-        # Prefer the display name from the agent profile, consistent with the broker's agent
-        # cards.
-        shown = card.get("display")
-        if isinstance(shown, str) and shown.strip():
-            return shown.strip()
-        name = card.get("name")
-        if isinstance(name, str) and name.strip() and name.strip() != persona:
-            return name.strip()
-    except (OSError, json.JSONDecodeError):
-        pass
-    return persona.capitalize()
+    from loam_agents import card
+    from loam_profile import display_name
+    return display_name(persona, card(persona, AI_LABS))
 
 
 def mentions(text: str, people: list[str] | None = None) -> list[str]:

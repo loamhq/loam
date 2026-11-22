@@ -32,6 +32,7 @@ const fileOptions = {
   onRename: (answer, offered) => followRename(answer, true, offered),
   deleteResource: resource => host.deleteWorkspaceFile(resource),
   hasFileDraft: resource => host.hasFileDraft(resource),
+  agentLabel: id => host.state.agents.byId.get(id)?.name,
   onResolveTo: (root, path, isFile, row) => goFiles(root, path, { isFile, row }),
   // Through `put()`, the one place that can say how far an upload has got.
   sendForm: (href, form, onProgress) => host.put(href, form, onProgress),
@@ -485,7 +486,7 @@ function filesScreen({ list = false } = {}) {
       fileView(files, {
         openFolder: files.st.chatFile ? () => goFiles(f.root, parentOf(f.path), { isFile: false }) : null,
         historyBack: host.backAction('main', globalThis.history?.state?.returnThread ? 'Back to thread' : undefined),
-        closeLabel: files.pluginRoot(f.root)?.name ?? (parentOf(f.path) ? fileNameOf(parentOf(f.path)) : ROOT_LOOK[f.root]?.name ?? f.root),
+        closeLabel: files.pluginRoot(f.root)?.name ?? files.pathLabels(f.root, parentOf(f.path), f.row).at(-1) ?? ROOT_LOOK[f.root]?.name ?? f.root,
         wide: false,
         htmlActionsInMenu: files.st.chatFile,
         field: fileFieldFor,
