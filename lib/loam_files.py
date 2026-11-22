@@ -401,12 +401,20 @@ def pinned(root: str, parts: list[str], kind: str) -> str | None:
     return None
 
 
-def _entry(root: str, parts: list[str], st: os.stat_result) -> dict:
+def _entry(root: str, parts: list[str], st: os.stat_result,
+           *, include_workspace: bool = False) -> dict:
     kind = "folder" if stat.S_ISDIR(st.st_mode) else "file"
+    workspace_name = None
+    if (root == "spaces" and parts and parts[0] not in ("commons", "README.md")
+            and (include_workspace or len(parts) == 1)):
+        from loam_agents import card
+        from loam_profile import display_name
+        workspace_name = display_name(parts[0], card(parts[0], cfg.AI_LABS))
+    name = parts[-1] if parts else ROOTS[root]["name"]
     return {
         "root": root,
         "path": "/".join(parts),
-        "name": parts[-1] if parts else ROOTS[root]["name"],
+        "name": workspace_name if workspace_name and len(parts) == 1 else name,
         "kind": kind,
         "size": st.st_size if kind == "file" else None,
         "modified": _iso(st.st_mtime),
@@ -414,6 +422,7 @@ def _entry(root: str, parts: list[str], st: os.stat_result) -> dict:
         "authority": authority(root, parts),
         "capabilities": capabilities(root, parts, kind),
         "link": link(root, parts),
+        **({"workspace_name": workspace_name} if workspace_name and len(parts) > 1 else {}),
         **_source(root, parts),
     }
 
@@ -567,7 +576,7 @@ def listing(root: str, raw_path: str | None, cursor: str | None = None,
                              r["name"]))
     page = rows[start:start + count]
     nxt = start + count if start + count < len(rows) else None
-    folder = _entry(root, parts, here)
+    folder = _entry(root, parts, here, include_workspace=True)
     folder["kind"] = "folder"
     folder["size"] = None
     return {"folder": folder, "entries": page, "total": len(rows),
@@ -619,7 +628,7 @@ def stat_resource(root: str, raw_path: str | None) -> dict:
             os.close(dfd)
         if not (stat.S_ISDIR(st.st_mode) or stat.S_ISREG(st.st_mode)):
             raise _missing(root, parts)
-        return _entry(root, parts, st)
+        return _entry(root, parts, st, include_workspace=True)
     try:
         return _entry(root, parts, os.fstat(fd))
     finally:
@@ -649,7 +658,7 @@ def read_text(root: str, raw_path: str | None) -> dict:
         raise FilesError(415, f"{root}/{'/'.join(parts)} is not UTF-8 text. "
                               f"Download it instead.",
                          media_type=media_type(parts[-1])) from None
-    out = _entry(root, parts, st)
+    out = _entry(root, parts, st, include_workspace=True)
     out["size"] = len(data)
     out.update({"text": text, "revision": revision(data)})
     return out

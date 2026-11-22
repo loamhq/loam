@@ -26,6 +26,7 @@ import loam_antigravity as agy
 import loam_broker as cfg
 import loam_clock
 import loam_codex as codex
+import loam_loading
 import loam_questions as questions_fmt
 from loam_session import local_command_output
 import loam_skills
@@ -705,7 +706,8 @@ class Session:
         """
         # The shared stream flags send permission prompts over stdio so the client can
         # answer.
-        argv = [cfg.CLAUDE, *cfg.CLAUDE_STREAM_FLAGS]
+        argv = [cfg.CLAUDE, *cfg.CLAUDE_STREAM_FLAGS, "--append-system-prompt",
+                loam_loading.display_name_line(self.workspace)]
         if self.model:
             argv += ["--model", self.model]
         if self.effort:
@@ -724,7 +726,6 @@ class Session:
     async def start(self, resume: bool = False) -> None:
         if not (self.workspace / "agent.json").is_file():
             raise BrokerError(404, f"no agent named {self.agent!r}")
-        import loam_loading
         loam_loading.refresh_reach_import(self.workspace)
         if (self.origin == adoption.ORIGIN_APP
                 and self.cli_session_id is None

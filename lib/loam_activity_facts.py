@@ -9,6 +9,7 @@ import loam_apps as apps
 import loam_config as config
 import loam_files as files
 import loam_plugins as plugins
+from loam_profile import display_name
 import loam_starter as starter
 import loam_threads as threads
 
@@ -112,7 +113,7 @@ def collect(groups):
         out["files"] = count_files("vault", vault, vault, excluded)
     if "agents" in groups:
         root = agents.ai_labs()
-        out["agents"] = [{"id": who, "name": agents.card(who).get("display") or agents.card(who).get("name") or who.title(),
+        out["agents"] = [{"id": who, "name": display_name(who, agents.card(who, root)),
                           "archived": agents.is_archived(who), "files": count_files("spaces", root, root / who)}
                          for who in agents.every() if not (root / who).is_symlink()]
     if "chats" in groups:

@@ -6,6 +6,7 @@ import { createCoreRegistry } from './core-registrations.js'
 import { formatDate } from './time.js'
 import { segmentedControl } from './chat-ui.js'
 import { authenticatedFetch as fetch } from './auth.js'
+import { agentName } from './sessions.js'
 // Files: the vault and the agents' spaces, browsed,
 // read and edited through the host.
 //
@@ -529,6 +530,7 @@ export function createFiles({
   onRename = null,
   deleteResource = null,
   hasFileDraft = () => false,
+  agentLabel = () => null,
   fetchBytes = (href) => fetch(href, { credentials: 'same-origin' }),
   urls = globalThis.URL,
   sendForm = fetchForm,
@@ -561,6 +563,17 @@ export function createFiles({
       .filter(([, v]) => v !== null && v !== undefined && v !== '')
       .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
       .join('&')
+
+  function pathLabels(root, path, row = null) {
+    const parts = splitPath(path)
+    const agent = parts[0]
+    if (root === 'spaces' && agent && agent !== 'commons' && agent !== 'README.md') {
+      const known = row?.root === root && splitPath(row.path)[0] === agent
+        ? row.workspace_name ?? (row.path === agent ? row.name : null) : null
+      parts[0] = known ?? agentLabel(agent) ?? agentName(null, agent)
+    }
+    return parts
+  }
 
   let rootsRequest = 0
   async function usedShortcuts(offered) {
@@ -1009,7 +1022,7 @@ export function createFiles({
   // even a missing shortcut must still be removable through its menu.
   async function shortcutMenu(shortcut, home) {
     if (!st.archive?.busy) st.archive = null
-    const sheet = { kind: 'folder', name: shortcut.label || nameOf(shortcut.path), on: true, toggle: () => home?.toggleShortcut(shortcut.root, shortcut.path, shortcut.kind), renameSlot: 'shortcut' }
+    const sheet = { kind: 'folder', name: shortcut.label || pathLabels(shortcut.root, shortcut.path).at(-1), on: true, toggle: () => home?.toggleShortcut(shortcut.root, shortcut.path, shortcut.kind), renameSlot: 'shortcut' }
     st.sheet = sheet
     schedule()
     try {
@@ -1530,7 +1543,7 @@ export function createFiles({
     }
   }
 
-  return { registry, st, pluginRoot, itemsMenu, stat, readText, ago: when, beginRename, cancelRename, editRename, rename, applyRename, focusRename, canDeleteFile, beginDelete, confirmDelete, holdSavesForDelete, removeDeletedFile, refreshContainingFolder, revealOpen, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, downloadArchive, loadRoots, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, resumeOwner, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
+  return { registry, st, pluginRoot, pathLabels, itemsMenu, stat, readText, ago: when, beginRename, cancelRename, editRename, rename, applyRename, focusRename, canDeleteFile, beginDelete, confirmDelete, holdSavesForDelete, removeDeletedFile, refreshContainingFolder, revealOpen, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, downloadArchive, loadRoots, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, resumeOwner, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
 }
 
 function triggerBrowserDownload(href, filename) {
@@ -1692,15 +1705,18 @@ function homeShortcuts(files, home, go) {
           { class: 'card card-group' },
           ...list.map((s) => {
             const { isMain, isSide } = marksFor(s.root, s.path, s.kind === 'file')
+            const path = files.pathLabels(s.root, s.path)
+            const root = ROOT_LOOK[s.root]?.name ?? s.root
+            const name = s.label || path.at(-1) || root
             return h('div', { class: `fs-entry${isMain ? ' on' : ''}${isSide ? ' in-side' : ''}`, key: `shortcut:${s.root}:${s.path}` }, renameField(files, s, 'shortcut') ?? h(
               'button',
               { class: `setrow ${s.offered ? 'fs-host-shortcut' : 'fs-shortcut'}${isMain ? ' on' : ''}`, key: `my:${s.root}:${s.path}`, 'aria-current': isMain ? 'page' : null, onclick: event => event.altKey && go.side?.()?.available() && s.kind === 'file' ? go.side().openSide({ kind: 'file', root: s.root, path: s.path }) : files.openShortcut(s, go) },
               s.kind === 'file' ? h('div', { class: 'icon-tile', style: { background: tileOf(s.path).bg, color: tileOf(s.path).fg } }, icon.file(14), h('span', { text: tileOf(s.path).label })) : h('div', { class: 'icon-tile fs-foldertile' }, icon.folder(18)),
-              h('div', { class: 'fs-words' }, h('div', { class: 'fs-name', text: s.label || nameOf(s.path) || (ROOT_LOOK[s.root]?.name ?? s.root) }), h('div', { class: 'fs-meta', text: [ROOT_LOOK[s.root]?.name ?? s.root, ...splitPath(parentOf(s.path))].join(' / ') })),
+              h('div', { class: 'fs-words' }, h('div', { class: 'fs-name', text: name }), h('div', { class: 'fs-meta', text: [root, ...path.slice(0, -1)].join(' / ') })),
               icon.chevronRight(10),
             ), s.kind === 'file' && go.side?.()?.available() ? h('span', { class: 'row-side-action' }, go.side().affordance({ kind: 'file', root: s.root, path: s.path })) : null,
             isSide ? h('span', { class: 'row-side-mark', title: 'Open in side panel', 'aria-label': 'Open in side panel' }, icon.panelRight(13)) : null,
-            renamingHere(files, s, 'shortcut') ? null : h('button', { class: 'iconbtn content-mark fs-shortcutmenu', title: `Shortcut actions for ${s.label || nameOf(s.path)}`, 'aria-label': `Shortcut actions for ${s.label || nameOf(s.path)}`, onclick: () => files.shortcutMenu(s, home) }, icon.dots(18)))
+            renamingHere(files, s, 'shortcut') ? null : h('button', { class: 'iconbtn content-mark fs-shortcutmenu', title: `Shortcut actions for ${name}`, 'aria-label': `Shortcut actions for ${name}`, onclick: () => files.shortcutMenu(s, home) }, icon.dots(18)))
           }),
         ),
   )
@@ -1734,9 +1750,10 @@ export function folderView(files, { go, wide, collapse = null, historyBack = nul
   // A plugin's root opened cold, before its plugin has registered: no
   // heading yet (its address, "@<id>", is not a name).
   const coldPlugin = !own && typeof st.root === 'string' && st.root.startsWith('@')
-  const title = atRoot ? 'Files' : own ? own.name : coldPlugin ? '' : st.path === '' ? rootName : nameOf(st.path)
-  const parent = atRoot ? null : st.path === '' ? 'Files' : parentOf(st.path) === '' ? rootName : nameOf(parentOf(st.path))
-  const sub = atRoot || coldPlugin ? '' : own ? (own.desc || '') : st.path === '' ? (rootRow?.desc ?? ROOT_LOOK[st.root]?.desc ?? '') : [rootName, ...splitPath(st.path)].join(' / ')
+  const path = files.pathLabels(st.root, st.path, st.listing.folder)
+  const title = atRoot ? 'Files' : own ? own.name : coldPlugin ? '' : path.at(-1) ?? rootName
+  const parent = atRoot ? null : st.path === '' ? 'Files' : path.at(-2) ?? rootName
+  const sub = atRoot || coldPlugin ? '' : own ? (own.desc || '') : st.path === '' ? (rootRow?.desc ?? ROOT_LOOK[st.root]?.desc ?? '') : [rootName, ...path].join(' / ')
   const pinned = !atRoot && !own && home?.isShortcut ? home.isShortcut(st.root, st.path) : false
 
   // The home's header is the Chats header, class for class, so the two tabs
@@ -2021,7 +2038,7 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, s
       'div',
       { class: 'fs-titles' },
       renameTitle(files, f.row, f.view === 'markdown' ? name.replace(/\.(?:md|markdown)$/i, '') : name, 'display fs-edtitle'),
-      openFolder ? h('button', { class: 'fs-location', title: 'Open folder', 'aria-label': `Open folder: ${closeLabel}`, onclick: openFolder }, icon.folder(14), h('span', { text: `${ROOT_LOOK[f.root]?.name ?? f.root}${parentOf(f.path) ? ` / ${parentOf(f.path)}` : ''}` })) : null,
+      openFolder ? h('button', { class: 'fs-location', title: 'Open folder', 'aria-label': `Open folder: ${closeLabel}`, onclick: openFolder }, icon.folder(14), h('span', { text: [ROOT_LOOK[f.root]?.name ?? f.root, ...files.pathLabels(f.root, parentOf(f.path), f.row)].join(' / ') })) : null,
       h('div', { class: 'fs-sub', text: metaOf(f.row) }),
       (!wide || side) && (saveWord || readOnly) ? h('div', { class: 'fs-filestate' }, saveWord, readOnly) : null,
       !editable && !f.loading && reason ? h('div', { class: 'fs-reason', text: reason }) : null,
@@ -2289,7 +2306,7 @@ export function addSheet(files, { close, nameField, nameValue = () => nameField.
           isFolder(m)
             ? h('div', { class: 'icon-tile fs-foldertile' }, icon.folder(18))
             : h('div', { class: 'icon-tile', style: { background: tileOf(m.name).bg, color: tileOf(m.name).fg } }, h('span', { text: tileOf(m.name).label })),
-          h('div', { class: 'fs-words' }, h('div', { class: 'fs-name', text: m.name }), h('div', { class: 'fs-meta', text: [ROOT_LOOK[m.root]?.name ?? m.root, ...splitPath(parentOf(m.path))].join(' / ') })),
+          h('div', { class: 'fs-words' }, h('div', { class: 'fs-name', text: m.name }), h('div', { class: 'fs-meta', text: [ROOT_LOOK[m.root]?.name ?? m.root, ...files.pathLabels(m.root, parentOf(m.path), m)].join(' / ') })),
         ),
       ),
       s.truncated ? h('div', { class: 'fs-quiet', text: 'The search was cut short; there may be others.' }) : null,

@@ -205,10 +205,14 @@ def render_agent(config: dict) -> str:
     return json.dumps(ordered, indent=2, ensure_ascii=False) + "\n"
 
 
+def display_name(agent: str, config: dict) -> str:
+    """The current name shown for an agent."""
+    value = config.get("display")
+    return value.strip() if isinstance(value, str) and value.strip() else agent.capitalize()
+
+
 def self_name(agent: str, config: dict | None) -> str:
-    """Return the name used in the persona's own files, falling back to its ID. Changing
-    the display name leaves that identity intact.
-    """
+    """The name the persona was made with, used by provisioning and fleet clause matching."""
     value = (config or {}).get("self_name") if isinstance(config, dict) else None
     return value.strip() if isinstance(value, str) and value.strip() else agent.capitalize()
 
@@ -358,10 +362,8 @@ def _face(agent: str, config: dict) -> dict | None:
 
 
 def identity(agent: str, config: dict) -> dict:
-    display = config.get("display")
     return {"id": agent,
-            "display": display if isinstance(display, str) and display.strip()
-            else agent.capitalize(),
+            "display": display_name(agent, config),
             "face": _face(agent, config),
             "archived": config.get("archived") or None,
             "default_display": agent.capitalize(),

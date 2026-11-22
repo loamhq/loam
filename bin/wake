@@ -30,6 +30,7 @@ import loam_config as lc  # noqa: E402
 import loam_due  # noqa: E402
 
 import loam_cron  # noqa: E402
+import loam_loading  # noqa: E402
 import loam_lock  # noqa: E402
 import loam_profile  # noqa: E402
 import loam_schedule  # noqa: E402
@@ -117,7 +118,8 @@ def claude_argv(agent: str, lane: str, prompt: str, lane_file: Path | None,
                 max_turns: int | None = MAX_TURNS,
                 effort: str | None = None,
                 session_id: str | None = None,
-                resume: str | None = None) -> list[str]:
+                resume: str | None = None, *,
+                workspace: Path | None = None) -> list[str]:
     """The lane's command line. One function so a probe of a lane's reach
     runs the same flags the lane does, with only the prompt its own. The
     model and effort default to this run's (LANE_MODEL, LANE_EFFORT).
@@ -127,8 +129,9 @@ def claude_argv(agent: str, lane: str, prompt: str, lane_file: Path | None,
     same id (a result run, 2026-11-19)."""
     model = model or LANE_MODEL
     effort = effort if effort is not None else LANE_EFFORT
+    name_line = loam_loading.display_name_line(workspace or loam_cron.AI_LABS / agent)
     return [
-        CLAUDE, "-p", prompt,
+        CLAUDE, "-p", f"{name_line}\n\n{prompt}",
         *(["--resume", resume] if resume else
           ["--session-id", session_id] if session_id else []),
         "--model", model,
@@ -791,7 +794,8 @@ def run(project: Path, agent: str, vault: Path, started: str,
     os.environ[loam_waiters.SESSION_ENV] = session_id
     try:
         result = subprocess.run(
-            claude_argv(agent, lane, prompt, lane_temp, session_id=session_id),
+            claude_argv(agent, lane, prompt, lane_temp, session_id=session_id,
+                        workspace=project),
             cwd=str(project), capture_output=True, text=True, check=False,
             timeout=loam_cron.lane_timeout_s(agent, lane),
             stdin=subprocess.DEVNULL,
@@ -990,7 +994,8 @@ def deliver_attention(project: Path, agent: str, vault: Path) -> str:
                 else:
                     os.environ[loam_waiters.SESSION_ENV] = new = str(uuid.uuid4())
                     result = subprocess.run(
-                        claude_argv(agent, lane, prompt, None, session_id=new),
+                        claude_argv(agent, lane, prompt, None, session_id=new,
+                                    workspace=project),
                         cwd=str(project), capture_output=True, text=True,
                         check=False,
                         timeout=loam_cron.lane_timeout_s(agent, "reflection"),
@@ -1164,7 +1169,7 @@ def _deliver_claude(project: Path, agent: str, lane: str, record: dict,
         os.environ[loam_waiters.SESSION_ENV] = resume or new or ""
         return subprocess.run(
             claude_argv(agent, lane, prompt, lane_temp, session_id=new,
-                        resume=resume),
+                        resume=resume, workspace=project),
             cwd=str(project), capture_output=True, text=True, check=False,
             timeout=loam_cron.lane_timeout_s(agent, "reflection"),
             stdin=subprocess.DEVNULL)
