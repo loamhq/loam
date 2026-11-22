@@ -9,7 +9,7 @@ const browser = await chromium.launch({ executablePath: process.env.LOAM_CHROME,
 const out = process.env.AGENT_FILE_EVIDENCE
 const baseline = process.env.AGENT_FILE_BASELINE === '1'
 const hello = { id: 't-hello', title: 'Hello', default: 'iris', pinned: true, hello: true, unread: 0, members: [{ persona: 'iris' }] }
-const iris = { id: 'iris', name: 'Iris', face: null }
+const iris = { id: 'iris', name: 'Violet', face: null }
 const ref = (file = '') => ({ root: 'spaces', path: file ? `iris/${file}` : 'iris', exists: true })
 const files = { workspace: ref(), soul: ref('soul.md'), config: ref('config.md'), memory: { map: ref('map.md'), folder: ref('memory') }, skills: { ...ref('skills'), count: 1 } }
 const documents = {
@@ -19,7 +19,10 @@ const documents = {
   'iris/memory/first-note.md': '# First note\n\nLeave space for the next question.',
   'iris/skills/orientation.md': '# Orientation\n\nShow people where to find their files.',
 }
-const resource = path => row('spaces', path)
+const resource = path => ({
+  ...row('spaces', path),
+  ...(path === iris.id ? { name: iris.name } : path.startsWith('iris/') ? { workspace_name: iris.name } : {}),
+})
 const json = (body, status = 200) => (_, res) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)) }
 const stream = body => (_, res) => { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write(`data: ${JSON.stringify(body)}\n\n`) }
 
@@ -96,6 +99,30 @@ try {
         await profile.waitFor()
       }
       const filesTab = profile.getByRole('tab', { name: 'Files', exact: true })
+      if (!baseline) {
+        await page.goto(`${app.url}/files/spaces`)
+        await page.locator('.fs-entry .fs-name').getByText(iris.name, { exact: true }).waitFor()
+        await capture('renamed-spaces')
+        await page.locator('.fs-entry .fs-name').getByText(iris.name, { exact: true }).click()
+        await page.locator('.fs-title').getByText(iris.name, { exact: true }).waitFor()
+        assert.equal(new URL(page.url()).pathname, '/files/spaces/iris')
+        await page.getByText('AI Spaces / Violet', { exact: true }).waitFor()
+        await capture('renamed-workspace')
+        await page.getByRole('button', { name: 'This folder', exact: true }).click()
+        await page.getByRole('button', { name: /^Add to shortcuts/ }).click()
+        await page.goto(`${app.url}/files/spaces/iris/memory`)
+        await page.getByText('AI Spaces / Violet / memory', { exact: true }).waitFor()
+        await capture('renamed-nested')
+        await page.goto(`${app.url}/files`)
+        await page.locator('.fs-shortcut .fs-name').getByText(iris.name, { exact: true }).waitFor()
+        await capture('renamed-shortcuts')
+        await button('Settings').click()
+        await page.locator('.sheet.settings').getByRole('button', { name: /^Files(?: |$)/ }).click()
+        const shortcuts = page.getByRole('region', { name: 'Shortcuts' })
+        await shortcuts.getByText(iris.name, { exact: true }).waitFor()
+        await shortcuts.getByRole('button', { name: 'Remove shortcut to Violet' }).waitFor()
+        await capture('renamed-settings-shortcuts')
+      }
       const cases = [
         ['read-soul', 'Read soul', files.soul, false],
         ['soul', 'Soul', files.soul, false],
@@ -146,6 +173,13 @@ try {
         await ready()
         await openThreadFile(name)
         await fileReady()
+        if (!baseline && key === 'soul') {
+          await page.locator('.fs-preview').getByRole('heading', { name: 'Iris', exact: true }).waitFor()
+          if (!wide) {
+            await page.getByRole('button', { name: 'Open folder: Violet' }).waitFor()
+            await capture('renamed-file-location')
+          }
+        }
         await capture(`thread-${key}`)
         await back()
         await ready()

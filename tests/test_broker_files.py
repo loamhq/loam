@@ -324,7 +324,7 @@ def test_read(c: Client, t: dict) -> None:
     status, body, text = c.get("list", root="spaces")
     check("spaces: the agents and the commons, nothing else",
           [e["name"] for e in body["entries"]],
-          ["alpha", "beta", "commons", "README.md"])
+          ["Alpha", "Beta", "commons", "README.md"])
     status, body, text = c.get("list", root="spaces", path="alpha")
     names = [e["name"] for e in body["entries"]]
     check("alpha's space: config visible, private and secret not",

@@ -26,6 +26,7 @@ import loam_codex as codex  # noqa: E402
 import loam_codex_wake as cw  # noqa: E402
 import loam_loading  # noqa: E402
 import loam_memory  # noqa: E402
+from loam_provider_session import Session  # noqa: E402
 
 FAILURES = 0
 
@@ -110,7 +111,11 @@ def style_text(ws: Path, style: str) -> str:
 
 def claude_conversation(ws: Path) -> str:
     settings = json.loads((ws / ".claude" / "settings.json").read_text())
-    return imports_text(ws) + "\n" + style_text(ws, settings["outputStyle"])
+    session = Session(ws.name)
+    session.workspace = ws
+    argv = session.argv(resume=False)
+    return (imports_text(ws) + "\n" + style_text(ws, settings["outputStyle"])
+            + "\n" + argv[argv.index("--append-system-prompt") + 1])
 
 
 def claude_lane(ws: Path, cron: str | None) -> tuple[str, list[str]]:
@@ -119,9 +124,9 @@ def claude_lane(ws: Path, cron: str | None) -> tuple[str, list[str]]:
     if text is not None:
         lane_file = TMP / f"{ws.name}-lane.md"
         lane_file.write_text(text)
-    argv = wake.claude_argv(ws.name, "x", "prompt", lane_file, model="haiku")
+    argv = wake.claude_argv(ws.name, "x", "prompt", lane_file, model="haiku", workspace=ws)
     style = json.loads(argv[argv.index("--settings") + 1])["outputStyle"]
-    out = imports_text(ws) + "\n" + style_text(ws, style)
+    out = imports_text(ws) + "\n" + style_text(ws, style) + "\n" + argv[argv.index("-p") + 1]
     if "--append-system-prompt-file" in argv:
         out += "\n" + Path(argv[argv.index("--append-system-prompt-file") + 1]).read_text()
     return out, argv
@@ -145,6 +150,8 @@ def main() -> int:
 
     without = build("withoutmap", mapped=False)
     with_map = build("withmap", mapped=True)
+    card = with_map / "agent.json"
+    card.write_text(json.dumps({**json.loads(card.read_text()), "display": "New Name"}))
     runs = {
         "Claude Code conversation": (claude_conversation, None),
         "Claude Code wake": (lambda ws: claude_lane(ws, None)[0], None),
@@ -165,6 +172,9 @@ def main() -> int:
             check(f"{label}, {ws.name}: exactly {sorted(want)}", tokens_in(text) == want)
             check(f"{label}, {ws.name}: shared instructions load",
                   LOAM_HEADING in text and OWNER_TOKEN in text)
+            name = "New Name" if ws == with_map else "Withoutmap"
+            check(f"{label}, {ws.name}: current name loads",
+                  text.count(f"Your current name in Loam is “{name}”.") == 1)
 
     for ws in (with_map, without):
         _, argv = claude_lane(ws, None)
