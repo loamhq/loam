@@ -32,6 +32,8 @@ ABOUT_ME = "About me.md"
 
 ARCHIVE_KEY = "archived"
 FACE_KEY = "face"
+FACE_SLOT_KEY = "face_slot"
+FACE_VARIANT_COUNT = 8
 # Folders under the workspaces root that are not agents, and words an id may
 # not be: the routes' own path words, the owner's, and the threads'.
 RESERVED_IDS = frozenset({
@@ -192,12 +194,300 @@ def _write_json(path: Path, value: dict) -> None:
     os.replace(tmp, path)
 
 
-def _write_agent(agent: str, config: dict) -> None:
+def _write_agent(agent: str, config: dict, root: Path | None = None) -> None:
     import loam_profile  # noqa: PLC0415 -- agent.json's one renderer
-    target = ai_labs() / agent / "agent.json"
+    target = (root or ai_labs()) / agent / "agent.json"
     tmp = target.with_name(f".agent.json.{os.getpid()}.tmp")
     tmp.write_text(loam_profile.render_agent(config), encoding="utf-8")
     os.replace(tmp, target)
+    _CARDS.pop(str(target), None)
+
+
+# ---------------------------------------------------------------------------
+# Permanent theme face slots.
+# ---------------------------------------------------------------------------
+
+def fnv_face_slot(agent: str, count: int = FACE_VARIANT_COUNT) -> int:
+    """32-bit FNV-1a modulo ``count`` — exact match for app/public/face-identity.js."""
+    size = count if isinstance(count, int) and count > 0 else FACE_VARIANT_COUNT
+    h = 2166136261
+    for ch in str(agent):
+        h = ((h ^ ord(ch)) * 16777619) & 0xFFFFFFFF
+    return h % size
+
+
+def _valid_face_slot(value) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    return None
+
+
+def face_slot_of(agent: str, config: dict | None = None,
+                 root: Path | None = None) -> int | None:
+    config = card(agent, root) if config is None else config
+    return _valid_face_slot(config.get(FACE_SLOT_KEY))
+
+
+def _configured_avatar_variants() -> dict[str, int]:
+    """Optional installation-supplied AVATAR_VARIANTS (env or loam.toml), if any."""
+    raw = os.environ.get("AVATAR_VARIANTS")
+    data = None
+    if raw:
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            data = None
+    if data is None:
+        val = lc.get("app.avatar_variants")
+        if isinstance(val, dict):
+            data = val
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, int] = {}
+    for k, v in data.items():
+        slot = _valid_face_slot(v)
+        if isinstance(k, str) and k and slot is not None:
+            out[k] = slot
+    return out
+
+
+def _lowest_unused_for_residue(residue: int, used: set[int],
+                               count: int = FACE_VARIANT_COUNT) -> int:
+    slot = residue % count
+    while slot in used:
+        slot += count
+    return slot
+
+
+def next_face_slot(live_slots: list[int], all_slots: list[int] | None = None, *,
+                   count: int = FACE_VARIANT_COUNT) -> int:
+    """First free slot for a new agent: fill unused residues mod ``count`` among
+    live agents first, break ties by fewest across all agents (including archived)
+    then lowest residue, and return the lowest unused non-negative integer for
+    that residue so themes with more than ``count`` faces also stay distinct."""
+    size = count if isinstance(count, int) and count > 0 else FACE_VARIANT_COUNT
+    live_clean = [s for s in live_slots if _valid_face_slot(s) is not None]
+    all_clean = live_clean if all_slots is None else [
+        s for s in all_slots if _valid_face_slot(s) is not None]
+    live_counts = [0] * size
+    for s in live_clean:
+        live_counts[s % size] += 1
+    all_counts = [0] * size
+    for s in all_clean:
+        all_counts[s % size] += 1
+    residue = min(range(size), key=lambda r: (live_counts[r], all_counts[r], r))
+    return _lowest_unused_for_residue(residue, set(all_clean), size)
+
+
+def _birth_records(root: Path) -> dict[str, tuple[float, int]]:
+    """Creation timestamps (seconds, event index) for agents in ``root``."""
+    try:
+        same_root = root.resolve() == ai_labs().resolve()
+    except OSError:
+        same_root = False
+    if not same_root:
+        return {}
+    births: dict[str, tuple[float, int]] = {}
+    for idx, ev in enumerate(events()):
+        if ev.get("kind") not in ("starter", "created"):
+            continue
+        agent = ev.get("agent")
+        at = _utc(ev.get("at"))
+        if isinstance(agent, str) and agent and at is not None and agent not in births:
+            births[agent] = (at.timestamp(), idx)
+    try:
+        marker = json.loads((state() / "starter.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        marker = None
+    if isinstance(marker, dict):
+        agent = marker.get("agent")
+        at = _utc(marker.get("at"))
+        if isinstance(agent, str) and agent and at is not None and agent not in births:
+            births[agent] = (at.timestamp(), -1)
+    return births
+
+
+def _age_key(agent: str, root: Path,
+             births: dict[str, tuple[float, int]]) -> tuple[float, int, str]:
+    if agent in births:
+        ts, idx = births[agent]
+        return (ts, idx, agent)
+    ws = root / agent
+    for name in ("soul.md", "agent.json"):
+        try:
+            return (float((ws / name).stat().st_mtime), 1 << 60, agent)
+        except OSError:
+            continue
+    return (float("inf"), 1 << 60, agent)
+
+
+def ensure_face_slots(root: Path | None = None, *,
+                      count: int = FACE_VARIANT_COUNT,
+                      fixed: dict[str, int] | None = None) -> dict[str, int]:
+    """Ensure every agent under ``root`` has a permanent ``face_slot`` in its
+    ``agent.json``. Fast-paths without locking once all agents carry one.
+
+    Backfill preserves every agent whose current FNV slot is unique (or oldest
+    in a collision group) and moves only newer colliding agents to the first
+    free slot. Installation-supplied ``AVATAR_VARIANTS`` always wins where set."""
+    root = root or ai_labs()
+    size = count if isinstance(count, int) and count > 0 else FACE_VARIANT_COUNT
+    agents = every(root)
+    if not agents:
+        return {}
+    fast: dict[str, int] = {}
+    missing_any = False
+    for name in agents:
+        slot = _valid_face_slot(card(name, root).get(FACE_SLOT_KEY))
+        if slot is None:
+            missing_any = True
+            break
+        fast[name] = slot
+    if not missing_any:
+        return fast
+
+    import loam_schedule  # noqa: PLC0415 -- the agent.json writers' lock
+    with loam_schedule.locked():
+        agents = every(root)
+        configured = _configured_avatar_variants() if fixed is None else {
+            k: v for k, v in fixed.items()
+            if isinstance(k, str) and k and _valid_face_slot(v) is not None}
+        configs = {name: card(name, root) for name in agents}
+        result: dict[str, int] = {}
+        live_slots: list[int] = []
+        all_slots: list[int] = []
+        missing_live: list[str] = []
+        missing_archived: list[str] = []
+
+        # Reserve slots explicitly pinned by AVATAR_VARIANTS for unlisted/future IDs.
+        for cid, cslot in configured.items():
+            if cid not in configs:
+                live_slots.append(cslot)
+                all_slots.append(cslot)
+
+        for name in agents:
+            cfg = configs[name]
+            arch = bool(cfg.get(ARCHIVE_KEY))
+            slot = _valid_face_slot(cfg.get(FACE_SLOT_KEY))
+            if slot is not None:
+                result[name] = slot
+                eff = configured.get(name, slot)
+                all_slots.append(eff)
+                if not arch:
+                    live_slots.append(eff)
+            elif arch:
+                missing_archived.append(name)
+            else:
+                missing_live.append(name)
+
+        if not missing_live and not missing_archived:
+            return result
+
+        births = _birth_records(root)
+        missing_live.sort(key=lambda a: _age_key(a, root, births))
+        missing_archived.sort(key=lambda a: _age_key(a, root, births))
+
+        to_write: dict[str, int] = {}
+
+        # Live agents: pinned first, then two-pass backfill so a colliding
+        # older pair never steals a newer agent's unique existing face.
+        remaining_live: list[str] = []
+        for name in missing_live:
+            if name in configured:
+                slot = configured[name]
+                to_write[name] = slot
+                result[name] = slot
+                live_slots.append(slot)
+                all_slots.append(slot)
+            else:
+                remaining_live.append(name)
+
+        live_movers: list[str] = []
+        for name in remaining_live:
+            r = fnv_face_slot(name, size)
+            if all(s % size != r for s in live_slots):
+                slot = _lowest_unused_for_residue(r, set(all_slots), size)
+                to_write[name] = slot
+                result[name] = slot
+                live_slots.append(slot)
+                all_slots.append(slot)
+            else:
+                live_movers.append(name)
+
+        for name in live_movers:
+            slot = next_face_slot(live_slots, all_slots, count=size)
+            to_write[name] = slot
+            result[name] = slot
+            live_slots.append(slot)
+            all_slots.append(slot)
+
+        # Archived agents: same two-pass rule against all_slots.
+        remaining_arch: list[str] = []
+        for name in missing_archived:
+            if name in configured:
+                slot = configured[name]
+                to_write[name] = slot
+                result[name] = slot
+                all_slots.append(slot)
+            else:
+                remaining_arch.append(name)
+
+        arch_movers: list[str] = []
+        for name in remaining_arch:
+            r = fnv_face_slot(name, size)
+            if all(s % size != r for s in all_slots):
+                slot = _lowest_unused_for_residue(r, set(all_slots), size)
+                to_write[name] = slot
+                result[name] = slot
+                all_slots.append(slot)
+            else:
+                arch_movers.append(name)
+
+        for name in arch_movers:
+            slot = next_face_slot(live_slots, all_slots, count=size)
+            to_write[name] = slot
+            result[name] = slot
+            all_slots.append(slot)
+
+        for name, slot in to_write.items():
+            cfg = dict(configs[name])
+            cfg[FACE_SLOT_KEY] = slot
+            _write_agent(name, cfg, root=root)
+
+        return result
+
+
+def allocate_face_slot(agent: str, root: Path | None = None, *,
+                       count: int = FACE_VARIANT_COUNT,
+                       fixed: dict[str, int] | None = None) -> int:
+    """Choose the permanent face slot for a brand-new ``agent`` (whose
+    agent.json has not yet been written). Caller holds ``loam_schedule.locked()``."""
+    root = root or ai_labs()
+    size = count if isinstance(count, int) and count > 0 else FACE_VARIANT_COUNT
+    configured = _configured_avatar_variants() if fixed is None else {
+        k: v for k, v in fixed.items()
+        if isinstance(k, str) and k and _valid_face_slot(v) is not None}
+    if agent in configured:
+        return configured[agent]
+    live_slots: list[int] = []
+    all_slots: list[int] = []
+    seen: set[str] = set()
+    for name in every(root):
+        if name == agent:
+            continue
+        seen.add(name)
+        cfg = card(name, root)
+        slot = configured.get(name, _valid_face_slot(cfg.get(FACE_SLOT_KEY)))
+        if slot is None:
+            continue
+        all_slots.append(slot)
+        if not cfg.get(ARCHIVE_KEY):
+            live_slots.append(slot)
+    for cid, cslot in configured.items():
+        if cid not in seen and cid != agent:
+            live_slots.append(cslot)
+            all_slots.append(cslot)
+    return next_face_slot(live_slots, all_slots, count=size)
 
 
 # ---------------------------------------------------------------------------
@@ -726,12 +1016,17 @@ def make(agent: str, draft: dict, wake: str, *, provision=None) -> dict:
     if draft["name"] != agent.capitalize():
         # Keep the name at creation for provisioning and fleet clause matching.
         config["self_name"] = draft["name"]
-    _write_agent(agent, config)
+    ensure_face_slots()
+    import loam_schedule  # noqa: PLC0415 -- the agent.json writers' lock
+    with loam_schedule.locked():
+        config[FACE_SLOT_KEY] = allocate_face_slot(agent)
+        _write_agent(agent, config)
     try:
         output = (provision or _provision)(agent, wake)
     except Exception as exc:  # noqa: BLE001 -- the half-made agent leaves the roster
         aside = ws / "agent.json.failed"
         os.replace(ws / "agent.json", aside)
+        _CARDS.pop(str(ws / "agent.json"), None)
         log({"kind": "create_failed", "agent": agent, "error": str(exc)})
         raise AgentsError(
             f"{agent} could not be provisioned, so it is not on the roster "

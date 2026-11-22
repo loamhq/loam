@@ -4,6 +4,7 @@ import { h, icon, blob } from './ui.js'
 import { emptyState } from './empty-state.js'
 import { settingsRow } from './chat-ui.js'
 import { agentLook } from './sessions.js'
+import { recordFaceSlots } from './face-identity.js'
 import { modelsOf, effortsOf, effortFits } from './providers.js'
 import { formatDate } from './time.js'
 
@@ -139,7 +140,7 @@ export function createProfiles({ api, redraw, changedAgent = () => {} }) {
   }
   async function archived() {
     st.directoryError = ''; redraw()
-    try { st.archived = (await api('GET', '/agents?archived=1')).agents.filter(a => a.archived) }
+    try { st.archived = (await api('GET', '/agents?archived=1')).agents.filter(a => a.archived); recordFaceSlots(st.archived) }
     catch (e) { st.directoryError = e.message }
     redraw()
   }

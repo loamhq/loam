@@ -23,8 +23,26 @@ async function composerBoot(broker) {
   return null
 }
 
+async function faceSlotsBoot(broker) {
+  try {
+    const out = await broker.json('GET', '/v1/agents', undefined, { signal: AbortSignal.timeout(3000) })
+    if (out.status === 200) {
+      const agents = JSON.parse(out.body)?.agents
+      if (Array.isArray(agents)) {
+        const slots = {}
+        for (const a of agents) {
+          if (typeof a?.id === 'string' && a.id && Number.isInteger(a.face_slot) && a.face_slot >= 0) slots[a.id] = a.face_slot
+        }
+        return slots
+      }
+    }
+  } catch { /* The app loads agents when the broker comes back. */ }
+  return {}
+}
+
 export async function appearanceBoot(broker, themes = [{ id: 'latte', name: 'Latte' }, { id: 'plain', name: 'Plain' }]) {
   const sendKey = composerBoot(broker)
+  const faceSlots = faceSlotsBoot(broker)
   let data
   try {
     const out = await broker.json('GET', '/v1/settings/appearance', undefined, { signal: AbortSignal.timeout(3000) })
@@ -34,5 +52,6 @@ export async function appearanceBoot(broker, themes = [{ id: 'latte', name: 'Lat
     data = { values: appearanceValues(null, themes), available: false, themes }
   }
   data.sendKey = await sendKey
-  return `globalThis.__loamAppearance = ${JSON.stringify(data).replace(/</g, '\\u003c')};\n`
+  const slots = await faceSlots
+  return `globalThis.LOAM_FACE_SLOTS = ${JSON.stringify(slots).replace(/</g, '\\u003c')};\nglobalThis.__loamAppearance = ${JSON.stringify(data).replace(/</g, '\\u003c')};\n`
 }

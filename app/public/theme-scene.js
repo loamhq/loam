@@ -27,10 +27,10 @@ import { agentLook } from './sessions.js'
 const WIDE = 600
 const SCENE_W = 880
 const AGENTS = [
-  { id: 'sprout', name: 'Sprout', initial: 'S' },
-  { id: 'quill', name: 'Quill', initial: 'Q' },
-  { id: 'wren', name: 'Wren', initial: 'W' },
-  { id: 'juniper', name: 'Juniper', initial: 'J' },
+  { id: 'sprout', name: 'Sprout', initial: 'S', faceSlot: 0 },
+  { id: 'quill', name: 'Quill', initial: 'Q', faceSlot: 1 },
+  { id: 'wren', name: 'Wren', initial: 'W', faceSlot: 2 },
+  { id: 'juniper', name: 'Juniper', initial: 'J', faceSlot: 3 },
 ]
 const roster = { list: AGENTS, byId: new Map(AGENTS.map(a => [a.id, a])) }
 const face = (id, size, font) => blob(agentLook(id, roster), { size, font, inline: true })

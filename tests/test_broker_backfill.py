@@ -235,20 +235,22 @@ async def main() -> None:
     check("GET /v1/agents is an object with an `agents` key",
           (status, list(answer)), (200, ["agents"]))
     check("...holding objects, not the bare strings it answered before",
-          answer["agents"][0],
+          {k: v for k, v in answer["agents"][0].items() if k != "face_slot"},
           {"id": "ada", "name": "Ada", "face": None})
     check("...sorted by id, as the roster always was",
           [a["id"] for a in answer["agents"]],
           ["ada", "nameless", "plain"])
     check("an agent.json with no display falls back to the capitalised id",
-          [a for a in answer["agents"] if a["id"] == "nameless"][0],
+          {k: v for k, v in [a for a in answer["agents"] if a["id"] == "nameless"][0].items() if k != "face_slot"},
           {"id": "nameless", "name": "Nameless", "face": None})
     check("an agent.json's retired emoji is not served",
-          [a for a in answer["agents"] if a["id"] == "plain"][0],
+          {k: v for k, v in [a for a in answer["agents"] if a["id"] == "plain"][0].items() if k != "face_slot"},
           {"id": "plain", "name": "Plain", "face": None})
-    # An uploaded face is identified by its route and digest.
+    # An uploaded face is identified by its route and digest; face_slot is the theme slot.
     check("nothing else from agent.json leaves the box",
-          sorted(answer["agents"][0]), ["face", "id", "name"])
+          sorted(answer["agents"][0]), ["face", "face_slot", "id", "name"])
+    check("each agent gets a distinct face_slot",
+          len({a["face_slot"] for a in answer["agents"]}), 3)
     check("the roster of ids is unchanged, and is what a session starts by",
           cfg.roster(), ["ada", "nameless", "plain"])
 

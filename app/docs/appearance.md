@@ -91,14 +91,22 @@ from shipped manifests; this default-only update requires no host code change.
 
 ## Permanent face identity
 
-`AVATAR_VARIANTS` is an installation-supplied, append-only object of permanent
-agent IDs to eight material/pour slots, 0–7. It uses the same configuration
-boundary as `AVATAR_COLOURS`; installation names never become product defaults.
-The server validates unique integer slots and sends them through the existing
-parser-blocking `/appearance-state.js`. Both `pourFor()` and `variantFor()` read
-one identity module, before any face renders. Names, roster order, tone and
-mode cannot change that choice. Unknown IDs keep the original fixed eight-way
-FNV fallback. Appending a supplied assignment leaves previous assignments alone.
+Each agent keeps a permanent non-negative `face_slot` on its `agent.json`,
+assigned once on creation to the first free slot so no two agents share a
+theme-drawn face while the theme still has an unused one; once the set runs out,
+slots repeat evenly. Existing rosters without `face_slot` are backfilled once:
+any agent whose current FNV slot is unique keeps it, and where agents collide
+the older agent keeps its face while the newer moves to a free slot. Deleting,
+archiving or renaming another agent never moves an existing agent's slot.
+Uploaded pictures (`agent.face`) still win over theme faces.
+
+`AVATAR_VARIANTS` is an optional installation-supplied, append-only object of
+permanent agent IDs to slots 0–7 that still overrides `face_slot` where set.
+The server delivers both `LOAM_AVATAR_VARIANTS` and the broker's
+`LOAM_FACE_SLOTS` in the parser-blocking `/appearance-state.js` before paint,
+and `GET /v1/agents` carries `face_slot` on each agent card. `variantFor(id, count)`
+reads that single identity module from each theme's own face count (used by
+Latte pours and all signature materials); unknown IDs fall back to the FNV hash.
 
 The [host handoff](../handoffs/2026-11-13-permanent-face-slots.md) explains
 configuration; the job receipt carries the deployment-specific values. Existing

@@ -292,7 +292,9 @@ async def main():
               and threads.mentions("@ada hi") == ["ada"])
         status, body = await http(port, "GET", "/v1/agents")
         check("the cards say the new name",
-              {"id": "ada", "name": "Clayton", "face": None} in body["agents"], body)
+              any(a.get("id") == "ada" and a.get("name") == "Clayton"
+                  and a.get("face") is None and isinstance(a.get("face_slot"), int)
+                  for a in body["agents"]), body)
         before = text
         for patch, code, label in (
                 ({"display": "Iris"}, 409, "another agent's name"),
@@ -374,8 +376,9 @@ async def main():
 
         # provision keeps what was set
         kept = profile.kept({**card("ada"), "display": "Clayton", "model": "opus"})
-        check("provision keeps display, an older emoji and the defaults (kept)",
-              kept == {"display": "Clayton", "emoji": "🧱", "model": "opus"}, kept)
+        check("provision keeps display, face_slot, an older emoji and the defaults (kept)",
+              kept == {"display": "Clayton", "emoji": "🧱", "model": "opus",
+                       "face_slot": card("ada")["face_slot"]}, kept)
 
         # -- a persona, through bin/settings ----------------------------------
         out = await cli(port, "set", "agent.model", "sonnet", "--target", "iris")

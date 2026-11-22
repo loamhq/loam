@@ -23,6 +23,7 @@ import { splitCards, plainWords } from './market-card.js'
 import { copyText } from './clipboard.js'
 import { emptyState } from './empty-state.js'
 import { agentLook, createAgents, when, providerGlyph } from './sessions.js'
+import { recordFaceSlots } from './face-identity.js'
 import { modelsOf, modelLabel, modelTooltip } from './providers.js'
 import { providerMark } from './marks.js'
 import { readEvents } from './sse.js'
@@ -234,6 +235,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       const body = readThreadList(e)
       for (const row of body.threads) cancelRemoval(row.id)
       st.threads = body.threads.sort(compareThreads); runtimeAgents = body.agents
+      recordFaceSlots(body.agents)
       st.listRetryAt = 0; st.listSnapshot = true; st.listLive = true; st.available = true; st.checked = true
       const current = st.open && body.threads.find((t) => t.id === st.open.thread.id)
       if (current) { st.open.summaryBarrier = null; updateRow(current) }
@@ -271,7 +273,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       const body = readThreadList(await transport('GET', '/threads?archived=1'))
       if (ticket !== listingRequest) return
       for (const row of body.threads) cancelRemoval(row.id)
-      if (Array.isArray(body.agents)) runtimeAgents = body.agents
+      if (Array.isArray(body.agents)) { runtimeAgents = body.agents; recordFaceSlots(body.agents) }
       st.threads = body.threads.sort(compareThreads); st.available = true; st.error = ''; ensureList()
       // A list request can predate a PATCH; it never overwrites the open record.
     } catch (error) {

@@ -26,6 +26,7 @@ import { backTitle, createWorkspaceHistory, historyBackButton, historyShortcut }
 import { createAppModalHistory, modalFromURL, modalURL } from './app-modal-history.js'
 import { settingsRow, agentProse, userBubble, messageFiles, stepFold, emptyConversation, panelHeader, settingsNav, segmentedControl, createMessageState, sheetHandle } from './chat-ui.js'
 import { setAvatarColours } from './sessions.js'
+import { recordFaceSlots } from './face-identity.js'
 import { authenticatedFetch as fetch, authExpired, expireAuth, failureSentence } from './auth.js'
 // Threads, Files, profiles and Activity share settings and page services.
 // This adapter talks only to the app's /api; the broker token stays on the
@@ -397,9 +398,10 @@ let agentsRequest = null, agentRosterRevision = 0
 const changedAgent = agent => {
   if (!agent) return
   agentRosterRevision++
+  recordFaceSlots([agent])
   const rows = state.agents.list
   state.agents = createAgents(agent.archived ? rows.filter(row => row.id !== agent.id)
-    : state.agents.byId.has(agent.id) ? rows.map(row => row.id === agent.id ? agent : row) : [...rows, agent])
+    : state.agents.byId.has(agent.id) ? rows.map(row => row.id === agent.id ? { ...(row.faceSlot !== undefined ? { faceSlot: row.faceSlot } : {}), ...agent } : row) : [...rows, agent])
   threads.refreshAgents()
   sidePanel.threads.refreshAgents()
   loadAgentAvailability(true)
@@ -573,6 +575,7 @@ function loadAgents() {
   agentsRequest = api('GET', '/agents').then(body => {
     // A profile change made here wins over a read started before it.
     if (revision !== agentRosterRevision || !Array.isArray(body?.agents)) return
+    recordFaceSlots(body.agents)
     const current = createAgents(body.agents)
     const hadRoster = state.agentsReady
     if (hadRoster && JSON.stringify(current.list) === JSON.stringify(state.agents.list)) return

@@ -24,10 +24,11 @@ PROVIDER_NAMES = {"claude-code": "Claude Code", "codex": "Codex",
 BASE_KEYS = ("name", "display", "emoji", "workspace", "vault")
 DEFAULT_KEYS = ("provider", "model", "effort")
 SETTABLE = ("display", *DEFAULT_KEYS)
-# Kept over a provision besides the settable ones: an uploaded face and the
-# archive mark (lib/loam_agents.py, 2026-11-14), and the retired emoji an
-# older file still holds (2026-11-16), so its bytes do not change.
-KEPT = (*SETTABLE, "face", "archived", "self_name", "emoji")
+# Kept over a provision besides the settable ones: an uploaded face, its
+# permanent theme face slot, and the archive mark (lib/loam_agents.py), and
+# the retired emoji an older file still holds (2026-11-16), so its bytes do
+# not change.
+KEPT = (*SETTABLE, "face", "face_slot", "archived", "self_name", "emoji")
 DISPLAY_MAX = 40
 # Words a display name may not be: the owner's, and `@all` / `@everyone`.
 RESERVED_NAMES = tuple(dict.fromkeys((lc.OWNER_ID, *lc.LEGACY_OWNER_IDS, "all", "everyone", "system")))

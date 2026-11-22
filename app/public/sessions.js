@@ -28,14 +28,18 @@ function agentDisplayName(agent) {
 export function createAgents(entries = []) {
   const clean = (Array.isArray(entries) ? entries : [])
     .filter((entry) => entry && typeof entry === 'object' && typeof entry.id === 'string' && entry.id !== '')
-    .map((entry) => ({
-      id: entry.id,
-      name: agentDisplayName(entry),
-      ...(typeof entry.role === 'string' && entry.role.trim() ? { role: entry.role.trim() } : {}),
-      ...(typeof entry.description === 'string' && entry.description.trim() ? { description: entry.description.trim() } : {}),
-      face: entry.face ?? null,
-      archived: entry.archived ?? null,
-    }))
+    .map((entry) => {
+      const slot = entry.face_slot ?? entry.faceSlot
+      return {
+        id: entry.id,
+        name: agentDisplayName(entry),
+        ...(typeof entry.role === 'string' && entry.role.trim() ? { role: entry.role.trim() } : {}),
+        ...(typeof entry.description === 'string' && entry.description.trim() ? { description: entry.description.trim() } : {}),
+        face: entry.face ?? null,
+        ...(Number.isInteger(slot) && slot >= 0 ? { faceSlot: slot } : {}),
+        archived: entry.archived ?? null,
+      }
+    })
 
   const shared = new Map()
   for (const agent of clean) {
@@ -97,6 +101,7 @@ export function agentLook(id, agents = null) {
     initial: agent.initial || '?',
     name: agent.name,
     imageSrc: agent.face?.url?.replace(/^\/v1\//, '/api/') || null,
+    ...(Number.isInteger(agent.faceSlot) && agent.faceSlot >= 0 ? { faceSlot: agent.faceSlot } : {}),
   }
 }
 
