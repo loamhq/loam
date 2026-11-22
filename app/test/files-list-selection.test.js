@@ -111,13 +111,13 @@ test('shortcut rows mark open main and side files the same way', async () => {
   click(find(find(entryNamed('plan.md'), 'row-side-action'), 'iconbtn'))
   await until(() => find(root, 'side-pane') && hasClass(entryNamed('plan.md'), 'in-side'))
 
-  // Navigate up to Vault, then up to Files home where Shortcuts live.
+  // Navigate up to Your files, then up to Files home where Pinned lives.
   click(find(find(root, 'workspace-list'), 'panel-history-back'))
-  await until(() => text(find(root, 'fs-title')) === 'Vault')
+  await until(() => text(find(root, 'fs-title')) === 'Your files')
   click(find(find(root, 'workspace-list'), 'panel-history-back'))
-  await until(() => find(root, 'fs-shortcuts'))
+  await until(() => find(root, 'fs-pinned'))
 
-  const shortcuts = find(root, 'fs-shortcuts')
+  const shortcuts = find(root, 'fs-pinned')
   const pageShortcut = all(shortcuts, 'fs-entry').find((e) => text(find(e, 'fs-name')) === 'page.html')
   const planShortcut = all(shortcuts, 'fs-entry').find((e) => text(find(e, 'fs-name')) === 'plan.md')
   assert.equal(hasClass(pageShortcut, 'on'), true)

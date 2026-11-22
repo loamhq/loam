@@ -81,6 +81,11 @@ def main(argv: list[str]) -> int:
         if updating:
             from loam_starter_update import refresh
             refresh()
+            import loam_vault_cleanup as cleanup  # noqa: PLC0415
+            report = cleanup.run_update_migration()
+            summary = cleanup.format_report(report)
+            if summary:
+                print(summary)
         return 0
     if cmd == "seed-vault" and len(rest) <= 1:
         vault = Path(rest[0]) if rest else lc.VAULT

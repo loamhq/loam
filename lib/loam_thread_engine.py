@@ -1737,6 +1737,12 @@ class ThreadEngine:
             posted.append(msg)
             reply = Reply()
 
+        import loam_recent  # noqa: PLC0415
+        try:
+            vault_snap = await asyncio.to_thread(loam_recent.snapshot_vault)
+        except Exception:  # noqa: BLE001
+            vault_snap = {}
+        snap_started = time.time()
         try:
             restored_steers = {}
             if recovering:
@@ -1921,6 +1927,18 @@ class ThreadEngine:
             session.unwatch(queue)
             if self.turn_watch.get(turn.key) is queue:
                 self.turn_watch.pop(turn.key, None)
+            # Schedule attribution diff in the thread pool without awaiting
+            # here so remember_session(..., watch=...) runs synchronously on
+            # the same tick after flush().
+            if vault_snap is not None:
+                try:
+                    asyncio.get_running_loop().run_in_executor(
+                        None,
+                        lambda: loam_recent.record_diff(
+                            vault_snap, kind="agent", actor=turn.persona,
+                            source="turn", started_at=snap_started))
+                except Exception:  # noqa: BLE001
+                    pass
         # What this turn read is what it has seen -- its prompt and anything
         # steered into it -- unless it died before a word came back: then
         # what it was shown is still news to the next turn, and nothing reads

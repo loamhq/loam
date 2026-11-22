@@ -8,18 +8,18 @@ import { createThreads } from '../public/threads.js'
 import { createActivity } from '../public/activity.js'
 
 installDom()
-test('Files waits for a successful roots answer before declaring shortcuts empty', () => {
+test('Files waits for a successful roots answer before declaring Pinned empty', () => {
   const files = createFiles({ api() {}, schedule() {} })
   const view = () => folderView(files, { go() {}, wide: false })
   assert.match(text(view()), /Loading/)
-  assert.equal(find(view(), 'fs-shortcuts'), null)
-  files.st.roots = { loaded: true, error: 'Unavailable', items: [], shortcuts: [] }
-  assert.equal(find(view(), 'fs-shortcuts'), null)
+  assert.equal(find(view(), 'fs-pinned'), null)
+  files.st.roots = { loaded: true, error: 'Unavailable', items: [], shortcuts: [], loamFiles: [] }
+  assert.equal(find(view(), 'fs-pinned'), null)
   files.st.roots.error = ''
   assert.match(text(view()), /Nothing pinned yet/)
   files.st.roots.shortcuts = [{ label: 'Notes', resource: { root: 'vault', path: 'Notes', kind: 'folder' } }]
   assert.doesNotMatch(text(view()), /Nothing pinned yet/)
-  assert.equal(all(view(), 'fs-host-shortcut').length, 1)
+  assert.equal(all(view(), 'fs-shortcut').length, 1)
 })
 
 test('loading Chats has no instruction about an agent roster that has not arrived', () => {

@@ -181,7 +181,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
         // A plugin's own settings (`settings.entry`): until 0.2.1 only Daily
         // notes' were read and shown, so no other plugin's could be changed
         // here (the 0.2.0 walk: Comments & suggestions' `reach`).
-        if (row.id === 'daily-notes' || (plugin?.contributes || row.contributes)?.['settings.entry']?.length) {
+        if ((plugin?.contributes || row.contributes)?.['settings.entry']?.length) {
           try { const settings = await host.api('GET', `/plugins/${encodeURIComponent(row.id)}/settings`); if (st.selected?.key === row.key) hostSettings = settings }
           catch (e) { if (st.selected?.key === row.key) st.detailError = e.message }
         }
@@ -464,19 +464,11 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
       updateControls(row),
       notice(st.error), notice(st.detailError),
       st.opening ? h('p', { class: 'note', role: 'status', text: 'Reading plugin details…' }) : null,
-      row.switch === 'plugin' && row.id !== 'daily-notes' && !row.broken ? h('div', { class: 'rows plugin-enable' }, h('div', { class: 'setrow' },
+      row.switch === 'plugin' && !row.broken ? h('div', { class: 'rows plugin-enable' }, h('div', { class: 'setrow' },
         h('div', { class: 'setrow-who' },
           h('div', { class: 'setrow-title', text: row.on ? 'On' : row.id === 'git-backup' ? 'Off-box backup is off' : 'Off' }),
           h('div', { class: 'setrow-sub', text: row.on ? (row.id === 'images' ? 'Agents use Images with an OpenAI or Google Gemini API key.' : 'Settings are kept when you turn this off.') : row.id === 'git-backup' ? 'Nothing is backed up off this machine yet. Turn on Git backup to back up your vault and agents to private repositories.' : 'Turn on to use this plugin and its settings.' })),
         h('button', { class: 'schedule-switch', role: 'switch', 'aria-label': `Enable ${row.name || row.id}`, 'aria-checked': String(Boolean(row.on)), disabled: st.opening || images?.key === row.key || loader.st.writing.has(`/plugins/${row.id}`), onclick: () => toggle(row) }, h('span'))), imageQuestion(row)) : null,
-      row.id === 'daily-notes' ? h('section', { class: 'plugin-host-settings', 'aria-label': 'Daily notes settings' },
-        h('div', { class: 'profile-choice' }, h('span', { text: 'Daily notes' }), h('button', { class: 'schedule-switch', role: 'switch', 'aria-label': 'Enable daily notes', 'aria-checked': String(Boolean(row.on)), disabled: loader.st.writing.has(`/plugins/${row.id}`), onclick: () => toggle(row) }, h('span'))),
-        hostSettings ? h('form', { onsubmit: async e => {
-          e.preventDefault(); st.error = ''; changed()
-          try { const values = { folder: e.currentTarget.querySelector('input').value }; hostSettings = await host.api('PATCH', `/plugins/${encodeURIComponent(row.id)}/settings`, { values }); st.done = 'Folder saved.' }
-          catch (e) { st.error = e.message }
-          changed()
-        } }, h('label', { for: 'daily-note-folder', text: 'Daily notes folder' }), h('input', { id: 'daily-note-folder', class: 'field-input', value: hostSettings.values.folder, disabled: !row.on }), h('p', { class: 'note', text: 'Daily notes use YYYY-MM-DD.md in this vault folder.' }), h('button', { class: 'pillbtn', type: 'submit', disabled: !row.on, text: 'Save folder' })) : null, notice(st.done, false)) : null,
       row.id === 'reviewer' && row.effective && host.openReviewerSettings ? h('div', { class: 'rows' },
         settingsRow({ title: 'Runs on', sub: runsOn?.provider
           ? [reviewerProvider?.name || runsOn.provider, modelLabel(reviewerProvider, runsOn.model).name || 'Default model'].join(' · ')
@@ -485,7 +477,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
         .map(entry => h('section', { class: 'plugin-preferences', key: `${entry.owner}:${entry.id}`, 'aria-label': entry.title }, host.registry.invoke(entry, 'render', { plugin: true, back: false }))) : []),
       // A plugin whose own section draws its settings (`entries: 'own'`, Git
       // backup) is not given the plain form of them as well.
-      row.on && row.id !== 'daily-notes' && !(host.registry?.entries('settings.section') ?? []).some(entry => entry.entries === 'own' && (entry.plugin === row.id || entry.owner === row.id)) ? entrySettings(row) : null,
+      row.on && !(host.registry?.entries('settings.section') ?? []).some(entry => entry.entries === 'own' && (entry.plugin === row.id || entry.owner === row.id)) ? entrySettings(row) : null,
       row.on ? secretSettings?.view() : null,
       row.keys?.length ? h('section', { class: 'plugin-keys', 'aria-label': 'Keys' }, h('h3', { class: 'kicker', text: 'Keys' }),
         h('p', { class: 'note', text: row.keys.every(k => k.optional) && row.keys.length > 1

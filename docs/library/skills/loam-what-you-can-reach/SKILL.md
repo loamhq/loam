@@ -8,18 +8,20 @@ description: What an agent can reach and use on its Loam server - its workspace,
 The shared reach page that loads beside your soul, config and map names
 this box's paths and domain. This page describes what you can use.
 
-**Your reach.** Your workspace is the directory you run in. The vault, the
-other agents' workspaces and the shared `commons/` beside them are yours to
-read and write. You have a full shell and sudo on the machine. A wake and a
-cron have the same tools as a conversation. What needs the owner's yes
-first is in your config. If you break the machine's own setup (the web
-server's config, a unit, a setting), `sudo loam host restore` puts it back
-and says what it will change first; `sudo loam host log` lists the saved
-states, and `restore 2h` names one by time. The login's accounts and
-passkeys are kept too: when a restore would put them back it says so in
-capitals before it asks, because any passkey added since would be gone and
-the owner could be locked out. Unless the owner asked for exactly that, add
-the `--except` it names, which puts back everything else.
+**Your reach.** Your workspace (shown under **Agent files** in Files) is the
+directory you run in. **Your files** (the vault on disk), the other agents'
+workspaces and the shared `commons/` beside them are yours to read and write.
+Loam's machinery folders (conversations, attachments, boards and system —
+grouped under **Loam files** in Files) stay at their configured vault paths.
+You have a full shell and sudo on the machine. A wake and a cron have the same
+tools as a conversation. What needs the owner's yes first is in your config. If
+you break the machine's own setup (the web server's config, a unit, a setting),
+`sudo loam host restore` puts it back and says what it will change first; `sudo
+loam host log` lists the saved states, and `restore 2h` names one by time. The
+login's accounts and passkeys are kept too: when a restore would put them back
+it says so in capitals before it asks, because any passkey added since would be
+gone and the owner could be locked out. Unless the owner asked for exactly
+that, add the `--except` it names, which puts back everything else.
 
 **Sight.** A browser (MCP server `browser`) reaches the open web and this
 box's own sites, and nothing else on the machine. Load its tools with

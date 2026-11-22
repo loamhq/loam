@@ -14,7 +14,7 @@ import { createWithMe, withmeId, WITHME_PREFIX } from './withme.js'
 import { how } from './appear.js'
 
 const BASE = '/x/doc-comments/'
-const ROOTS = { vault: 'Vault', spaces: 'AI Spaces', system: 'System' }
+const ROOTS = { vault: 'Your files', spaces: 'Agent files', system: 'System' }
 const ROOT_ID = '@doc-comments'
 const COMPACT_PX = 760
 const LEAVE_MS = 340
@@ -428,7 +428,7 @@ export function activate(loam) {
   const sharedRoot = loam.places?.files?.root?.add?.({
     id: 'doc-comments',
     name: 'Shared Docs',
-    desc: withMeOn() ? 'Docs you share, and docs shared with you' : 'Docs open to people outside',
+    desc: 'Shared by you, or with you.',
     icon: (size) => peopleIcon(size),
     when: () => allowed(),
     load: () => Promise.all([loadShared(), withMeOn() ? withme.load() : null]),

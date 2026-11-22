@@ -295,13 +295,14 @@ test('read-only says why, from the host’s authority', () => {
   assert.match(readOnlyReason(row('vault', 'pic.png')), /Only text/)
 })
 
-test('the roots, keyed by root, named by the host, with shortcuts and no count', () => {
+test('the roots, keyed by root, named by the host, with no seeded shortcuts and no count', () => {
   const roots = rootsOf(rootsAnswer())
-  assert.deepEqual(roots.map((r) => [r.root, r.name]), [['vault', 'Vault'], ['spaces', 'AI Spaces']])
+  assert.deepEqual(roots.map((r) => [r.root, r.name]), [['vault', 'Your files'], ['spaces', 'Agent files']])
   assert.equal(roots[0].capabilities.create, true)
   assert.ok(roots.every((r) => !('count' in r) && !('id' in r)))
   assert.deepEqual(rootsOf({ roots: [{ id: 'vault' }, 'system'] }), [], 'the guessed shapes are not read')
-  assert.deepEqual(shortcutsOf(rootsAnswer()).map((s) => [s.label, s.resource.path]), [['System notes', '00_System'], ['App', 'Projects/App']])
+  assert.deepEqual(shortcutsOf(rootsAnswer()), [])
+  assert.deepEqual(shortcutsOf({ shortcuts: [{ label: 'App', resource: { root: 'vault', path: 'Projects/App', name: 'App', kind: 'folder' } }] }).map((s) => [s.label, s.resource.path]), [['App', 'Projects/App']])
   assert.deepEqual(shortcutsOf({ shortcuts: [{ label: 'x', resource: { root: 'vault' } }] }), [])
 })
 
@@ -344,7 +345,7 @@ test('resolve: found, ambiguous, missing and external, by status; a missing path
     assert.equal(r.resource, undefined)
   }
   assert.equal(missingSentence('[[Gone]]', resolveOf({ status: 'missing', target: 'Gone' })), 'There is no note called “Gone”.')
-  assert.equal(missingSentence('x', resolveOf({ status: 'missing', root: 'vault', path: 'Notes/gone.md' })), 'Nothing at Vault / Notes/gone.md.')
+  assert.equal(missingSentence('x', resolveOf({ status: 'missing', root: 'vault', path: 'Notes/gone.md' })), 'Nothing at Your files / Notes/gone.md.')
   assert.match(missingSentence('../../x', resolveOf({ status: 'missing', reason: 'the link climbs out of its root' })), /climbs out/)
   const ext = resolveOf({ status: 'external', url: 'https://example.org/a' })
   assert.equal(externalHref(ext.url), 'https://example.org/a')

@@ -204,16 +204,37 @@ why not, and if the check itself crashed. When no agent can run or Loam's
 check has stopped, the app shows one status line with the reason and a next
 step where there is one, and clears it when agents can run again. A fresh install gets one check period after its welcome thread is created for the first reading to arrive.
 
-**The vault** is the owner's notes and the record, plain Markdown. Its
-`README.md` says what each folder is for. `About me.md`, at its top, is what
-the owner's agents know about them: the agents add to it, and it is the
-owner's to read and edit.
+**Files** brings together **Your files** (the vault: plain Markdown and files
+written by the owner or their agents, for the owner), **Agent files** (each
+agent's workspace and the shared Commons: theirs to write, the owner's to read),
+and **Shared Docs** when Comments & suggestions is on. The vault's `README.md`
+says what each folder is for, and `About me.md` at its top is what the agents
+know about the owner (agents add to it, and the owner can read and edit it).
+New installs seed only `About me.md`, `Projects/Loam/Start here.html`, and the
+machinery folders.
 
-In Files, **Delete** is the last item in the ⋯ menu on a deletable vault
-file's row or open header. Confirm to move the file to trash. **Undo** is
-available in the status message for five seconds and restores the saved file
-to its original path if the name is free. Trash stays on the vault disk
-until restored or cleared by the operator.
+Loam's machinery folders — conversations, attachments, boards and system —
+sit behind one quiet **Loam files** row at the bottom of **Your files** (still
+reachable by search, wiki-links, deep links and from chats). Wake failure logs
+(`loam-wake-failures.md`) and thread boards live inside **Loam files** rather
+than the inbox.
+
+On the **Files** home, optional **Quick actions** (**New note**, **Today's
+note**) come from the built-in `quick-actions` plugin (off by default on new
+installs; configured in Settings › Plugins › Quick actions or through
+`bin/settings set plugin.quick-actions.*`). Below the places sit **Pinned**
+(items pinned by the owner from any file or folder's ⋯ menu; nothing is seeded
+pinned) and **Recent** (the owner's and personas' recent changes in Your files
+outside Loam files, grouped when one author writes 3+ files in a folder on one
+day, filtered by Everyone / You / Agents, showing the past 48 hours up to 10
+rows with Show more up to a week and 50 rows; engineer writes, receipts and job
+artifacts never appear).
+
+In Files, **Delete** is the last item in the ⋯ menu on a deletable file's row
+or open header. Confirm to move the file to trash. **Undo** is available in the
+status message for five seconds and restores the saved file to its original
+path if the name is free. Trash stays on the vault disk until restored or
+cleared by the operator.
 Agents use `delete_file` and `restore_file` for the same vault operations.
 
 **Settings › Plugins** shows installed themes and extensions and where each
@@ -244,15 +265,15 @@ Loam tells the chosen attention agent about a newer original. The agent
 uses `loam-building-a-plugin` to show what would change in chat, bring in
 what the owner wants, or keep this version and leave it quiet.
 
-**History and backup.** Every fifteen minutes the vault and AI Spaces are
-each committed to their own git history on the server, so a change anyone
-regrets can be got back from it; nothing leaves the machine. First setup
-goes straight from connecting an AI provider to Chats or the open Hello.
-Settings › Plugins shows when off-box backup is off. Open Git backup there
-to turn it on and connect private repositories for the vault and AI Spaces.
-In Files, **Download as zip** on the vault, AI Spaces or any folder gives
-the owner a copy of it as it is now, without git's history or anything
-secret-shaped.
+**History and backup.** Every fifteen minutes Your files (the vault) and Agent
+files (the workspaces) are each committed to their own git history on the
+server, so a change anyone regrets can be got back from it; nothing leaves the
+machine. First setup goes straight from connecting an AI provider to Chats or
+the open Hello. Settings › Plugins shows when off-box backup is off. Open Git
+backup there to turn it on and connect private repositories for Your files and
+Agent files. In Files and Settings › Files, **Download as zip** on Your files,
+Agent files or any folder gives the owner a copy of it as it is now, without
+git's history or anything secret-shaped.
 
 **The engineer** builds and changes Loam itself and the owner's projects.
 An agent hands it a job as a brief, which returns at once; the engineer

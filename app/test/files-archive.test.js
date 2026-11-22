@@ -281,15 +281,16 @@ test('Files UI shows Download as zip in folder menus, Preparing state, plain err
     fetchBytes: () => new Promise((resolve) => { resolveCheck = resolve }),
     triggerDownload: (href, filename) => downloads.push({ href, filename }),
   })
-  files.st.roots = { loaded: true, items: [{ root: 'vault', name: 'Vault', desc: 'Notes', capabilities: { read: true, write: true } }, { root: 'spaces', name: 'AI Spaces', desc: 'Agents', capabilities: { read: true } }], shortcuts: [], error: '' }
+  files.st.roots = { loaded: true, items: [{ root: 'vault', name: 'Your files', homeDesc: 'Written by you or your agents, for you.', desc: 'Notes', capabilities: { read: true, write: true } }, { root: 'spaces', name: 'Agent files', homeDesc: 'What your agents keep for themselves.', desc: 'Agents', capabilities: { read: true } }], shortcuts: [], loamFiles: [], error: '' }
 
-  // Empty Shortcuts state has no card and no icon tile.
+  // Empty Pinned state explains how to pin via ⋯ menu without a card of rows.
   const homeTree = folderView(files, { go() {}, wide: true, home: { shortcuts: [], toggleShortcut() {}, isShortcut: () => false } })
   const noshort = find(homeTree, 'fs-noshort')
   assert.ok(noshort)
   assert.equal(noshort.className, 'fs-noshort')
-  assert.equal(find(homeTree, 'fs-shortcuts').querySelector('.card'), null)
-  assert.match(text(noshort), /Nothing pinned yet/)
+  assert.equal(find(homeTree, 'fs-pinned').querySelector('.card'), null)
+  assert.match(text(find(homeTree, 'fs-pinned-empty')), /Nothing pinned yet/)
+  assert.match(text(noshort), /⋯ menu.*Pin/)
 
   // Vault root ⋯ sheet offers Download as zip and transitions through Preparing -> triggered download.
   files.st.root = 'vault'

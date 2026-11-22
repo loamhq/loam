@@ -418,6 +418,9 @@ def _main() -> int:
                                                "model": LANE_MODEL}):
             LOCK_WAIT_S = round(time.monotonic() - waiting_since, 1)
             mark_running(agent, started, vault, lane)
+            import loam_recent  # noqa: PLC0415
+            vault_snap = loam_recent.snapshot_vault(vault)
+            snap_started = time.time()
             try:
                 rc = run(project, agent, vault, started, cron)
                 fire["outcome"] = (NOT_ENABLED and "skipped"
@@ -436,6 +439,12 @@ def _main() -> int:
                                  f"{type(exc).__name__}")
                 raise
             finally:
+                try:
+                    loam_recent.record_diff(vault_snap, kind="agent", actor=agent,
+                                            source="wake", vault=vault,
+                                            started_at=snap_started)
+                except Exception:  # noqa: BLE001
+                    pass
                 clear_running(agent)
                 loam_schedule.record_fire(
                     agent, record, fire["outcome"], lane=lane, started=started,

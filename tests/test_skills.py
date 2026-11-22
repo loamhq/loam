@@ -110,16 +110,17 @@ def main() -> int:
                          capture_output=True, text=True, env=dict(os.environ))
     check("bin/library seed-vault exits 0", (out.returncode, out.stderr), (0, ""))
     shape = [p for p in tree(lc.VAULT) if "/skills/loam-" not in p and "skills/loam-" not in p]
-    check("a blank install's vault: the plain folders, the README, both shelves",
-          shape, ["About me.md", "Attachments/", "Conversations/", "Inbox/", "Projects/",
+    check("a blank install's vault: About me, Projects/Loam explainer, Loam files, no Inbox/Daily/Images",
+          shape, ["About me.md", "Attachments/", "Boards/", "Conversations/", "Projects/",
+                  "Projects/Loam/", "Projects/Loam/Start here.html",
                   "README.md", "System/", "System/Dictation terms.md", "System/Loam/", "System/Loam/README.md",
                   "System/Loam/skills/", "System/skills/", "System/skills/README.md"])
     check("...and Loam's shelf is the library, file for file",
           sk.library_diff(), {"added": [], "removed": [], "changed": []})
     readme = (lc.VAULT / "README.md").read_text()
     check("the README names each folder by its configured name",
-          all(f"`{n}/`" in readme for n in ("Inbox", "Conversations", "Projects",
-                                             "Attachments", "System", "System/Loam",
+          all(f"`{n}/`" in readme for n in ("Conversations", "Projects",
+                                             "Attachments", "Boards", "System", "System/Loam",
                                              "System/skills")), True)
 
     (lc.VAULT / "README.md").write_text("mine\n")
@@ -134,13 +135,13 @@ def main() -> int:
     numbered = TMP / "numbered"
     folders = {"inbox": "00_INBOX", "failure_log": "00_INBOX/from-agents/loam-wake-failures.md",
                "conversations": "15_CONVERSATIONS", "projects": "40_PROJECTS",
-               "attachments": "98_ATTACHMENTS", "system": "99_SYSTEM"}
+               "attachments": "98_ATTACHMENTS", "boards": "Boards", "system": "99_SYSTEM"}
     (numbered / "99_SYSTEM" / "conventions").mkdir(parents=True)
     (numbered / "README.md").write_text("an old vault\n")
     made = sk.seed_vault(numbered, folders)
     check("numbered folder names are used as configured, nothing else made",
-          made, ["00_INBOX/", "15_CONVERSATIONS/", "40_PROJECTS/",
-                 "98_ATTACHMENTS/", "99_SYSTEM/Dictation terms.md", "99_SYSTEM/skills/", "99_SYSTEM/Loam/ (installed)"])
+          made, ["15_CONVERSATIONS/", "40_PROJECTS/",
+                 "98_ATTACHMENTS/", "Boards/", "99_SYSTEM/Dictation terms.md", "99_SYSTEM/skills/", "99_SYSTEM/Loam/ (installed)"])
     check("...and an existing vault gets no About me.md",
           (numbered / "About me.md").exists(), False)
     check("...an existing vault's own folders and README are untouched",

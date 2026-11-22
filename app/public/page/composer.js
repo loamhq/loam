@@ -660,7 +660,7 @@ function composerMenu() {
           {
             key: 'vault',
             title: 'Pick from Files',
-            sub: 'A file from Vault or AI Spaces',
+            sub: 'A file from Your files or Agent files',
             glyph: icon.folder(18),
             run: () => host.pickFromFiles(),
           },

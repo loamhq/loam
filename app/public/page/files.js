@@ -236,7 +236,10 @@ function goFiles(root, path = '', { isFile = null, row = null, push = true, frag
     host.browseFiles(root === 'system' ? null : root, root === 'system' ? '' : path, { push, hidden: root === 'system' })
     return true
   }
-  const item = { kind: 'file', root, path, row, fragment, mode, push, list, returnThread }
+  const item = {
+    kind: 'file', root, path, row, fragment, mode, push, list, returnThread,
+    returnToList: !routed && !host.isWide() && host.workspaceHistory.state.front === 'list',
+  }
   const sheet = host.state.sheet
   if (returnToSettings && sheet?.kind === 'settings') {
     item.returnModal = { kind: 'settings', page: sheet.page, provider: sheet.provider }
@@ -510,23 +513,36 @@ function filesScreen({ list = false } = {}) {
 
 
 
-// The Files home's own things: the person's shortcuts and the two folders its actions
-// write into, from `store.files` (see there for why they are this device's).
+// The Files home's own things: Pinned items (device-held until host preferences
+// exist), quick actions from the host `quick-actions` plugin, and agent faces
+// for Recent rows.
 function filesHome(browser = files) {
   const held = host.store.files
   const shortcuts = fileShortcuts(held, browser.st.roots.shortcuts)
   const has = (root, path) => shortcuts.some((s) => s.root === root && s.path === path)
+  const qa = host.quickActions?.st
+  const showNewNote = Boolean(qa?.on && (qa.actions === 'both' || qa.actions === 'new-note'))
+  const showDailyNote = Boolean(qa?.on && (qa.actions === 'both' || qa.actions === 'daily-note'))
   return {
     shortcuts,
-    inbox: held.inbox,
-    daily: host.dailyNotes?.st.on ? host.dailyNotes.st.folder : null,
+    showNewNote,
+    showDailyNote,
     isShortcut: has,
     toggleShortcut: (root, path, kind = 'folder') => {
       host.store.files = toggleFileShortcut(host.store.files, browser.st.roots.shortcuts, root, path, kind)
       host.schedule()
     },
-    onInbox: () => browser.newInbox(held.inbox),
-    onDaily: async () => { await host.dailyNotes.refresh(); if (host.dailyNotes.st.on && host.dailyNotes.st.folder !== null) browser.openDaily(host.dailyNotes.st.folder) },
+    onInbox: async () => {
+      await host.quickActions?.refresh()
+      const cur = host.quickActions?.st
+      if (cur?.on && (cur.actions === 'both' || cur.actions === 'new-note')) browser.newInbox(cur.inboxFolder)
+    },
+    onDaily: async () => {
+      await host.quickActions?.refresh()
+      const cur = host.quickActions?.st
+      if (cur?.on && (cur.actions === 'both' || cur.actions === 'daily-note')) browser.openDaily(cur.dailyFolder)
+    },
+    agentLook: (id) => host.agentLook(id, host.state.agents),
   }
 }
 

@@ -71,6 +71,9 @@ ABOUT_ME_TEXT = """# About me
 What my agents know about me. They add to it as they learn what lasts; it is
 mine to read and edit.
 """
+# The temporary visual explainer seeded at the top of <projects>/Loam/ on new installs.
+START_HERE = "Start here.html"
+START_HERE_SRC = Path(__file__).resolve().parent.parent / "docs" / "starter" / START_HERE
 # The one folder inside Loam's that an update keeps (2026-11-16): plugins'
 # data that belongs in the vault, `<system>/Loam/data/<plugin id>/` (the
 # doc-comments sidecars first). It is never in the library, never counted as
@@ -370,28 +373,37 @@ def carry_kept(src: Path, dst: Path) -> None:
 # -- the starter vault ------------------------------------------------------------
 
 def vault_readme(folders: dict[str, str] | None = None) -> str:
-    f = folders or lc.VAULT_FOLDERS
+    f = {**lc.VAULT_FOLDERS, **(folders or {})}
     system = f["system"]
-    return f"""# Your vault
+    projects = f["projects"]
+    boards = f["boards"]
+    return f"""# Your files
 
-Everything here is yours: plain Markdown files, readable by you, your agents
+Everything here is yours: plain Markdown and files, readable by you, your agents
 and any editor. Change any of it. Loam finds its own folders by the names in
 its configuration (`/etc/loam/loam.toml`, `[vault]`), so a folder renamed
 there keeps working.
 
+In Files, this folder is **Your files**; each agent’s own workspace is in
+**Agent files**; and Loam’s machinery folders sit together at the bottom of
+Your files under **Loam files**.
+
 | File or folder | What it is for |
 |---|---|
 | `{ABOUT_ME}` | What your agents know about you. They add to it as they learn; read it and edit it whenever you like. |
-| `{f['inbox']}/` | What needs you. |
-| `{f['conversations']}/` | The record of every thread, written by Loam as you talk. Read it; do not edit it. |
-| `{f['projects']}/` | Your projects and their notes. |
-| `{f['attachments']}/` | Images and files you add to a thread. |
-| `{system}/` | How your agents work: shared skills, docs, conventions. |
-| `{system}/{LOAM_DIR}/` | Loam's own skills and docs. **Each update replaces this folder**; put your changes somewhere else. |
+| `{projects}/` | Your projects and their notes, starting with `{projects}/Loam/{START_HERE}`. |
+| `{f['conversations']}/` | **Loam files** — the record of every chat, written by Loam as you talk. Read it; do not edit it. |
+| `{f['attachments']}/` | **Loam files** — images and files you add to a chat. |
+| `{boards}/` | **Loam files** — each chat’s board. |
+| `{system}/` | **Loam files** — how your agents work: shared skills, docs, conventions. |
+| `{system}/{LOAM_DIR}/` | Loam’s own skills and docs. **Each update replaces this folder**; put your changes somewhere else. |
 | `{system}/{OWN_DIR}/` | Your shared shelf of skills, read by every agent. Updates never touch it. |
 
-A skill is a folder with a `SKILL.md` in it. An agent's own skill, in its
-workspace's `skills/`, wins over a shared one with the same name.
+Optional folders such as `Inbox/`, `Daily/` or `Images/` are created only when
+you turn on Quick actions or generate an image, or when you make them yourself.
+
+A skill is a folder with a `SKILL.md` in it. An agent’s own skill, in its
+workspace’s `skills/`, wins over a shared one with the same name.
 """
 
 
@@ -421,19 +433,21 @@ def seed_dictation_terms(system: Path) -> bool:
 
 def seed_vault(vault: Path, folders: dict[str, str] | None = None,
                library: Path | None = None) -> list[str]:
-    """The starter vault a blank install gets, at ``vault``: the folders
-    Loam uses, named from the configuration, a README, ``About me.md``, the library as
-    ``<system>/Loam/`` and the person's empty shelf. Writes only what is
-    missing (the library excepted, which is Loam's and installed whole), so
-    on a vault that already exists it moves nothing; ``About me.md`` only on a
-    new vault, one with no README yet. Returns what it made."""
-    f = dict(folders or lc.VAULT_FOLDERS)
+    """The starter vault a blank install gets, at ``vault``: ``About me.md``,
+    ``<projects>/Loam/Start here.html``, the Loam files folders
+    (conversations, attachments, boards, system + library + skills shelf), and
+    ``README.md``. No Inbox, Daily or Images folders are created on a new
+    install. Writes only what is missing (the library excepted, which is Loam's
+    and installed whole), so on a vault that already exists it moves nothing;
+    ``About me.md`` and ``Start here.html`` only on a fresh vault (one with no
+    README yet). Returns what it made."""
+    f = {**lc.VAULT_FOLDERS, **(folders or {})}
     made = []
     readme = vault / "README.md"
-    # A new vault's (no README yet): an existing one, the first install's
-    # included, is never handed an About me it did not have.
+    # A new vault's (no README yet): an existing one is never handed starter
+    # pages it did not have.
     fresh = not readme.exists()
-    for key in ("inbox", "conversations", "projects", "attachments", "system"):
+    for key in ("conversations", "projects", "attachments", "boards", "system"):
         path = vault / f[key]
         if not path.is_dir():
             path.mkdir(parents=True)
@@ -449,6 +463,14 @@ def seed_vault(vault: Path, folders: dict[str, str] | None = None,
     if fresh and not about.exists():
         about.write_text(ABOUT_ME_TEXT, encoding="utf-8")
         made.append(ABOUT_ME)
+    if fresh and START_HERE_SRC.is_file():
+        loam_proj = vault / f["projects"] / LOAM_DIR
+        loam_proj.mkdir(parents=True, exist_ok=True)
+        explainer = loam_proj / START_HERE
+        if not explainer.exists():
+            explainer.write_text(START_HERE_SRC.read_text(encoding="utf-8"),
+                                 encoding="utf-8")
+            made.append(f"{f['projects']}/{LOAM_DIR}/{START_HERE}")
     if not readme.exists():
         readme.write_text(vault_readme(f), encoding="utf-8")
         made.append("README.md")

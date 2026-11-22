@@ -7,7 +7,7 @@ const capacityNumber = new Intl.NumberFormat(undefined, { maximumFractionDigits:
 const loadNumber = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 })
 const size = bytes => bytes > 0 && bytes < GiB / 10
   ? `${Math.max(1, Math.round(bytes / 2 ** 20))} MiB` : `${capacityNumber.format(bytes / GiB)} GiB`
-const labels = { vault: 'Vault', workspaces: 'Agent workspaces', records: 'Conversations and records',
+const labels = { vault: 'Your files', workspaces: 'Agent files', records: 'Conversations and records',
   containers: 'Containers and images', other: 'System and other files' }
 
 function meter(label, { value, capacity, fraction, note, warning, detail } = {}) {

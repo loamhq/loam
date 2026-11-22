@@ -6,7 +6,7 @@ import { readConfig } from '../src/config.js'
 import { fakeBroker, closing, TOKEN } from './harness.js'
 import { createProfiles, soulExcerpt, mountProfile } from '../public/agent-profile.js'
 import { createAgentDrafts } from '../public/agent-drafts.js'
-import { createDailyNotes } from '../public/daily-notes.js'
+import { createQuickActions } from '../public/quick-actions.js'
 import { createAgents, agentLook } from '../public/sessions.js'
 import { createSecretSettings } from '../public/plugin-secrets.js'
 import { listedManifest, AUDIO_PLUGINS } from './audio-plugins.mjs'
@@ -72,14 +72,14 @@ test('draft confirmation uses the displayed revision and reloads after a stale-r
   await c.confirm(draft); assert.deepEqual(writes, [{ rev: 2 }, { rev: 2 }]); assert.equal(made[0].id, 'throwaway')
 })
 
-test('daily action follows plugin switch and folder, ignores stale reads, and has no fallback', async () => {
-  let on = true, folder = 'Journal', finish
-  const c = createDailyNotes({ redraw() {}, api: async (method, path) => path.endsWith('/settings') ? finish ? new Promise(r => { finish = r }) : { values: { folder } } : { plugin: { on } } })
-  await c.refresh(); assert.deepEqual([c.st.on, c.st.folder], [true, 'Journal'])
-  folder = 'Days'; await c.refresh(); assert.equal(c.st.folder, 'Days')
+test('quick actions follow plugin switch, actions and folders, and ignore stale reads', async () => {
+  let on = true, actions = 'both', inboxFolder = '00_INBOX', dailyFolder = 'Journal', finish
+  const c = createQuickActions({ redraw() {}, api: async (method, path) => path.endsWith('/settings') ? finish ? new Promise(r => { finish = r }) : { values: { actions, inbox_folder: inboxFolder, daily_folder: dailyFolder } } : { plugin: { on } } })
+  await c.refresh(); assert.deepEqual([c.st.on, c.st.actions, c.st.inboxFolder, c.st.dailyFolder], [true, 'both', '00_INBOX', 'Journal'])
+  dailyFolder = 'Days'; actions = 'daily-note'; await c.refresh(); assert.deepEqual([c.st.actions, c.st.dailyFolder], ['daily-note', 'Days'])
   finish = true; const old = c.refresh(); await new Promise(r => setImmediate(r))
-  on = false; await c.refresh(); finish({ values: { folder: 'Stale' } }); await old
-  assert.deepEqual([c.st.on, c.st.folder], [false, null])
+  on = false; await c.refresh(); finish({ values: { actions: 'both', daily_folder: 'Stale' } }); await old
+  assert.equal(c.st.on, false)
 })
 
 test('uploaded face survives theme paint resolution; the soul quote contains exactly two sentences', () => {
@@ -112,7 +112,7 @@ test('both voice plugins (Market plugins since 0.2.9) declare both optional shar
 test('browser key routes relay metadata and refusals, and never expose the server-only value route', async t => {
   const broker = await fakeBroker(new Proxy({}, { get: () => (req, res, url, raw) => reply(res, req.method === 'PUT' ? { error: 'Google says this is not a valid API key. Check that it was pasted whole.' } : { secrets: [{ name: 'GEMINI_API_KEY', set: true, source: 'box' }] }, req.method === 'PUT' ? 422 : 200) }))
   const app = await appFor(t, broker)
-  for (const [method, path, body] of [['GET', '/plugins/dictation/secrets'], ['PUT', '/plugins/read-aloud/secrets/GEMINI_API_KEY', { value: 'synthetic' }], ['POST', '/plugins/dictation/secrets/GEMINI_API_KEY/check', {}], ['DELETE', '/plugins/dictation/secrets/GEMINI_API_KEY'], ['PATCH', '/plugins/daily-notes/settings', { values: { folder: 'Days' } }]]) {
+  for (const [method, path, body] of [['GET', '/plugins/dictation/secrets'], ['PUT', '/plugins/read-aloud/secrets/GEMINI_API_KEY', { value: 'synthetic' }], ['POST', '/plugins/dictation/secrets/GEMINI_API_KEY/check', {}], ['DELETE', '/plugins/dictation/secrets/GEMINI_API_KEY'], ['PATCH', '/plugins/quick-actions/settings', { values: { daily_folder: 'Days' } }]]) {
     const out = await fetch(app.url + '/api' + path, { method, ...(body ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) })
     assert.equal(out.status, method === 'PUT' ? 422 : 200)
     assert.equal(out.headers.get('cache-control'), 'no-store')

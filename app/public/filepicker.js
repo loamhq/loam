@@ -108,7 +108,7 @@ export function pickerSheet(picker, { agentName = null } = {}) {
           'button',
           { class: 'setrow fs-pickroot', key: `pick:root:${r.root}`, onclick: () => picker.go(r.root, '') },
           h('div', { class: 'icon-tile', style: { background: 'var(--paper-card)', color: 'var(--paper-card-ink-2)' } }, icon.folder(18)),
-          h('div', { class: 'fs-words' }, h('div', { class: 'fs-name', text: r.name }), h('div', { class: 'fs-meta', text: r.desc })),
+          h('div', { class: 'fs-words' }, h('div', { class: 'fs-name', text: r.name }), h('div', { class: 'fs-meta', text: r.homeDesc || r.desc })),
           icon.chevronRight(10),
         ),
       )

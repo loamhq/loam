@@ -56,17 +56,34 @@ def _save_bindings(rows):
     threads._write_atomic(_binding_file(), json.dumps(rows, ensure_ascii=False) + "\n")
 
 
+def _allowed_roots() -> tuple[Path, ...]:
+    """Vault folders that may hold thread files: Boards, System (Loam files),
+    and the configured inbox for legacy bindings."""
+    roots = []
+    for key in ("boards", "system", "inbox"):
+        folder = lc.vault_folder(key)
+        if folder:
+            roots.append(threads.VAULT / folder)
+    return tuple(roots)
+
+
+def _folder_for(pid: str) -> Path:
+    if pid == "boards":
+        return Path(lc.vault_folder("boards"))
+    return Path(lc.vault_folder("system")) / pid
+
+
 def _path(rel):
-    inbox = threads.VAULT / lc.vault_folder("inbox")
+    roots = _allowed_roots()
     path = threads.VAULT / rel
-    if (not path.is_relative_to(inbox) or path.suffix != ".md"
-            or path.resolve() != path or path == inbox):
-        raise threads.ThreadError(409, "Thread file is outside its configured inbox")
+    if (not any(path.is_relative_to(r) and path != r for r in roots)
+            or path.suffix != ".md" or path.resolve() != path):
+        raise threads.ThreadError(409, "Thread file is outside its configured folder")
     return path
 
 
 def _available(pid, title, spec, bindings):
-    folder = Path(lc.vault_folder("inbox")) / pid
+    folder = _folder_for(pid)
     used = {row[key] for group in bindings.values() for row in group.values()
             for key in ("path", "moving_to") if key in row}
     base = threads.safe_title(title)

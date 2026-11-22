@@ -53,6 +53,15 @@ export function filesHost({ texts = {} } = {}) {
       json(res, 200, { accepted: true, seq: 1 })
     },
     'GET /v1/files/roots': (req, res) => json(res, 200, rootsAnswer()),
+    'GET /v1/files/recent': (req, res, url) => json(res, 200, {
+      who: url.searchParams.get('who') || 'all',
+      window: url.searchParams.get('window') || 'default',
+      used_fallback: false,
+      has_more: false,
+      total_shown: 0,
+      total_week: 0,
+      days: [],
+    }),
     'GET /v1/files/stat': (req, res, url) => {
       const r = find(url.searchParams.get('root'), url.searchParams.get('path'))
       if (!r) return json(res, 404, { error: `nothing at ${url.searchParams.get('root')}/${url.searchParams.get('path')}` })

@@ -53,6 +53,7 @@ export function panelAncestors(url) {
   if (url.pathname === '/' && url.searchParams.get('chats') === 'archived') return ['/']
   const folder = parseFilesPath(url.pathname)
   if (folder?.root === 'system') return []
+  if (folder?.root === 'loam') return [filesHref(null), filesHref('vault')]
   if (folder?.root) {
     const parts = folder.path.split('/').filter(Boolean)
     return [filesHref(null), ...parts.map((_, i) => filesHref(folder.root, parts.slice(0, i).join('/')))]
