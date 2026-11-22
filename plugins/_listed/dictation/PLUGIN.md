@@ -1,7 +1,7 @@
 ---
 id: dictation
 name: Dictation
-version: 1.2.3
+version: 1.2.4
 author: Loam contributors
 api: 0
 default_on: false
@@ -46,7 +46,7 @@ In Settings › Plugins › Dictation, choose Record first to create or open you
 
 ## What you need, and what leaves your server
 
-Loam uses a Google key first, then an OpenAI key, then the browser. A provider error stays with that provider. Open Settings › Plugins › Dictation to see the provider. After your first browser take, the plugin can offer a free Gemini key. You can dismiss the suggestion or open the guide from Dictation preferences. To use the guide, sign in to Google AI Studio, create a key and paste it in the guide. Loam checks it and saves it in Settings › Connections › API keys for both plugins.
+Loam uses a Google key first, then an OpenAI key, then the browser. A provider error stays with that provider. Open Settings › Plugins › Dictation to see the provider. After a browser take, the composer explains that it used browser speech and offers a free Gemini key for better results. Choose Don’t show again to dismiss the offer on all your devices. The guide remains available in Dictation preferences. To use the guide, sign in to Google AI Studio, create a key and paste it in the guide. Loam checks it and saves it in Settings › Connections › API keys for both plugins.
 
 Eligible projects get a free quota without setting up billing. Google may use free-tier audio and text to improve its products. Check [availability](https://aistudio.google.com/docs/available-regions) and [your limits](https://aistudio.google.com/rate-limit).
 

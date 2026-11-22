@@ -462,8 +462,7 @@ async function transcribeTake() {
   if (failed !== null) {
     if (needsKey) {
       // No key is not a take that failed: say what is missing and where it goes.
-      const reach = typeof host.goSettings === 'function'
-      say(reach ? NEEDS_KEY : `${NEEDS_KEY} Add one in Settings › Plugins › Dictation.`, reach ? { act: 'settings', label: 'Add a key', detail: failed } : null)
+      say(NEEDS_KEY, host.guide ? { act: 'guide', label: 'Add free key' } : null)
     } else {
       say(/OpenAI|Google|Gemini|provider changed/i.test(failed) ? failed : TAKE_FAILED, take.retried ? null : { act: 'retry', label: 'Retry', take, detail: failed })
     }
@@ -693,7 +692,7 @@ function pressMic(target = 'draft') {
   if (host.state.rec) return
   hush()
   if (host.provider && !host.provider()) return say('Checking the speech provider. Try the microphone again in a moment.')
-  if (host.provider?.() === 'browser' && !Recogniser) return say('This browser has no speech recognition. A free Gemini key enables recording.', { act: 'guide', label: 'Get a key' })
+  if (host.provider?.() === 'browser' && !Recogniser) return say('Browser speech recognition is unavailable here. Add a free Gemini key to record.', { act: 'guide', label: 'Add free key' })
   if (dictationMode() === 'record') {
     // The note is asked for now, while the person speaks, and waited on only
     // when the take is ready to go. Live has no terms to give: the browser's
@@ -1057,7 +1056,7 @@ function termsCard() {
   )
 }
 
-const NEEDS_KEY = 'Dictation needs a Gemini API key.'
+const NEEDS_KEY = 'Without a Gemini or OpenAI key, dictation uses browser speech recognition.'
 
 function settingsDictation({ back = true } = {}) {
   const d = host.state.dictation
@@ -1086,7 +1085,7 @@ function settingsDictation({ back = true } = {}) {
       { class: `card${mode === 'browser' ? ' dictation-browser-mode' : ''}`, key: 'dictation-mode' },
       h('div', { class: 'kicker', text: 'Mode' }),
       segmentedControl({ label: 'Dictation mode', options: MODES.map(m => ({ ...m, disabled: !can[m.id] })), value: browserOnly ? 'browser' : d.mode, choose: id => setDictation({ mode: id }) }),
-      h('div', { class: 'note', text: browserOnly && !Recogniser ? 'A server key enables Record first on this device.' : chosen.note }),
+      h('div', { class: 'note', text: browserOnly && !Recogniser ? 'Add a free Gemini key to use Record first on this device.' : chosen.note }),
       // The choice stands, and says when this browser cannot honour it.
       !browserOnly && mode !== null && mode !== d.mode
         ? h('div', { class: 'note warn', text: `This browser cannot do that, so the mic uses ${mode === 'record' ? 'Record first' : 'As you speak'}.` })

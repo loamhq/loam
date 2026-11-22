@@ -8,21 +8,24 @@ export function activate(loam) {
   const guide = speechGuide(loam, 'dictation', 'Get tidier words with a free Gemini key')
   const suggestionKey = 'gemini-suggestion', settingsPath = '/plugins/dictation/settings'
   let provider = null, revision = 0, suggestion = null
-  let seen = loam.settings.get(suggestionKey, false), saving = null, pending = null, settingsRead = 0
+  const dismissedKey = 'gemini-suggestion-dismissed'
+  let dismissed = loam.settings.get(dismissedKey, false), saving = null, pending = null, settingsRead = 0
   const api = async (...args) => loam.ui.host.api(...args)
   const redraw = () => loam.ui.host.schedule()
   function updateSuggestion() {
     const ticket = ++settingsRead
     return api('GET', settingsPath).then(result => {
-      if (ticket !== settingsRead || seen || result.values?.[suggestionKey] !== 'hidden') return
-      seen = true; pending = null; redraw()
+      if (ticket !== settingsRead || result.values?.[suggestionKey] !== 'hidden') return
+      dismissed = true
+      pending = null
+      closeSuggestion()
     }).catch(() => {})
   }
   function saveSuggestion() {
     if (saving) return saving
     settingsRead++
     saving = api('PATCH', settingsPath, { values: { [suggestionKey]: 'hidden' } })
-      .then(() => loam.settings.set('gemini-suggestion-saved', true))
+      .then(() => loam.settings.set('gemini-dismissal-saved', true))
       .catch(() => {})
       .finally(() => { saving = null })
     return saving
@@ -33,15 +36,14 @@ export function activate(loam) {
     redraw()
   }
   function showSuggestion(entry, target) {
-    if (seen || pending || provider !== 'browser') return
+    if (dismissed || suggestion || pending || provider !== 'browser') return
     const offer = { entry, target }
     pending = offer
     // Read again so another device's dismissal also follows an already-open tab.
     updateSuggestion().then(() => {
-      if (pending !== offer || seen || provider !== 'browser') return
-      suggestion = pending; pending = null; seen = true
-      loam.settings.set(suggestionKey, true)
-      saveSuggestion()
+      if (pending !== offer || dismissed || provider !== 'browser') return
+      suggestion = offer
+      pending = null
       redraw()
     })
   }
@@ -62,7 +64,8 @@ export function activate(loam) {
   updateSuggestion()
   for (const event of ['speech.keys.changed', 'page.visible', 'health.changed', 'plugin.settings.opened']) loam.events.on(event, refresh)
   loam.events.on('page.visible', () => {
-    if (loam.settings.get(suggestionKey, false) && !loam.settings.get('gemini-suggestion-saved', false)) saveSuggestion()
+    if (loam.settings.get(dismissedKey, false) && !loam.settings.get('gemini-dismissal-saved', false)) saveSuggestion()
+    else updateSuggestion()
   })
   loam.events.on('plugin.secrets.changed', ({ id }) => { if (id === 'dictation') refresh() })
   const owners = loam.ui.host.panelHosts?.() ?? [loam.ui.host]
@@ -95,9 +98,15 @@ export function activate(loam) {
     if (!suggestion || suggestion.entry !== (context?.host?.panelId ?? context?.panel ?? 'main') || suggestion.target !== context.target) return null
     const { h, icon } = loam.ui
     return h('aside', { class: 'dictation-suggestion', 'aria-label': 'Dictation tip' },
-      guide.link(),
-      h('button', { class: 'iconbtn ghost', type: 'button', 'aria-label': 'Dismiss Gemini key suggestion', title: 'Dismiss suggestion',
-        onclick: () => { closeSuggestion(); if (!loam.settings.get('gemini-suggestion-saved', false)) saveSuggestion() } }, icon.close(14)))
+      h('span', { class: 'dictation-suggestion-copy', text: 'Browser speech · Better with Gemini' }),
+      guide.link('Add free key'),
+      h('button', { class: 'iconbtn ghost', type: 'button', 'aria-label': 'Don’t show again', title: 'Don’t show again',
+        onclick: () => {
+          dismissed = true
+          loam.settings.set(dismissedKey, true)
+          closeSuggestion()
+          saveSuggestion()
+        } }, icon.close(14)))
   }
   loam.places.composer.tool.add({ id: 'dictation.suggestion', slot: 'advice', render: suggestionFor })
   loam.places.composer.tool.add({ id: 'dictation.notice', slot: 'notice', render: context => {

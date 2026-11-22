@@ -68,6 +68,11 @@ Version 1.2 adds an optional OpenAI key and a connection to api.openai.com. Loam
 
 ### Settings
 
+When dictation uses browser speech, the composer offers a free Gemini key
+for better results. Choose **Don’t show again** to dismiss the offer across
+devices. The key guide stays in Dictation preferences.
+
+
 Settings › Plugins › Dictation keeps your mode in this browser. Record first
 also shows Polish, the longest recording (1 to 15 minutes, 5 by default),
 microphone selection, and Names and terms. Your device keeps its recording
