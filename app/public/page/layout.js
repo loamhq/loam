@@ -103,8 +103,32 @@ function desk(beside = null) {
 // to read one from. A glyph says the same thing without inventing a name.
 function rail(...args) { return host.registry.component('core.rail', { args, defaultView: () => builtinRail(...args) }) }
 
+function railAction(entry) {
+  const context = { wide: true, host }
+  if (typeof entry.render === 'function') return host.registry.invoke(entry, 'render', context)
+  const active = Boolean(entry.active && host.registry.invoke(entry, 'active', context))
+  const badge = entry.badge ? host.registry.invoke(entry, 'badge', context) : null
+  const label = entry.label || entry.title || entry.id
+  const glyph = typeof entry.icon === 'function' ? host.registry.invoke(entry, 'icon', 20) : (icon[entry.icon] ?? icon.apps)(20)
+  return h('button', {
+    type: 'button',
+    key: `rail-action:${entry.owner}:${entry.id}`,
+    class: `railtab railaction${active ? ' on' : ''}`,
+    title: label,
+    'aria-label': label,
+    'aria-expanded': entry.active ? String(active) : null,
+    'data-plugin': entry.owner,
+    'data-rail-action': entry.id,
+    onclick: event => host.registry.invoke(entry, 'onclick', event),
+  }, glyph, entry.title ? h('span', { text: entry.title }) : null,
+  badge ? h('span', { class: 'navdot', 'aria-label': typeof badge === 'string' ? badge : `${badge} new` }) : null)
+}
+
 function builtinRail() {
   const settings = () => host.openSheet({ kind: 'settings', page: 'root' })
+  const actions = host.registry.entries('rail.action', { wide: true, host })
+    .filter(entry => !entry.component && !entry.hidden)
+    .map(railAction).flat().filter(Boolean)
   return h(
     'aside',
     { class: 'rail' },
@@ -113,6 +137,8 @@ function builtinRail() {
       h('button', { class: `railtab${host.state.navigator === section.id || section.selected?.() ? ' on' : ''}`, title: section.title,
         onclick: () => host.commands.run('section.open', { id: section.id }) },
         typeof section.icon === 'function' ? section.icon(20) : (icon[section.icon] ?? icon.apps)(20), h('span', { text: section.title })))),
+    actions.length ? h('span', { class: 'rail-sep', 'aria-hidden': 'true' }) : null,
+    actions.length ? h('div', { class: 'rail-actions' }, ...actions) : null,
     h(
       'div',
       { class: 'rail-foot' },

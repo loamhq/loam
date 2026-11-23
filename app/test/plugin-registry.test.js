@@ -98,3 +98,58 @@ test('Files keeps the projection used by an open edit and reselects it on the ne
   assert.equal(files.st.file.text, raw)
   files.closeFile()
 })
+
+test('rail.action renders in the desktop rail and cleans up on removal, and thread.list.action renders in the Chats header', async () => {
+  const { installDom } = await import('./fakedom.js')
+  const { all } = await import('./browser.js')
+  const { h, icon } = await import('../public/ui.js')
+  const { mount: mountLayout } = await import('../public/page/layout.js')
+  const { createThreads } = await import('../public/threads.js')
+  installDom()
+  const registry = createCoreRegistry()
+  const core = registry.scope({ id: '@core' })
+  core.places.rail.section.add({ id: 'chats', title: 'Chats', icon: 'chat' })
+  const plugin = registry.scope({ id: 'scratchpad' })
+  let open = false, clicks = 0
+  const railHandle = plugin.places.rail.action.add({
+    id: 'open', title: 'Pad', label: 'Open scratchpad', icon: () => icon.file(20),
+    active: () => open, badge: () => 2, onclick: () => { clicks++; open = !open },
+  })
+  const host = {
+    registry, state: { navigator: 'chats', sheet: null, collapsed: false },
+    commands: { run() {} }, openSheet() {}, goActivity() {}, schedule() {},
+    store: {}, workspaceHistory: { state: { front: 'list' } }, files: { st: {} },
+    threads: { st: {} }, panels: { visible: () => false, st: {}, focused: () => 'main' },
+  }
+  const layout = mountLayout(host)
+  let rail = layout.rail()
+  assert.equal(all(rail, 'rail-sep').length, 1)
+  const btn = all(rail, 'railaction')[0]
+  assert.ok(btn)
+  assert.equal(btn.getAttribute('aria-label'), 'Open scratchpad')
+  assert.equal(btn.getAttribute('aria-expanded'), 'false')
+  assert.equal(all(btn, 'navdot').length, 1)
+  btn.fire('click')
+  assert.equal(clicks, 1)
+  rail = layout.rail()
+  assert.equal(all(rail, 'railaction')[0].getAttribute('aria-expanded'), 'true')
+  assert.ok(all(rail, 'railaction')[0].className.includes('on'))
+  railHandle.remove()
+  rail = layout.rail()
+  assert.equal(all(rail, 'rail-sep').length, 0)
+  assert.equal(all(rail, 'railaction').length, 0)
+
+  const listHandle = plugin.places.thread.list.action.add({
+    id: 'pad', render: ({ wide }) => h('button', { class: 'iconbtn pad-list-btn', 'data-wide': String(wide) }, 'P'),
+  })
+  const threads = createThreads({ registry, api: async () => ({ threads: [], agents: [] }), redraw() {}, agents: () => [] })
+  const listView = threads.list(false)
+  const head = all(listView, 'home-head')[0]
+  const padBtns = all(head, 'pad-list-btn')
+  assert.equal(padBtns.length, 1)
+  assert.equal(padBtns[0].getAttribute('data-wide'), 'false')
+  // Omitted in Archived view.
+  threads.showArchived(true)
+  assert.equal(all(threads.list(false), 'pad-list-btn').length, 0)
+  listHandle.remove()
+})

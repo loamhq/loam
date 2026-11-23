@@ -2888,3 +2888,25 @@ listener for immediate notification in an open page.
   buttons side-by-side or an empty `Resolved 0` menu. Both `.dc-menu` and
   `.sh-menu` clamp horizontally into `[8px, innerWidth - 8px]` so menus never
   clip off-screen at 390px.
+
+## 2026-11-23 — General plugin chrome places, switch settings, and conditional `agent.prompt`
+
+- **Two new UI places in `PLACES` / `PLACE_NAMES`:** `rail.action` renders
+  utility buttons in the desktop side rail (below the section icons, separated
+  by a hairline `.rail-sep`), and `thread.list.action` renders icon actions in
+  the Chats list header beside `Thread list actions (⋯)`. `thread.header.action`
+  now also passes `wide` in its context so plugins can vary header vs rail
+  controls cleanly across phone and desktop.
+- **Native switches and live updates for `settings.entry`:** A `settings.entry`
+  with `choices: ["on", "off"]` may set `control: switch` to render as a
+  horizontal toggle row (`.plugin-entry-switch` + `.schedule-switch`) instead of
+  a segmented choice row; `set_setting` normalizes boolean `True`/`False` to
+  `"on"`/`"off"`. Any non-GET write to `/plugins/<id>/settings` emits
+  `plugin.settings.changed` (`{ id, values }`) on the plugin event bus so active
+  plugins react immediately without a reload.
+- **Conditional `agent.prompt` (`when:`):** `agent.prompt` entries accept the
+  same `when: {setting, in}` clause as `vault.folder`, filtered inside
+  `lane_prompt()`. When `set_setting()` changes a setting referenced by a
+  persona `agent.prompt`'s `when:` clause on a live install, it calls
+  `render_personas()` immediately so `CLAUDE.md`, Codex, and Antigravity
+  instructions stay in sync without a manual re-provision.

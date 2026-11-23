@@ -227,6 +227,7 @@ async function api(method, path, body, { signal } = {}) {
     pluginLoader?.refresh()
     if (path.startsWith('/plugins/quick-actions')) quickActions.refresh()
     if (/^\/plugins\/[^/]+\/secrets\//.test(path)) registry.emit('plugin.secrets.changed', { id: path.split('/')[2] })
+    if (/^\/plugins\/[^/]+\/settings$/.test(path)) registry.emit('plugin.settings.changed', { id: decodeURIComponent(path.split('/')[2]), values: parsed?.values ?? {} })
     // A shared key changed (API keys): every plugin that uses it hears so.
     if (path.startsWith('/keys/')) for (const user of parsed?.plugins ?? []) registry.emit('plugin.secrets.changed', { id: user.id })
   }

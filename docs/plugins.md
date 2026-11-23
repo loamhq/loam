@@ -421,11 +421,18 @@ SHA-256 content hash), and `GET /v1/files/locate?root=vault&inode=…&sha256=…
 
 **A `settings.entry` reads for a person** (2026-11-18, 0.2.5): `labels`
 gives a choice its words in the page's menu (the stored value is still the
-choice), `note` is one sentence under the control, and `advanced: true`
+choice), `note` is one sentence under the control, `advanced: true`
 puts the entry behind a quiet **Advanced** at the end of the plugin's
-settings, for what a person rarely needs (a model's name). Hosts before
-0.2.5 ignore all three, so a plugin that uses them still installs there and
-shows its plain labels.
+settings, for what a person rarely needs (a model's name), and `control: switch`
+(with `choices: ["on", "off"]`) draws a native toggle switch instead of a
+dropdown menu; saving a plugin setting emits `plugin.settings.changed`
+(`{id, values}`) on the page. Hosts before these fields ignore them, so a
+plugin that uses them still installs there and shows its plain controls.
+
+**Conditional `agent.prompt`**: an `agent.prompt` entry may carry
+`when: {setting: <key>, in: [<values>]}` (the same shape as `vault.folder`'s
+`when`). Only matching entries are included in `lane_prompt()`, and changing a
+setting named in a persona prompt's `when` re-renders persona instructions.
 
 **A plugin may draw its own settings** (2026-11-18, Git backup): page
 code that adds a `settings.section` with `group: 'plugin'` and
@@ -1641,9 +1648,11 @@ folder and full reviewed commit. The installer previews and confirms that
 exact package through the regular Market installer. The installed copy can
 be switched off, updated and removed in Settings. The list is empty for now.
 
-## Thread controls and Markdown editing
+## Thread controls, navigation actions, and Markdown editing
 
 These API 0 slots are new and may change.
 
-- Register a `thread.header.action` with `slot: 'control'` to draw a button in the thread header. A side panel gives it `placement: 'menu'` in the thread actions menu. Call `closeMenu()` when choosing that item. Both placements receive the current `thread`. A control can open an existing `panel.item` or call `selectView(name)`. A view can supply `dirty(context)` to protect a pending edit when its thread closes. Omitting the slot keeps an action below the header.
+- Register a `thread.header.action` with `slot: 'control'` to draw a button in the thread header. A side panel gives it `placement: 'menu'` in the thread actions menu. Call `closeMenu()` when choosing that item. Both placements receive the current `thread` and `wide`. A control can open an existing `panel.item` or call `selectView(name)`. A view can supply `dirty(context)` to protect a pending edit when its thread closes. Omitting the slot keeps an action below the header.
+- Register a `thread.list.action` to draw an action button in the Chats list top bar (when not viewing Archived threads). Its `render({wide, archived, state})` returns a button node or `null`.
+- Register a `rail.action` to add a workspace action button to the desktop navigation rail (separated below the section tabs, above Activity and Settings). Provide `{id, title, label?, icon, active?, badge?, onclick}` for a native rail button or `render({wide, host})` for custom DOM.
 - Register a `files.viewer` with `slot: 'projection'` to edit a Markdown file through a different text view. Match `{root, path, row}` with `when`. Return `{show(raw), write(raw, edited), offsets(raw)}`. The offset map supplies `toSource(offset, assoc)` and `fromSource(offset)` for annotations. The last matching projection is selected when the file opens and stays with that edit. Preserve hidden bytes, line endings and unedited text. Files continues to own the revision check and conflict handling.

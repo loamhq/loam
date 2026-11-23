@@ -69,6 +69,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
   const showcase = createThemeShowcase({ schedule: () => changed(), mode: () => theme.current === 'dark' ? 'dark' : 'light' })
   const failedShots = new Set()
   const failedIcons = new Set()
+  const savingEntries = new Set()
   const button = (text, onclick, cls = 'pillbtn', props = {}) => h('button', { type: 'button', class: cls, text, onclick, ...props })
   const notice = (text, bad = true) => text ? h('p', { class: `plugin-notice${bad ? ' err' : ''}`, role: bad ? 'alert' : 'status', text }) : null
   let updates = null, checking = null, updateWrite = null, reviewAnswer = null
@@ -161,7 +162,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
   }
   const select = row => host.appModalHistory ? host.goSettings('plugins', row.id) : open(row)
   async function open(row) {
-    hostSettings = null; secretSettings = null; reviewAnswer = null
+    hostSettings = null; secretSettings = null; reviewAnswer = null; savingEntries.clear()
     images = null
     reviewer = null; reviewerRequest = null
     st.selected = row; st.detail = null; st.detailError = ''; st.opening = true; st.guide = false; st.remove = false; st.error = ''; st.focusDetail = true; changed()
@@ -334,22 +335,39 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
       pluginSwitch(row),
       row.on && row.service && row.service.state !== 'running' ? serviceView(row) : null)
   }
-  // Each `settings.entry` of a plugin that is on: a choice as a menu, text as
-  // a field, each saved by itself (PATCH /plugins/<id>/settings).
-  async function saveEntry(row, key, value) {
+  // Each `settings.entry` of a plugin that is on: a switch, a choice menu, or
+  // text as a field, each saved by itself (PATCH /plugins/<id>/settings).
+  async function saveEntry(row, key, value, { quiet = false } = {}) {
+    if (savingEntries.has(key)) return
+    savingEntries.add(key)
     st.error = ''; st.done = ''; changed()
     try {
       const out = await host.api('PATCH', `/plugins/${encodeURIComponent(row.id)}/settings`, { values: { [key]: value } })
       if (hostSettings) hostSettings = { ...hostSettings, values: { ...hostSettings.values, ...out.values } }
-      st.done = 'Saved.'
+      if (!quiet) st.done = 'Saved.'
     } catch (e) { st.error = e.message }
-    changed()
+    finally { savingEntries.delete(key); changed() }
   }
-  // A choice shows its words (`labels`, 2026-11-18), a `note` sits under its
-  // control, and `advanced` entries wait behind a quiet Advanced.
+  // A switch renders as a native toggle row (`control: 'switch'`); a choice
+  // shows its words (`labels`, 2026-11-18), a `note` sits under its control,
+  // and `advanced` entries wait behind a quiet Advanced.
   function entryRow(row, entry) {
     const id = `plugin-setting-${row.id}-${entry.key}`, value = hostSettings.values?.[entry.key] ?? entry.default ?? ''
     const noteId = entry.note ? `${id}-note` : null
+    if (entry.control === 'switch' && entry.choices?.includes('on') && entry.choices?.includes('off')) {
+      const on = value === 'on'
+      const labelId = `${id}-label`
+      return h('div', { class: 'setrow plugin-entry plugin-entry-switch', key: entry.key },
+        h('div', { class: 'setrow-who' },
+          h('div', { class: 'setrow-title', id: labelId, text: entry.label }),
+          entry.note ? h('div', { class: 'setrow-sub', id: noteId, text: entry.note }) : null),
+        h('button', { type: 'button', id, class: 'schedule-switch', role: 'switch',
+          'aria-checked': String(on), 'aria-labelledby': labelId,
+          ...(noteId ? { 'aria-describedby': noteId } : {}),
+          disabled: savingEntries.has(entry.key),
+          onclick: () => saveEntry(row, entry.key, on ? 'off' : 'on', { quiet: true }) },
+          h('span', { 'aria-hidden': 'true' })))
+    }
     const control = entry.choices?.length
       ? h('select', { id, class: 'field-input', value: String(value), ...(noteId ? { 'aria-describedby': noteId } : {}), onchange: e => saveEntry(row, entry.key, e.currentTarget.value) },
         ...entry.choices.map(c => h('option', { value: c, text: entry.labels?.[c] ?? c, selected: c === value })))

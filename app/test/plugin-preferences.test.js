@@ -130,3 +130,40 @@ test('a plugin’s settings show choice labels and notes, and keep advanced ones
   await new Promise(resolve => setImmediate(resolve))
   assert.deepEqual(calls.at(-1), ['PATCH', '/plugins/images/settings', { values: { backend: 'google' } }], 'the value saved is the choice’s id')
 })
+
+test('a settings.entry with control: switch renders as a toggle switch and saves on/off', async () => {
+  installDom()
+  const registry = createRegistry(), calls = []
+  const entries = [
+    { key: 'thread_boards', label: 'Thread boards', note: 'Show a Board button in each thread header.', choices: ['on', 'off'], default: 'on', control: 'switch' },
+    { key: 'chat_board', label: 'Chat board', note: 'Keep one board across Chats.', choices: ['on', 'off'], default: 'on', control: 'switch' },
+  ]
+  const values = { thread_boards: 'on', chat_board: 'on' }
+  const row = { id: 'boards', key: 'yours:boards', name: 'Boards', layer: 'yours', on: true, effective: true, switch: 'plugin', contributes: { 'settings.entry': entries } }
+  const loader = { st: { rows: [row], loaded: true, failures: new Map(), writing: new Set() } }
+  const api = async (method, path, body) => {
+    calls.push([method, path, body])
+    if (path.endsWith('/settings') && method === 'GET') return { id: row.id, entries, values: { ...values } }
+    if (path.endsWith('/settings') && method === 'PATCH') {
+      Object.assign(values, body.values)
+      return { id: row.id, values: { ...body.values } }
+    }
+    return { plugin: row }
+  }
+  const settings = createPluginSettings({ loader, theme: { value: {} }, host: { registry, settingsHead: title => h('h2', { text: title }), api } })
+  await settings.open(row)
+  const draw = () => h('div', {}, settings.view())
+  const switchRows = all(draw(), 'plugin-entry-switch')
+  assert.equal(switchRows.length, 2)
+  assert.equal(all(draw(), 'field-input').length, 0, 'switches do not render as dropdowns')
+  const toggles = switchRows.map(node => all(node, 'schedule-switch')[0])
+  assert.equal(toggles[0].getAttribute('role'), 'switch')
+  assert.equal(toggles[0].getAttribute('aria-checked'), 'true')
+  assert.match(text(switchRows[0]), /Show a Board button in each thread header\./)
+  toggles[0].fire('click')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(calls.at(-1), ['PATCH', '/plugins/boards/settings', { values: { thread_boards: 'off' } }])
+  const updated = all(draw(), 'plugin-entry-switch').map(node => all(node, 'schedule-switch')[0])
+  assert.equal(updated[0].getAttribute('aria-checked'), 'false')
+  assert.equal(updated[1].getAttribute('aria-checked'), 'true')
+})

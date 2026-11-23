@@ -50,7 +50,8 @@ MEMORY = ("none", "read", "write")
 # The places spec v0 names. A manifest naming another is listed with a
 # warning, not refused: a place may be newer than this host.
 PLACES = (
-    "rail.section", "app.overlay", "settings.section", "thread.list.decoration",
+    "rail.section", "rail.action", "app.overlay", "settings.section",
+    "thread.list.decoration", "thread.list.action",
     "thread.header.action", "thread.kind", "message.renderer",
     "message.footer.action", "composer.tool", "files.viewer", "files.action", "files.root",
     "files.share",

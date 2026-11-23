@@ -453,6 +453,102 @@ marked = c.contributes_of({"settings.entry": [{"key": "remote", "label": "Reposi
                                               {"key": "every", "label": "Every", "default": "1h"}]}, None, [])["settings.entry"]
 check("setup is kept where given, absent elsewhere", (marked[0].get("setup"), "setup" in marked[1]), (True, False))
 
+# Switch controls on settings.entry and conditional agent.prompt (`when:`).
+sw = c.contributes_of({
+    "settings.entry": [
+        {"key": "thread_boards", "label": "Thread boards", "choices": ["on", "off"],
+         "default": "on", "control": "switch"},
+        {"key": "chat_board", "label": "Chat board", "choices": ["on", "off"],
+         "default": "on", "control": "switch"},
+    ],
+    "agent.prompt": [
+        {"text": "Thread board instructions.", "when": {"setting": "thread_boards", "in": ["on"]}},
+        {"text": "Chat board instructions.", "when": {"setting": "chat_board", "in": ["on"]}},
+    ],
+}, None, [])
+check("control: switch is kept on [on, off] settings.entry",
+      sw["settings.entry"][0].get("control") == "switch"
+      and sw["agent.prompt"][0].get("when") == {"setting": "thread_boards", "in": ["on"]}, sw)
+for bad in ({"control": "checkbox", "choices": ["on", "off"]},
+            {"control": "switch", "choices": ["yes", "no"]},
+            {"control": "switch"}):
+    try:
+        c.contributes_of({"settings.entry": [{"key": "k", "label": "K", **bad}]}, None, [])
+        check(f"settings.entry {bad} is refused", False)
+    except c.ContributionError:
+        check(f"settings.entry {sorted(bad)} is refused", True)
+for bad_when in ({"setting": "BAD", "in": ["on"]}, {"setting": "ok", "in": []}, "on"):
+    try:
+        c.contributes_of({"agent.prompt": [{"text": "Hi", "when": bad_when}]}, None, [])
+        check(f"agent.prompt invalid when {bad_when} is refused", False)
+    except c.ContributionError:
+        check(f"agent.prompt invalid when {bad_when!r} is refused", True)
+
+# Conditional agent.prompt reflects all four toggle states and set_setting accepts bools.
+with tempfile.TemporaryDirectory() as tmp:
+    t = Path(tmp)
+    pdir = t / "switcher"
+    pdir.mkdir()
+    (pdir / "PLUGIN.md").write_text(
+        "---\n"
+        "id: switcher\n"
+        "name: Switcher\n"
+        "version: 0.1.0\n"
+        "api: 0\n"
+        "kind: [extension]\n"
+        "places: [rail.action, thread.list.action]\n"
+        "touches: {record: none, memory: none, server: false}\n"
+        "contributes:\n"
+        "  settings.entry:\n"
+        "    - key: thread_boards\n"
+        "      label: Thread boards\n"
+        "      choices: [\"on\", \"off\"]\n"
+        "      default: \"on\"\n"
+        "      control: switch\n"
+        "    - key: chat_board\n"
+        "      label: Chat board\n"
+        "      choices: [\"on\", \"off\"]\n"
+        "      default: \"on\"\n"
+        "      control: switch\n"
+        "  agent.prompt:\n"
+        "    - text: Thread board instructions.\n"
+        "      when: {setting: thread_boards, in: [\"on\"]}\n"
+        "    - text: Chat board instructions.\n"
+        "      when: {setting: chat_board, in: [\"on\"]}\n"
+        "---\n",
+        encoding="utf-8",
+    )
+    old_yours = subprocess.os.environ.get("LOAM_PLUGINS_DIR")
+    subprocess.os.environ["LOAM_PLUGINS_DIR"] = str(t)
+    try:
+        import loam_plugins as lp
+        row = next(r for r in lp._rows() if r["id"] == "switcher")
+        check("rail.action and thread.list.action produce no manifest warnings",
+              row["warnings"] == [], row["warnings"])
+        lp.set_on("switcher", True)
+        both = c.lane_prompt("persona")
+        check("conditional agent.prompt: both on includes both texts",
+              "Thread board instructions." in both and "Chat board instructions." in both, both)
+        res = c.set_setting("switcher", "thread_boards", False)
+        check("set_setting normalizes False to 'off' for switch entry", res["value"] == "off", res)
+        chat_only = c.lane_prompt("persona")
+        check("conditional agent.prompt: thread_boards off omits thread instructions",
+              "Thread board instructions." not in chat_only and "Chat board instructions." in chat_only, chat_only)
+        c.set_setting("switcher", "chat_board", "off")
+        neither = c.lane_prompt("persona")
+        check("conditional agent.prompt: both off omits plugin paragraph",
+              "**switcher**" not in neither, neither)
+        res_on = c.set_setting("switcher", "thread_boards", True)
+        check("set_setting normalizes True to 'on' for switch entry", res_on["value"] == "on", res_on)
+        thread_only = c.lane_prompt("persona")
+        check("conditional agent.prompt: thread_boards on, chat_board off includes only thread instructions",
+              "Thread board instructions." in thread_only and "Chat board instructions." not in thread_only, thread_only)
+    finally:
+        if old_yours is None:
+            subprocess.os.environ.pop("LOAM_PLUGINS_DIR", None)
+        else:
+            subprocess.os.environ["LOAM_PLUGINS_DIR"] = old_yours
+
 # -- scratch LOAM_CONFIG / LOAM_OFFLINE must never touch live user units --------
 with tempfile.TemporaryDirectory() as tmp:
     t = Path(tmp)

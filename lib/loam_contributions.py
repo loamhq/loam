@@ -7,9 +7,9 @@ switch on); turning it off takes every entry away. The places:
 | place | an entry | where it lands |
 |---|---|---|
 | `agent.tool` | `{name, run, lanes?, agents?}`: a stdio MCP server, `run` by `/bin/sh -c` in the plugin's folder | the lanes' MCP servers |
-| `agent.prompt` | `{text \| file, lanes?, agents?}`: what the plugin lets an agent do, in words | the lanes' instructions |
+| `agent.prompt` | `{text \| file, lanes?, agents?, when?}`: what the plugin lets an agent do, in words | the lanes' instructions |
 | `schedule.kind` | `{name, schedule, run}`: a run on Loam's schedule grammar (`daily at 05:00 PT`) | a timer, `loam-plugin-<id>-<name>` |
-| `settings.entry` | `{key, label, choices?, default?, labels?, note?, advanced?, setup?}`: a value an agent may read and set | the settings registry, `plugin.<id>.<key>` |
+| `settings.entry` | `{key, label, choices?, default?, labels?, note?, advanced?, setup?, control?}`: a value an agent may read and set | the settings registry, `plugin.<id>.<key>` |
 | `engineer.env` | `{name, value \| setting \| secret, projects?}` | an engineer job's environment |
 | `engineer.job` | `{run, projects?, timeout?}`: a command run at each job's launch, in the plugin's folder; each `NAME=value` line it prints is the job's environment | an engineer job's environment, and files in its folder |
 | `drift.check` | `{run, timeout?}`: exit 0 is "nothing wrong", else each line of its output is a finding | `check-drift` |
@@ -150,6 +150,30 @@ def _secret_names(entry: dict, where: str) -> list[str]:
     return names
 
 
+def _parse_when(entry: dict, where: str) -> dict | None:
+    when = entry.get("when")
+    if when is None:
+        return None
+    if (not isinstance(when, dict)
+            or not (isinstance(when.get("setting"), str) and KEY.match(when["setting"]))
+            or not (isinstance(when.get("in"), list) and when["in"]
+                    and all(isinstance(v, str) for v in when["in"]))):
+        raise ContributionError(
+            f"{where}: `when` is `{{setting: <key>, in: [<values>]}}`")
+    return {"setting": when["setting"], "in": list(when["in"])}
+
+
+def _when_matches(plugin: dict, entry: dict, values: dict | None = None) -> bool:
+    when = entry.get("when")
+    if not when:
+        return True
+    entries = {s["key"]: s for s in plugin["contributes"].get("settings.entry") or []}
+    vals = setting_values(plugin["id"]) if values is None else values
+    wkey = when["setting"]
+    current = vals.get(wkey, entries.get(wkey, {}).get("default"))
+    return current in when["in"]
+
+
 def contributes_of(value, folder: Path | None, warnings: list[str]) -> dict:
     """The manifest's `contributes:` checked and normalised; a
     ContributionError for anything that makes it unusable. An unknown place
@@ -213,8 +237,12 @@ def contributes_of(value, folder: Path | None, warnings: list[str]) -> dict:
                     if len(text) > PROMPT_MAX:
                         raise ContributionError(f"{where}: at most {PROMPT_MAX} "
                                                 f"characters; it is {len(text)}")
-                items.append({"text": text, "file": file, "lanes": _lanes(e, where),
-                              "agents": _agents(e, where)})
+                item = {"text": text, "file": file, "lanes": _lanes(e, where),
+                        "agents": _agents(e, where)}
+                when = _parse_when(e, where)
+                if when is not None:
+                    item["when"] = when
+                items.append(item)
             elif place == "schedule.kind":
                 forms = [k for k in ("schedule", "calendar", "boot") if e.get(k)]
                 if len(forms) != 1:
@@ -301,6 +329,14 @@ def contributes_of(value, folder: Path | None, warnings: list[str]) -> dict:
                     if not isinstance(setup, bool):
                         raise ContributionError(f"{where}: `setup` is true or false")
                     item["setup"] = setup
+                control = e.get("control")
+                if control is not None:
+                    if control != "switch":
+                        raise ContributionError(f"{where}: `control` is `switch`")
+                    if not choices or len(choices) != 2 or set(choices) != {"on", "off"}:
+                        raise ContributionError(
+                            f"{where}: `control: switch` requires `choices: [on, off]`")
+                    item["control"] = control
                 items.append(item)
             elif place == "engineer.env":
                 name = e.get("name")
@@ -364,15 +400,9 @@ def contributes_of(value, folder: Path | None, warnings: list[str]) -> dict:
                     raise ContributionError(f"{where}: `setting` is one of its own "
                                             f"settings.entry keys")
                 item = {"path": path, "setting": setting}
-                when = e.get("when")
+                when = _parse_when(e, where)
                 if when is not None:
-                    if (not isinstance(when, dict)
-                            or not (isinstance(when.get("setting"), str) and KEY.match(when["setting"]))
-                            or not (isinstance(when.get("in"), list) and when["in"]
-                                    and all(isinstance(v, str) for v in when["in"]))):
-                        raise ContributionError(
-                            f"{where}: `when` is `{{setting: <key>, in: [<values>]}}`")
-                    item["when"] = {"setting": when["setting"], "in": list(when["in"])}
+                    item["when"] = when
                 items.append(item)
             elif place == "web.door":
                 why = e.get("why")
@@ -631,8 +661,9 @@ def lane_prompt(lane: str, agent: str | None = None,
     none. One paragraph per plugin, headed by its id."""
     parts = []
     for p in active() if plugins is None else plugins:
+        vals = setting_values(p["id"])
         texts = [e["text"] for e in p["contributes"].get("agent.prompt") or []
-                 if _targets(e, lane, agent) and e.get("text")]
+                 if _targets(e, lane, agent) and _when_matches(p, e, vals) and e.get("text")]
         if texts:
             parts.append(f"**{p['id']}** (a plugin): " + "\n\n".join(texts))
     if not parts:
@@ -694,6 +725,9 @@ def set_setting(pid: str, key: str, value) -> dict:
     entry = next((e for e in entries_of(pid) if e["key"] == key), None)
     if entry is None:
         raise ContributionError(f"{pid} has no setting {key!r}, or is off")
+    if isinstance(value, bool) and (entry.get("control") == "switch"
+                                    or set(entry.get("choices") or []) == {"on", "off"}):
+        value = "on" if value else "off"
     if entry.get("choices") and value not in entry["choices"]:
         raise ContributionError(f"{pid}.{key} is one of {', '.join(entry['choices'])}")
     if not entry.get("choices") and (not isinstance(value, str) or len(value) > 500):
@@ -706,7 +740,7 @@ def set_setting(pid: str, key: str, value) -> dict:
     tmp.write_text(json.dumps(values, indent=2) + "\n")
     os.replace(tmp, path)
     out = {"key": key, "value": value}
-    # A timer or a vault folder that follows this setting moves with it (L9).
+    # A timer, vault folder, or conditional agent prompt that follows this setting moves with it.
     plugin = next((p for p in active() if p["id"] == pid), None)
     if plugin and any(s.get("setting") == key
                       for s in plugin["contributes"].get("schedule.kind") or []):
@@ -715,6 +749,15 @@ def set_setting(pid: str, key: str, value) -> dict:
                       for f in plugin["contributes"].get("vault.folder") or []):
         if real_layer():
             out["folders_made"] = ensure_vault_folders([plugin])
+    if plugin and any((ap.get("when") or {}).get("setting") == key
+                      and "persona" in ap.get("lanes", ())
+                      for ap in plugin["contributes"].get("agent.prompt") or []):
+        import loam_plugins  # noqa: PLC0415
+        if real_layer() and loam_plugins.CONTRIBUTIONS_FOLLOW:
+            rendered, errors = render_personas()
+            out["rendered"] = rendered
+            if errors:
+                out["errors"] = errors
     return out
 
 
@@ -890,12 +933,8 @@ def vault_folders(plugins: list[dict] | None = None) -> list[str]:
         entries = {e["key"]: e for e in p["contributes"].get("settings.entry") or []}
         vals = setting_values(p["id"])
         for f in p["contributes"].get("vault.folder") or []:
-            when = f.get("when")
-            if when:
-                wkey = when["setting"]
-                current = vals.get(wkey, entries.get(wkey, {}).get("default"))
-                if current not in when["in"]:
-                    continue
+            if not _when_matches(p, f, vals):
+                continue
             path = f.get("path")
             if f.get("setting"):
                 entry = entries.get(f["setting"], {})
@@ -1263,6 +1302,33 @@ def apply_units(dry: bool = False, *, unit_dir: Path | None = None,
 # A switch, an install, a removal: bring every lane into line
 # ---------------------------------------------------------------------------
 
+def render_personas() -> tuple[list[str], list[str]]:
+    """Re-render every persona's assembled instruction files (Claude Code,
+    Codex, Antigravity) via ``bin/provision``. Returns ``(rendered, errors)``."""
+    rendered: list[str] = []
+    errors: list[str] = []
+    prov = lc.ROOT / "bin" / "provision"
+    for ws in sorted(lc.WORKSPACES.iterdir()):
+        cfg = ws / "agent.json"
+        if not cfg.is_file():
+            continue
+        try:
+            data = json.loads(cfg.read_text(encoding="utf-8"))
+            res = subprocess.run([str(prov), data["name"]],
+                                 capture_output=True, text=True, check=False, timeout=120)
+            (rendered if res.returncode == 0 else errors).append(
+                data["name"] if res.returncode == 0
+                else f"provision {data['name']}: {(res.stderr or res.stdout)[-300:]}")
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"provision {ws.name}: {exc}")
+    for flag in ("--codex", "--antigravity"):
+        res = subprocess.run([str(prov), flag], capture_output=True, text=True,
+                             check=False, timeout=300)
+        if res.returncode:
+            errors.append(f"provision {flag}: {(res.stderr or res.stdout)[-300:]}")
+    return rendered, errors
+
+
 def apply(reason: str = "") -> dict:
     """Everything a change of plugins moves: the timers, and the personas'
     assembled files (bin/provision, one persona at a time, then its Codex and
@@ -1291,23 +1357,7 @@ def apply(reason: str = "") -> dict:
         out["keys"] = loam_keys.adopt() + [f"{p}: keys.env" for p in loam_keys.sync()]
     except Exception as exc:  # noqa: BLE001
         out["errors"].append(f"keys: {exc}")
-    prov = lc.ROOT / "bin" / "provision"
-    for ws in sorted(lc.WORKSPACES.iterdir()):
-        cfg = ws / "agent.json"
-        if not cfg.is_file():
-            continue
-        try:
-            data = json.loads(cfg.read_text(encoding="utf-8"))
-            res = subprocess.run([str(prov), data["name"]],
-                                 capture_output=True, text=True, check=False, timeout=120)
-            (out["rendered"] if res.returncode == 0 else out["errors"]).append(
-                data["name"] if res.returncode == 0
-                else f"provision {data['name']}: {(res.stderr or res.stdout)[-300:]}")
-        except Exception as exc:  # noqa: BLE001
-            out["errors"].append(f"provision {ws.name}: {exc}")
-    for flag in ("--codex", "--antigravity"):
-        res = subprocess.run([str(prov), flag], capture_output=True, text=True,
-                             check=False, timeout=300)
-        if res.returncode:
-            out["errors"].append(f"provision {flag}: {(res.stderr or res.stdout)[-300:]}")
+    rendered, errors = render_personas()
+    out["rendered"].extend(rendered)
+    out["errors"].extend(errors)
     return out

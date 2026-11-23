@@ -1709,6 +1709,10 @@ a.ghline { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
 .brand { width: 42px; height: 42px; flex: none; display: block; }
 /* Match the rail button corner radius to the account tile at each size. */
 .rail-tabs { display: flex; flex-direction: column; gap: 10px; }
+.rail-sep { width: 24px; height: 1px; background: var(--paper-rule); flex: none; margin: 2px 0; }
+.rail-actions { display: flex; flex-direction: column; gap: 10px; }
+.railaction { position: relative; }
+.railaction .navdot { position: absolute; right: 10px; top: 8px; }
 .railtab {
   width: 56px; height: 56px; border-radius: 18px; border: 0; background: transparent;
   color: var(--paper-ink-2); display: flex; flex-direction: column; align-items: center;
@@ -2546,6 +2550,10 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .plugin-entry-settings .plugin-entry .setrow-title { white-space:normal; font-weight:500; font-size:14px; }
 .plugin-entry-settings .plugin-entry > .field-input { width:100%; }
 .plugin-entry-settings .plugin-entry-note { margin:0; font-size:13px; }
+.plugin-entry-settings .plugin-entry.plugin-entry-switch { flex-direction:row; align-items:center; justify-content:space-between; gap:12px; }
+.plugin-entry-settings .plugin-entry.plugin-entry-switch .setrow-who { min-width:0; flex:1; }
+.plugin-entry-settings .plugin-entry.plugin-entry-switch .setrow-title { font-weight:600; font-size:15px; }
+.plugin-entry-settings .plugin-entry.plugin-entry-switch .setrow-sub { margin-top:2px; white-space:normal; }
 /* Keep advanced settings in an expandable section. */
 .plugin-entry-advanced { border-top:1px solid var(--paper-rule); }
 .plugin-entry-advanced > summary { padding:12px 16px; min-height:44px; display:flex; align-items:center; cursor:pointer; font-size:13px; color:var(--paper-ink-2); }

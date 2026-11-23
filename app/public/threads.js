@@ -1035,6 +1035,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
         props: { class: `${st.wide ? 'list-head' : 'home-head'}${st.archived ? ' tt-archived-head' : ''}` }, actions: [
         !st.archived ? round('New thread', icon.pencil(18), () => create(), { class: `iconbtn${listIsMain() && !st.open && !st.personaMenu ? ' secondary' : ''}`, disabled: st.creating }) : null,
         round('Search threads', icon.search(18), () => { st.searchOpen = !st.searchOpen; st.focusSearch = st.searchOpen; redraw() }, { 'aria-expanded': String(Boolean(st.searchOpen)) }),
+        ...(!st.archived ? registry.draw('thread.list.action', { wide: st.wide, archived: false, state: st }) : []),
         !st.archived ? round('Thread list actions', icon.dots(18), () => { st.personaMenu = null; st.listMenu = !st.listMenu; redraw() }, { 'aria-haspopup': 'menu', 'aria-expanded': String(Boolean(st.listMenu)) }) : null,
         st.wide && !st.archived ? round('Hide sidebar for a focused view', icon.panelLeft(18), () => collapse(true)) : null] }),
 
@@ -1715,7 +1716,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     const unmatched = [...o.permissions.values()].filter((p) => !o.messages.some((m) => m.id === p.message_id))
     const closeMenu = (act) => () => { o.headerMenu = false; act(); redraw() }
     const headerContext = { thread: o.thread, state: o, open, patch, view: currentView(),
-      selectView: chooseView, backButton: historyButton, panel: sidePanel ? 'side' : 'main' }
+      selectView: chooseView, backButton: historyButton, panel: sidePanel ? 'side' : 'main', wide: st.wide }
     const controls = placement => registry.draw('thread.header.action', {
       ...headerContext, slot: 'control', placement, closeMenu: () => { o.headerMenu = false; redraw() },
     })
