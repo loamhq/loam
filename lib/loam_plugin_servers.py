@@ -41,7 +41,11 @@ def managed() -> bool:
     flag = os.environ.get("LOAM_PLUGIN_UNITS")
     if flag is not None:
         return flag == "1"
-    return plugins.yours_root() == plugins.YOURS_DEFAULT
+    import loam_offline  # noqa: PLC0415
+    if loam_offline.offline():
+        return False
+    return (lc.is_install_config()
+            and plugins.yours_root().resolve() == plugins.YOURS_DEFAULT.resolve())
 
 
 def unit(pid: str) -> str:

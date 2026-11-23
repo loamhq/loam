@@ -53,6 +53,8 @@ import loam_worktree as wt  # noqa: E402
 hidden = wt.sealed_paths()
 check("the wall covers the vault, workspaces, projects, plugins and state",
       {lc.VAULT, lc.WORKSPACES, lc.PROJECTS, lc.PLUGINS, lc.STATE} <= set(hidden), True)
+if lc.USER_UNIT_DIR.is_dir():
+    check("...and the user systemd unit directory", lc.USER_UNIT_DIR in hidden, True)
 check("...never the checkout, nor anything holding it",
       any(p == eng.AGENTS or p in eng.AGENTS.parents for p in hidden), False)
 planted = []

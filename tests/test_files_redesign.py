@@ -16,11 +16,12 @@ from zoneinfo import ZoneInfo
 AGENTS = Path(__file__).resolve().parent.parent
 TMP = Path(tempfile.mkdtemp(prefix="loam-files-redesign-"))
 
+HOME_DIR = TMP / "home"
 VAULT = TMP / "vault"
 SPACES = TMP / "ai-labs"
 STATE = TMP / "state"
 PLUGINS = TMP / "plugins"
-for d in (VAULT, SPACES, STATE, PLUGINS):
+for d in (HOME_DIR, VAULT, SPACES, STATE, PLUGINS):
     d.mkdir(parents=True, exist_ok=True)
 
 CONF = TMP / "loam.toml"
@@ -34,7 +35,7 @@ link = "[[Sam]]"
 timezone = "America/Los_Angeles"
 
 [paths]
-home = "{TMP}"
+home = "{HOME_DIR}"
 root = "{AGENTS}"
 vault = "{VAULT}"
 workspaces = "{SPACES}"
