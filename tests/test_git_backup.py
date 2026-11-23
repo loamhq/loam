@@ -555,6 +555,44 @@ class Plugin(unittest.TestCase):
             proc.terminate()
             proc.communicate(timeout=10)
 
+    def test_killed_push_reports_failing_in_status(self):
+        self.assertTrue(self.i.backup("connect", "vault", str(self.rv))["ok"])
+        self.assertTrue(self.i.backup("test", "vault")["ok"])
+        st = self.i.backup("status")
+        self.assertEqual(st["trees"][0]["level"], "ok")
+        self.assertEqual(st["summary"]["level"], "part")
+        # Simulate an OOM-killed push: in_progress left behind with a dead PID.
+        state_path = self.i.home / "state" / "plugins" / "private" / "git-backup" / "state.json"
+        data = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertNotIn("in_progress", data["trees"]["vault"])
+        data["trees"]["vault"]["in_progress"] = {
+            "started_at": "2026-11-23T22:47:34Z",
+            "pid": 99999999,
+        }
+        state_path.write_text(json.dumps(data), encoding="utf-8")
+        st = self.i.backup("status")
+        self.assertEqual(st["trees"][0]["level"], "fail")
+        self.assertEqual(st["trees"][0]["failing"]["kind"], "killed")
+        self.assertEqual(st["summary"]["level"], "fail")
+        # A live PID in_progress is not reported as failed.
+        data["trees"]["vault"]["in_progress"]["pid"] = os.getpid()
+        state_path.write_text(json.dumps(data), encoding="utf-8")
+        st = self.i.backup("status")
+        self.assertEqual(st["trees"][0]["level"], "ok")
+        # A subsequent push clears in_progress.
+        self.assertTrue(self.i.backup("push", "--now", "vault")[0]["ok"])
+        data = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertNotIn("in_progress", data["trees"]["vault"])
+
+    def test_bounded_git_config_is_applied(self):
+        sys.path.insert(0, str(PLUGIN / "tools"))
+        import backup_core  # noqa: PLC0415
+        joined = " ".join(backup_core.BOUNDED_GIT)
+        for expected in ("pack.threads=1", "pack.windowMemory=64m",
+                         "pack.deltaCacheSize=32m", "core.packedGitLimit=128m",
+                         "gc.autoDetach=false"):
+            self.assertIn(expected, joined)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

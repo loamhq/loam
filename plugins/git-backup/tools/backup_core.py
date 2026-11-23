@@ -334,8 +334,21 @@ def git_env(tree: str) -> dict:
             "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "/bin/false", "LC_ALL": "C"}
 
 
+# Memory bounds for git pack-objects / gc inside the 512M cgroup cap:
+# on multi-core hosts git defaults to pack.threads=<ncpus> and unlimited
+# pack.windowMemory, which OOMs when loose objects accumulate.
+BOUNDED_GIT = (
+    "-c", "pack.threads=1",
+    "-c", "pack.windowMemory=64m",
+    "-c", "pack.deltaCacheSize=32m",
+    "-c", "core.packedGitWindowSize=16m",
+    "-c", "core.packedGitLimit=128m",
+    "-c", "gc.autoDetach=false",
+)
+
+
 def git(tree: str, *args: str, timeout: float = PROBE_TIMEOUT_S, where: Path | None = None):
-    return subprocess.run(["git", "-C", str(where or tree_path(tree)), *args],
+    return subprocess.run(["git", "-C", str(where or tree_path(tree)), *BOUNDED_GIT, *args],
                           capture_output=True, text=True, env=git_env(tree),
                           timeout=timeout, check=False)
 
@@ -705,6 +718,18 @@ def track(tree: str, url: str, head: str) -> list[str]:
     return moved
 
 
+def _pid_alive(pid: int | None) -> bool:
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
 def push(tree: str, force: bool = False) -> dict:
     """One backup of one tree: commit what is new (Loam's own routine), then
     send `main` to the repository. Never forced, never to a public one."""
@@ -715,17 +740,20 @@ def push(tree: str, force: bool = False) -> dict:
     state = load_state()
     if not force and not due(tree, state, vals["every"]):
         return {"ok": True, "tree": tree, "skipped": "not due"}
-    where = tree_path(tree)
-    if not ac.hand_routine(tree):
-        ac.commit(tree, where)
     t = state["trees"][tree]
     if t.get("remote") and t["remote"] != url:
         state["trees"][tree] = t = {}
     t["remote"] = url
+    t["in_progress"] = {"started_at": iso(), "pid": os.getpid()}
+    save_state(state)
+    where = tree_path(tree)
+    if not ac.hand_routine(tree):
+        ac.commit(tree, where)
     seen = visibility(url)
     t["visibility"] = seen
     if seen == "public":
         host = real_host(parts(url).get("host", "")) or "the host"
+        t.pop("in_progress", None)
         failing = _fail(tree, url, {"kind": "public", "words": PUBLIC_WORDS.format(
             name=NOUN[tree], host=host)}, state)
         save_state(state)
@@ -734,24 +762,36 @@ def push(tree: str, force: bool = False) -> dict:
         with ac.lock(where, timeout=120):
             head = git(tree, "rev-parse", "--verify", "-q", "HEAD").stdout.strip()
             if not head:
+                t.pop("in_progress", None)
+                save_state(state)
                 return {"ok": True, "tree": tree, "skipped": "nothing committed yet"}
             last_contact = parse_iso(t.get("last_ok_at"))
             if (not force and head == t.get("last_pushed_sha") and not t.get("failing")
                     and last_contact and (now() - last_contact).total_seconds() < VERIFY_S):
+                t.pop("in_progress", None)
                 t["last_attempt_at"] = iso()
                 save_state(state)
                 return {"ok": True, "tree": tree, "skipped": "up to date", "sha": head[:7]}
             started = time.monotonic()
             try:
-                done = git(tree, "push", "--porcelain", url, f"HEAD:refs/heads/{BRANCH}",
-                           timeout=PUSH_TIMEOUT_S)
+                done = git(tree, "-c", "gc.auto=0", "push", "--porcelain", url,
+                           f"HEAD:refs/heads/{BRANCH}", timeout=PUSH_TIMEOUT_S)
             except subprocess.TimeoutExpired:
                 done = subprocess.CompletedProcess([], 1, "", "push timed out")
             if done.returncode == 0:
                 track(tree, url, head)
+                # Bounded repack before loose objects pile up to git's 6700 default.
+                try:
+                    git(tree, "-c", "gc.auto=1000", "-c", "gc.autoPackLimit=20",
+                        "gc", "--auto", "--quiet", timeout=PUSH_TIMEOUT_S)
+                except subprocess.TimeoutExpired:
+                    pass
     except TimeoutError:
+        t.pop("in_progress", None)
+        save_state(state)
         return {"ok": True, "tree": tree, "skipped": "busy: Loam's commit is running"}
     if done.returncode != 0:
+        t.pop("in_progress", None)
         why = classify(done.stderr + "\n" + done.stdout, url)
         why["detail"] = done.stderr.strip()[-600:]
         failing = _fail(tree, url, why, state)
@@ -759,6 +799,7 @@ def push(tree: str, force: bool = False) -> dict:
         return {"ok": False, "tree": tree, "kind": why["kind"], "words": why["words"],
                 "files": why.get("files") or [], "attempts": failing["attempts"]}
     was = t.get("failing")
+    t.pop("in_progress", None)
     t.pop("failing", None)
     t.update(last_attempt_at=iso(), last_ok_at=iso(), last_pushed_at=iso(),
              last_pushed_sha=head, seconds=round(time.monotonic() - started, 1))
@@ -825,6 +866,16 @@ def tree_status(tree: str, state: dict, vals: dict) -> dict:
                              capture_output=True, text=True, check=False).stdout.strip()
         waiting = int(cnt) if cnt.isdigit() else None
     failing = t.get("failing")
+    in_progress = t.get("in_progress")
+    if not failing and isinstance(in_progress, dict) and not _pid_alive(in_progress.get("pid")):
+        started_at = in_progress.get("started_at")
+        failing = {
+            "kind": "killed",
+            "words": "The last backup was stopped before it finished (the process was killed, possibly out of memory).",
+            "since": started_at,
+            "last": started_at,
+            "attempts": 1,
+        }
     pushed_at = parse_iso(t.get("last_pushed_at"))
     if not url:
         level, line = "off", "Not backed up off this machine yet."
