@@ -172,9 +172,43 @@ def _structural_exclusions() -> tuple[tuple[str, ...], list[tuple[str, ...]]]:
     return proj_parts, _loam_folder_parts()
 
 
-def excluded_parts(parts: tuple[str, ...] | list[str]) -> bool:
+def _board_paths() -> frozenset[str]:
+    """Vault-relative POSIX paths of every known board:
+    - All thread boards in the boards plugin's thread-files record
+      (``thread-files.json`` / legacy ``file-bindings.json``).
+    - The General board's configured path (``vault.general_board``).
+    """
+    paths: set[str] = set()
+    general = lc.get("vault.general_board", "")
+    if isinstance(general, str) and general.strip():
+        rel = to_rel_path(general.strip())
+        if rel:
+            paths.add(rel)
+    try:
+        import loam_thread_files as ltf  # noqa: PLC0415
+        src = ltf._source()
+        if src.is_file():
+            data = json.loads(src.read_text("utf-8"))
+            boards = data.get("boards") if isinstance(data, dict) else None
+            if isinstance(boards, dict):
+                for row in boards.values():
+                    if not isinstance(row, dict):
+                        continue
+                    for key in ("path", "moving_to"):
+                        raw = row.get(key)
+                        if isinstance(raw, str) and raw.strip():
+                            rel = to_rel_path(raw.strip())
+                            if rel:
+                                paths.add(rel)
+    except Exception:
+        pass
+    return frozenset(paths)
+
+
+def excluded_parts(parts: tuple[str, ...] | list[str], *,
+                   board_paths: frozenset[str] | None = None) -> bool:
     """True when a vault-relative path belongs to Loam files, dotfiles,
-    launcher receipts, or runtime/engineer infrastructure files."""
+    boards, launcher receipts, or runtime/engineer infrastructure files."""
     if not parts:
         return True
     if any(p.startswith(".") or p in ("..",) for p in parts):
@@ -194,6 +228,9 @@ def excluded_parts(parts: tuple[str, ...] | list[str]) -> bool:
         # <projects>/Loam/infrastructure/schedule.md
         if tuple(sub) == ("Loam", "infrastructure", "schedule.md"):
             return True
+    bp = _board_paths() if board_paths is None else board_paths
+    if bp and "/".join(parts) in bp:
+        return True
     return False
 
 
@@ -514,6 +551,7 @@ def recent_files(who: str = "all", window: str = "default", *,
     ledger = _load_ledger()
     names = _persona_names()
     proj_parts, loam_parts = _structural_exclusions()
+    board_paths = _board_paths()
 
     candidates: list[dict] = []
 
@@ -549,6 +587,8 @@ def recent_files(who: str = "all", window: str = "default", *,
                 if st.st_mtime < week_cutoff:
                     continue
                 rel = "/".join(here)
+                if rel in board_paths:
+                    continue
                 kind, actor = _resolve_author(rel, st.st_mtime_ns, ledger)
                 if kind not in ("owner", "agent"):
                     continue

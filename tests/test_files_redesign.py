@@ -48,6 +48,7 @@ inbox = "Inbox"
 conversations = "Conversations"
 attachments = "Attachments"
 boards = "Boards"
+general_board = "Inbox/from-agents/comms.md"
 projects = "Projects"
 system = "System"
 """,
@@ -262,6 +263,30 @@ set_mtime(VAULT / "Conversations" / "2026-11-22.md", fixed_now - 210)
 (VAULT / "System" / "loam-wake-failures.md").write_text("# Alert\n", encoding="utf-8")
 set_mtime(VAULT / "System" / "loam-wake-failures.md", fixed_now - 200)
 
+# Boards outside Boards/: General board (vault.general_board) and a thread board
+# recorded in thread-files.json. Both are attributed to an agent and must still
+# stay out of Recent.
+gen_board = VAULT / "Inbox" / "from-agents" / "comms.md"
+gen_board.parent.mkdir(parents=True, exist_ok=True)
+gen_board.write_text("# General board\n", encoding="utf-8")
+gen_ns = set_mtime(gen_board, fixed_now - 195)
+recent.record_write(gen_board, kind="agent", actor="ada", source="hook", mtime_ns=gen_ns)
+
+outside_board = VAULT / "Notes" / "thread-board-outside.md"
+outside_board.write_text("# Thread board outside Boards/\n", encoding="utf-8")
+out_ns = set_mtime(outside_board, fixed_now - 190)
+recent.record_write(outside_board, kind="agent", actor="finn", source="hook", mtime_ns=out_ns)
+tf_data = PLUGINS / "_data" / "thread-files.json"
+tf_data.parent.mkdir(parents=True, exist_ok=True)
+tf_data.write_text(
+    json.dumps({
+        "boards": {
+            "t-outside": {"path": "Notes/thread-board-outside.md", "title": "Outside"},
+        }
+    }),
+    encoding="utf-8",
+)
+
 # 3e. Unattributed writes (running engineer job, script, unrecorded overwrite)
 #     are EXCLUDED from Recent — never credited to owner.
 unattr_file = VAULT / "Notes" / "unattributed-script.md"
@@ -448,6 +473,14 @@ try:
             "Conversations/2026-11-22.md",
             "System/loam-wake-failures.md",
         )),
+        sorted(by_path),
+    )
+    check(
+        "exclusions: boards outside Boards/ (general_board and thread-files.json) absent from Recent",
+        "Inbox/from-agents/comms.md" not in by_path
+        and "Notes/thread-board-outside.md" not in by_path
+        and recent.excluded_path("Inbox/from-agents/comms.md")
+        and recent.excluded_path("Notes/thread-board-outside.md"),
         sorted(by_path),
     )
 finally:
