@@ -257,9 +257,14 @@ export function anchorOf(words) {
 // Published vault URLs — the `FILES_VAULT_URLS` prefixes the server hands the
 // page — are links into Files, not out of the app.
 let vaultUrls = []
+let vaultUrlsVersion = 0
 
 export function setVaultUrls(list) {
-  vaultUrls = Array.isArray(list) ? list.filter((u) => typeof u === 'string' && /^https:\/\//i.test(u)) : []
+  const next = Array.isArray(list) ? list.filter((u) => typeof u === 'string' && /^https:\/\//i.test(u)) : []
+  if (next.length !== vaultUrls.length || next.some((u, i) => u !== vaultUrls[i])) {
+    vaultUrls = next
+    vaultUrlsVersion += 1
+  }
 }
 
 function isVaultUrl(url) {
@@ -360,21 +365,30 @@ function stripInline(nodes) {
 
 // A screen is built whole on every change, so every message in a transcript is
 // parsed on every redraw, and markdown is the expensive half of building one.
-// The parse is a pure function of the text, so it is remembered *by* the text:
-// a delta re-parses the message being written and nothing else, and a
-// remembered answer can never be stale because the key is the whole input. The
+// The parse depends on the text and on the inline link-recognition state
+// (`linking`, whether `linking.from` enables relative paths, and `vaultUrls`),
+// so it is remembered by both: a delta re-parses the message being written and
+// nothing else, while callers that parse without linking (`imageRefs`, `strip`)
+// never poison the linked render. The other module flags (`imaging`,
+// `softening`, `vaulting`, `anchoring`) are read only during rendering. The
 // table is dropped rather than aged — a streaming message makes a new key per
 // delta, and none of them is worth keeping once it has stopped.
 const remembered = new Map()
 const REMEMBER = 240
 
+function parseKey(text) {
+  if (!linking) return `0\0${text}`
+  return `${linking.from ? 2 : 1}:${vaultUrlsVersion}\0${text}`
+}
+
 export function parse(text) {
   if (typeof text !== 'string' || text === '') return []
-  const had = remembered.get(text)
+  const key = parseKey(text)
+  const had = remembered.get(key)
   if (had) return had
   const blocks = parseBlocks(text.replace(/\r\n?/g, '\n').split('\n'))
   if (remembered.size >= REMEMBER) remembered.clear()
-  remembered.set(text, blocks)
+  remembered.set(key, blocks)
   return blocks
 }
 

@@ -17,7 +17,7 @@ import assert from 'node:assert/strict'
 import { installDom } from './fakedom.js'
 
 installDom()
-const { markdown, strip, safeHref } = await import('../public/markdown.js')
+const { markdown, strip, safeHref, imageRefs, setVaultUrls } = await import('../public/markdown.js')
 
 // A tree small enough to read in a failure message: `p(strong("x"))`.
 function shape(node) {
@@ -373,4 +373,125 @@ test('a code block and a table carry their source to the copy button, and nothin
   const plain = markdown(src)
   assert.deepEqual(plain.map((n) => n.nodeName), ['P', 'PRE', 'DIV', 'UL'])
   assert.equal(plain[2].getAttribute('class'), 'tablewrap')
+})
+
+// --------------------------------------------------- parse cache isolation
+
+function elementsOf(nodes, out = []) {
+  for (const node of nodes) {
+    if (node.nodeType !== 1) continue
+    out.push(node)
+    elementsOf(node.childNodes, out)
+  }
+  return out
+}
+
+const fileLinksIn = (nodes) =>
+  elementsOf(nodes).filter((n) => n.tag === 'a' && (n.getAttribute('class') ?? '').split(' ').includes('filelink'))
+
+test('parse cache does not poison wiki-links, path links or embeds after imageRefs() or strip()', () => {
+  const onLink = () => {}
+
+  const withImage = 'Rebuilt [[Notes/guide.html|Getting started]], see [plan](/files/vault/plan.md), `/srv/notes/a.md` and ![[shot.png]].\n\n![preview](Images/shot.png)'
+  assert.deepEqual(imageRefs(withImage), [{ alt: 'preview', dest: 'Images/shot.png' }])
+  const afterImages = markdown(withImage, { onLink, chatLinks: true })
+  assert.deepEqual(
+    fileLinksIn(afterImages).map((a) => a.textContent),
+    ['Getting started', 'plan', '/srv/notes/a.md', 'shot.png'],
+  )
+
+  const latest = 'Updated [[Notes/handbook.md|the handbook]] and [summary](/files/vault/summary.md).'
+  assert.equal(strip(latest), latest)
+  const afterStrip = markdown(latest, { onLink, chatLinks: true })
+  assert.deepEqual(
+    fileLinksIn(afterStrip).map((a) => a.textContent),
+    ['the handbook', 'summary'],
+  )
+
+  // Calling without linking after linking must not inherit filelinks from the cache.
+  assert.equal(fileLinksIn(markdown(latest)).length, 0)
+  assert.equal(strip(latest), latest)
+})
+
+test('parse cache keeps linking.from, vaultUrls, images, soft breaks, vault mode and anchors independent', () => {
+  const onLink = () => {}
+
+  // Relative links depend on `from` (Files preview vs chat).
+  const rel = 'Read [next](../b.md) and [[Notes/a|Note A]].'
+  assert.deepEqual(fileLinksIn(markdown(rel, { onLink })).map((a) => a.textContent), ['Note A'])
+  assert.deepEqual(
+    fileLinksIn(markdown(rel, { onLink, from: { root: 'vault', path: 'Notes/a.md' } })).map((a) => a.textContent),
+    ['next', 'Note A'],
+  )
+  assert.deepEqual(fileLinksIn(markdown(rel, { onLink })).map((a) => a.textContent), ['Note A'])
+
+  // Vault URLs can arrive after a message was already parsed.
+  const vaultLink = 'Open [the doc](https://notes.example.org/doc.md).'
+  setVaultUrls([])
+  try {
+    assert.equal(fileLinksIn(markdown(vaultLink, { onLink })).length, 0)
+    setVaultUrls(['https://notes.example.org'])
+    assert.deepEqual(fileLinksIn(markdown(vaultLink, { onLink })).map((a) => a.textContent), ['the doc'])
+    setVaultUrls([])
+    assert.equal(fileLinksIn(markdown(vaultLink, { onLink })).length, 0)
+  } finally {
+    setVaultUrls([])
+  }
+
+  // `images`, `soft`, `vault` and `anchors` apply cleanly across repeated parses of identical text.
+  const imgText = 'See [[Notes/pic|the pic]] ![alt](/files/vault/pic.png)'
+  assert.deepEqual(imageRefs(imgText), [{ alt: 'alt', dest: '/files/vault/pic.png' }])
+  const drawn = markdown(imgText, {
+    onLink,
+    chatLinks: true,
+    images: {
+      draw: (alt) => {
+        const el = document.createElement('figure')
+        el.setAttribute('data-alt', alt)
+        return el
+      },
+      group: (list) => {
+        const wrap = document.createElement('div')
+        wrap.setAttribute('class', 'reply-figures')
+        for (const el of list) wrap.appendChild(el)
+        return wrap
+      },
+    },
+  })
+  assert.equal(elementsOf(drawn).filter((n) => n.tag === 'figure').length, 1)
+  assert.deepEqual(fileLinksIn(drawn).map((a) => a.textContent), ['the pic'])
+  const fallback = markdown(imgText, { onLink, chatLinks: true })
+  assert.equal(elementsOf(fallback).filter((n) => n.tag === 'figure').length, 0)
+  assert.deepEqual(fileLinksIn(fallback).map((a) => a.textContent), ['the pic', 'alt'])
+
+  const wrapped = 'first line\nsecond line'
+  assert.equal(markdown(wrapped, { soft: true }).map(shape).join(' '), 'p("first line"," ","second line")')
+  assert.equal(markdown(wrapped).map(shape).join(' '), 'p("first line",br(),"second line")')
+  assert.equal(markdown(wrapped, { soft: true }).map(shape).join(' '), 'p("first line"," ","second line")')
+
+  const note = '## Next steps\n\n- [ ] task #plan ![[shot.png]] [rel](../b.md)'
+  strip(note)
+  const chatNodes = markdown(note, { onLink, chatLinks: true })
+  assert.equal(elementsOf(chatNodes).find((n) => n.tag === 'h2').getAttribute('data-anchor'), null)
+  assert.equal(elementsOf(chatNodes).filter((n) => n.getAttribute('class') === 'md-tag').length, 0)
+  assert.equal(elementsOf(chatNodes).find((n) => n.tag === 'input').hasAttribute('disabled'), true)
+  assert.deepEqual(fileLinksIn(chatNodes).map((a) => a.textContent), ['shot.png'])
+
+  const previewNodes = markdown(note, {
+    onLink,
+    from: { root: 'vault', path: 'Notes/a.md' },
+    anchors: true,
+    vault: true,
+    onTask: () => {},
+    embed: (target) => {
+      const el = document.createElement('img')
+      el.setAttribute('data-embed', target)
+      return el
+    },
+  })
+  assert.equal(elementsOf(previewNodes).find((n) => n.tag === 'h2').getAttribute('data-anchor'), 'next-steps')
+  assert.deepEqual(elementsOf(previewNodes).filter((n) => n.getAttribute('class') === 'md-tag').map((n) => n.textContent), ['#plan'])
+  assert.equal(elementsOf(previewNodes).find((n) => n.tag === 'input').hasAttribute('disabled'), false)
+  assert.equal(elementsOf(previewNodes).filter((n) => n.getAttribute('data-embed') === 'shot.png').length, 1)
+  assert.deepEqual(fileLinksIn(previewNodes).map((a) => a.textContent), ['rel'])
 })

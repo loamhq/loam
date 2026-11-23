@@ -205,3 +205,11 @@ have never met.
   queued in a capture listener can run before the document router. A confirmed
   missing main thread replaces its current URL with Chats and keeps any app
   modal that was open there. See `docs/agent-profiles.md` and `docs/wide-panels.md`.
+- **Markdown parse cache keys** (`public/markdown.js`): `parse()` memoises by
+  both the input text and the link-recognition state (`linking`, whether
+  `linking.from` enables relative paths, and `vaultUrls` versioned in
+  `setVaultUrls`), so linkless callers (`imageRefs()` for reply attachments,
+  `strip()` for previews) never poison later `markdown(..., { onLink })`
+  renders. The other module flags (`imaging`, `softening`, `vaulting`,
+  `anchoring`) are read only during rendering. See `test/markdown.test.js` and
+  `docs/evidence/chat-wikilink-cache/README.md`.
