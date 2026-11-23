@@ -551,6 +551,11 @@ def make_handler(
     return Handler
 
 
+class _HTTPServer(ThreadingHTTPServer):
+    request_queue_size = 64
+    daemon_threads = True
+
+
 def serve(
     service: Service,
     port: int,
@@ -562,12 +567,10 @@ def serve(
     appear_default=lambda: appear_mod.DEFAULT,
 ) -> ThreadingHTTPServer:
     pdir = Path(plugin_dir) if plugin_dir else Path(__file__).resolve().parent.parent
-    server = ThreadingHTTPServer(
+    return _HTTPServer(
         (host, port),
         make_handler(service, pdir, appear_store=appear_store, remote=remote, reach=reach, appear_default=appear_default),
     )
-    server.daemon_threads = True
-    return server
 
 
 def main() -> int:

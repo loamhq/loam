@@ -391,6 +391,11 @@ def make_handler(
     return Handler
 
 
+class _HTTPServer(ThreadingHTTPServer):
+    request_queue_size = 64
+    daemon_threads = True
+
+
 def serve(
     store,
     tracker: FileTracker,
@@ -404,12 +409,10 @@ def serve(
     reach=lambda: "everywhere",
     default_days=lambda: links_mod.DEFAULT_DAYS,
 ) -> ThreadingHTTPServer:
-    server = ThreadingHTTPServer(
+    return _HTTPServer(
         (host, port),
         make_handler(store, tracker, links, collab, door, withme, reach=reach, default_days=default_days),
     )
-    server.daemon_threads = True
-    return server
 
 
 def main() -> int:
