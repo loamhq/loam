@@ -3,6 +3,7 @@
 Find each release's notes in `docs/releases/<version>.md`. Loam gives the
 notes to the person's agent, who decides what is worth sharing with them.
 
+- [0.2.33](docs/releases/0.2.33.md), 2026-11-23: New plugin places (`rail.action`, `thread.list.action`), switch settings, and conditional agent prompts; readable portrait image sizing in chat; optional separate data disk (`--data-dir`) in the installer; agent instruction display-name updates on rename; and bounded Git backup pack memory.
 - [0.2.32](docs/releases/0.2.32.md), 2026-11-22: Sharing any file and Comments & suggestions as two built-in plugins, Files home polish and Recent fixes, browser-tool screenshots kept in threads, wiki-links in chats fixed, and plugin timer stability.
 - [0.2.31](docs/releases/0.2.31.md), 2026-11-22: permanent non-colliding theme face slots for agents across all themes, Files home redesign (Your files, Agent files, Loam files, Recent, Quick actions), and thread turn stability across board-folder migration.
 - [0.2.30](docs/releases/0.2.30.md), 2026-11-22: API keys keeps only OpenAI and Google Gemini built in; optional local providers come from installed plugins or host configuration.
