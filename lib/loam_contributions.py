@@ -1124,11 +1124,22 @@ def live_units() -> dict[str, str]:
 
 
 def real_layer() -> bool:
-    """Identify the installed Yours layer before touching live units or rendering personas.
-    A scratch layer must reconcile only its own state.
+    """Identify the host install's real Yours layer before touching live systemd
+    units or rendering personas. A scratch LOAM_CONFIG, LOAM_PLUGINS_DIR,
+    LOAM_PLUGIN_SHIPPED, or LOAM_OFFLINE test environment must never mutate the
+    live user's units or personas.
     """
     import loam_plugins  # noqa: PLC0415
-    return loam_plugins.yours_root() == loam_plugins.YOURS_DEFAULT
+    if os.environ.get("LOAM_OFFLINE") == "1":
+        return False
+    if os.environ.get("LOAM_PLUGIN_SHIPPED"):
+        return False
+    cfg_env = os.environ.get("LOAM_CONFIG")
+    if cfg_env and Path(cfg_env).expanduser().resolve() != lc.INSTALL_CONFIG_FILE.resolve():
+        return False
+    if lc.CONFIG_FILE.resolve() != lc.INSTALL_CONFIG_FILE.resolve():
+        return False
+    return loam_plugins.yours_root().resolve() == lc.install_plugins_dir()
 
 
 def apply_units(dry: bool = False) -> list[dict]:

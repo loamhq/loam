@@ -44,6 +44,27 @@ def install_state_dir() -> Path:
     return (home / ".local" / "state" / "loam").resolve()
 
 
+def install_plugins_dir() -> Path:
+    """The host install's live Yours plugins folder (from /etc/loam/loam.toml or
+    the current user's default), independent of LOAM_CONFIG."""
+    try:
+        raw = tomllib.loads(INSTALL_CONFIG_FILE.read_text())
+    except OSError:
+        raw = {}
+    paths = raw.get("paths") if isinstance(raw.get("paths"), dict) else {}
+    if paths.get("plugins"):
+        return Path(str(paths["plugins"])).expanduser().resolve()
+    if paths.get("home"):
+        home = Path(str(paths["home"])).expanduser()
+    else:
+        user = raw.get("user")
+        try:
+            home = Path(pwd.getpwnam(user).pw_dir) if user else Path(pwd.getpwuid(os.getuid()).pw_dir)
+        except KeyError:
+            home = HOME
+    return (home / "plugins").resolve()
+
+
 def _load() -> dict:
     try:
         return tomllib.loads(CONFIG_FILE.read_text())

@@ -34,6 +34,7 @@ link = "[[Sam]]"
 timezone = "America/Los_Angeles"
 
 [paths]
+home = "{TMP}"
 root = "{AGENTS}"
 vault = "{VAULT}"
 workspaces = "{SPACES}"
@@ -52,6 +53,9 @@ system = "System"
     encoding="utf-8",
 )
 os.environ["LOAM_CONFIG"] = str(CONF)
+os.environ["LOAM_PLUGINS_DIR"] = str(PLUGINS)
+os.environ["LOAM_CONTRIBUTIONS_FOLLOW"] = "0"
+os.environ["LOAM_OFFLINE"] = "1"
 os.environ["LOAM_HOST_SETTINGS"] = str(TMP / "host-settings.json")
 
 sys.path.insert(0, str(AGENTS / "lib"))

@@ -322,6 +322,51 @@ marked = c.contributes_of({"settings.entry": [{"key": "remote", "label": "Reposi
                                               {"key": "every", "label": "Every", "default": "1h"}]}, None, [])["settings.entry"]
 check("setup is kept where given, absent elsewhere", (marked[0].get("setup"), "setup" in marked[1]), (True, False))
 
+# -- scratch LOAM_CONFIG / LOAM_OFFLINE must never touch live user units --------
+with tempfile.TemporaryDirectory() as tmp:
+    t = Path(tmp)
+    (t / "plugins").mkdir()
+    (t / "vault").mkdir()
+    (t / "state").mkdir()
+    (t / "units").mkdir()
+    sentinel_t = t / "units" / "loam-plugin-sentinel--tick.timer"
+    sentinel_s = t / "units" / "loam-plugin-sentinel--tick.service"
+    sentinel_t.write_text("[Timer]\nOnCalendar=daily\n", encoding="utf-8")
+    sentinel_s.write_text("[Service]\nExecStart=/bin/true\n", encoding="utf-8")
+    conf = t / "loam.toml"
+    conf.write_text(
+        f'[paths]\nroot = "{ROOT}"\nvault = "{t / "vault"}"\n'
+        f'plugins = "{t / "plugins"}"\nstate = "{t / "state"}"\n',
+        encoding="utf-8",
+    )
+    probe = (
+        "import json, sys; from pathlib import Path\n"
+        f"sys.path.insert(0, {str(ROOT / 'lib')!r})\n"
+        "import loam_config as lc, loam_contributions as c, loam_plugins as lp\n"
+        f"lc.USER_UNIT_DIR = Path({str(t / 'units')!r})\n"
+        "lp.set_on('quick-actions', True)\n"
+        "print(json.dumps({'real': c.real_layer(), 'units': c.apply_units(), 'apply': c.apply('test')}))\n"
+    )
+    clean_env = {k: v for k, v in subprocess.os.environ.items()
+                 if not k.startswith("LOAM_")}
+    clean_env["LOAM_CONFIG"] = str(conf)
+    out = subprocess.check_output([sys.executable, "-c", probe], env=clean_env, text=True)
+    res = __import__("json").loads(out.strip())
+    check("scratch LOAM_CONFIG without LOAM_PLUGINS_DIR: real_layer() is False",
+          res["real"] is False and res["units"] == [] and "skipped" in res["apply"], res)
+    check("...and live systemd plugin timer units are never removed",
+          sentinel_t.is_file() and sentinel_s.is_file())
+    # Also verify LOAM_OFFLINE=1 blocks real_layer() even with no LOAM_CONFIG
+    probe_off = (
+        "import sys; "
+        f"sys.path.insert(0, {str(ROOT / 'lib')!r}); "
+        "import loam_contributions as c; print(c.real_layer())"
+    )
+    off_env = {k: v for k, v in subprocess.os.environ.items() if not k.startswith("LOAM_")}
+    off_env["LOAM_OFFLINE"] = "1"
+    check("LOAM_OFFLINE=1 forces real_layer() to False",
+          subprocess.check_output([sys.executable, "-c", probe_off], env=off_env, text=True).strip() == "False")
+
 failed = results.count(False)
 print(f"\n{len(results) - failed}/{len(results)} passed")
 sys.exit(1 if failed else 0)
