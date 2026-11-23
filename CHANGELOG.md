@@ -3,6 +3,7 @@
 Find each release's notes in `docs/releases/<version>.md`. Loam gives the
 notes to the person's agent, who decides what is worth sharing with them.
 
+- [0.2.32](docs/releases/0.2.32.md), 2026-11-22: Sharing any file and Comments & suggestions as two built-in plugins, Files home polish and Recent fixes, browser-tool screenshots kept in threads, wiki-links in chats fixed, and plugin timer stability.
 - [0.2.31](docs/releases/0.2.31.md), 2026-11-22: permanent non-colliding theme face slots for agents across all themes, Files home redesign (Your files, Agent files, Loam files, Recent, Quick actions), and thread turn stability across board-folder migration.
 - [0.2.30](docs/releases/0.2.30.md), 2026-11-22: API keys keeps only OpenAI and Google Gemini built in; optional local providers come from installed plugins or host configuration.
 - [0.2.29](docs/releases/0.2.29.md), 2026-11-22: automatic plugin updates for settings-only additions and repaired `commons/` ownership on fresh installs and updates.
