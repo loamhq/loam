@@ -1086,10 +1086,8 @@ def main() -> int:
     for name in names:
         ws = AI_LABS / name
         cfg = json.loads((ws / "agent.json").read_text(encoding="utf-8"))
-        # The persona's own words are rendered on the id's name: a display
-        # name set on its profile (2026-11-13) is the app's, not its self's.
-        # The name it was made with when it has one (`self_name`, 2026-11-14).
-        display = loam_profile.self_name(name, cfg)
+        # Render instructions with the agent's current display name.
+        display = loam_profile.display_name(name, cfg)
 
         compare(findings, f"{name} settings.json",
                 ws / ".claude" / "settings.json",

@@ -2124,7 +2124,7 @@ def main() -> None:
         loam_map_migration.main()
         for name in loam_agents.archived(AI_LABS):
             workspace = AI_LABS / name
-            display = loam_profile.self_name(name, loam_agents.card(name, AI_LABS))
+            display = loam_profile.display_name(name, loam_agents.card(name, AI_LABS))
             render_persona_loading(workspace, display)
             loam_schedule.adopt_default(name)
         return
@@ -2188,9 +2188,9 @@ def main() -> None:
         _card = _card if isinstance(_card, dict) else {}
     except (OSError, ValueError):
         _card = {}
-    # Provision with the original name. Launchers tell the agent its current display name.
+    # Render instructions with the agent's current display name.
     import loam_profile  # noqa: PLC0415
-    own_name = loam_profile.self_name(name, _card)
+    own_name = loam_profile.display_name(name, _card)
     shape = skills_shape(workspace)
 
     print(f"agent={name} display={display} wake={wake} skills={shape}")

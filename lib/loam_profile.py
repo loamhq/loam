@@ -120,6 +120,37 @@ def sync_settings_model(workspace: Path, config: dict) -> bool:
     return True
 
 
+def sync_display_instructions(agent: str, workspace: Path, config: dict) -> bool:
+    """Update the opening ``You are <display>.`` line of ``CLAUDE.md`` and
+    re-render any existing Codex or Antigravity instructions file for this
+    agent. Never touches hand-written files (``soul.md``, ``config.md``).
+    A missing ``CLAUDE.md`` is left for the next provision."""
+    workspace = Path(workspace)
+    claude_path = workspace / "CLAUDE.md"
+    try:
+        text = claude_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    want_first = f"You are {display_name(agent, config)}."
+    first, sep, rest = text.partition("\n")
+    changed = False
+    if first.startswith("You are ") and first != want_first:
+        updated = want_first + sep + rest
+        tmp = claude_path.with_name(claude_path.name + ".tmp")
+        tmp.write_text(updated, encoding="utf-8")
+        os.replace(tmp, claude_path)
+        changed = True
+    import loam_codex  # noqa: PLC0415
+    if loam_codex.instructions_path(agent).is_file():
+        loam_codex.write_instructions(agent, workspace)
+        changed = True
+    import loam_antigravity  # noqa: PLC0415
+    if (workspace / loam_antigravity.RULES_FILE).is_file():
+        loam_antigravity.write_instructions(workspace)
+        changed = True
+    return changed
+
+
 def _host() -> dict:
     import loam_engineer  # noqa: PLC0415 -- stdlib-only, and the path's home
     try:
@@ -350,6 +381,8 @@ def update_agent(agent: str, patch: dict, check) -> dict:
         # chat started with no model reads settings.json, so the profile's
         # model is written there too, or that chat runs on another model.
         sync_settings_model(target.parent, new)
+        if "display" in patch:
+            sync_display_instructions(agent, target.parent, new)
     return new
 
 

@@ -392,9 +392,29 @@ async def main():
         check("from an unattended lane: refused before any call",
               not out.get("ok") and "conversation" in out.get("error", "")
               and "effort" not in card("iris"), out)
+        import loam_codex  # noqa: PLC0415
+        import loam_antigravity  # noqa: PLC0415
+        iris_ws = LABS / "iris"
+        (iris_ws / "CLAUDE.md").write_text("You are Iris.\n\n@soul.md\n\n@config.md\n", encoding="utf-8")
+        codex_path = loam_codex.write_instructions("iris", iris_ws)
+        agy_path = loam_antigravity.write_instructions(iris_ws)
+        soul_before = (iris_ws / "soul.md").read_text(encoding="utf-8")
+        config_before = (iris_ws / "config.md").read_text(encoding="utf-8")
         out = await cli(port, "set", "agent.display", "Violet", "--target", "iris")
         check("bin/settings set agent.display: read back",
               out.get("ok") and out.get("value") == "Violet", out)
+        claude_after = (iris_ws / "CLAUDE.md").read_text(encoding="utf-8")
+        codex_after = codex_path.read_text(encoding="utf-8")
+        agy_after = agy_path.read_text(encoding="utf-8")
+        check("renaming re-renders CLAUDE.md, Codex and Antigravity instructions at once",
+              claude_after.startswith("You are Violet.\n")
+              and "You are Iris." not in claude_after
+              and "You are Violet." in codex_after and "You are Iris." not in codex_after
+              and "You are Violet." in agy_after and "You are Iris." not in agy_after,
+              (claude_after[:40], codex_after[:120], agy_after[:120]))
+        check("renaming does not touch hand-written soul.md or config.md",
+              (iris_ws / "soul.md").read_text(encoding="utf-8") == soul_before
+              and (iris_ws / "config.md").read_text(encoding="utf-8") == config_before)
         status, body = await http(port, "GET", "/v1/files/list?root=spaces")
         space = next((row for row in body.get("entries", []) if row["path"] == "iris"), {})
         check("Files lists the new name at the original workspace address",
