@@ -67,10 +67,15 @@ export const AUTHORITY_NOTE = {
   runtime: 'The host keeps this. It is shown read-only.',
 }
 
+const VIEWABLE_NON_TEXT = new Set(['image', 'pdf', 'audio', 'video', 'html'])
+
 export function readOnlyReason(row) {
   if (capsOf(row).write) return ''
   if (row?.authority && AUTHORITY_NOTE[row.authority]) return AUTHORITY_NOTE[row.authority]
-  if (row?.authority === 'user' && row?.kind === 'file') return 'Only text files are edited here; this one can be downloaded.'
+  if (row?.authority === 'user' && row?.kind === 'file') {
+    if (VIEWABLE_NON_TEXT.has(viewOf(row))) return ''
+    return 'This file can’t be shown here; download it to open.'
+  }
   return ''
 }
 
@@ -2408,10 +2413,12 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, s
       ? segmentedControl({ label: 'File view', value: f.mode, choose: mode => files.setMode(mode),
           options: [{ id: 'preview', label: 'Preview' }, { id: 'edit', label: f.view === 'html' || !editable ? 'Source' : 'Edit' }] })
       : null
-  const reason = readOnlyReason(f.row)
+  const viewable = ['image', 'pdf', 'audio', 'video'].includes(f.view) || (f.view === 'html' && f.mode === 'preview')
+  const reason = viewable ? '' : readOnlyReason(f.row)
   const saved = editable ? saveState(f, changed) : null
   const saveWord = editable && saved ? h('span', { class: `fs-saved ${saved.tone}`, role: 'status', text: saved.word }) : null
-  const readOnly = !editable && !f.loading ? h('span', { class: 'fs-tag', title: reason || null, text: 'Read-only' }) : null
+  const readOnly = !editable && !f.loading && !viewable && !(f.view === 'other' && f.row?.authority === 'user')
+    ? h('span', { class: 'fs-tag', title: reason || null, text: 'Read-only' }) : null
   const modeLabel = f.mode === 'preview' ? (editable ? 'Edit' : 'Source') : 'Preview'
   const modeToggle = tabs ? h('button', { class: 'iconbtn fs-mode-toggle', title: modeLabel, 'aria-label': modeLabel, onclick: () => files.setMode(f.mode === 'preview' ? 'edit' : 'preview') }, f.mode === 'preview' ? icon.pencil(18) : icon.file(18)) : null
   // Live HTML has no title/path area, so its folder is reached through ⋯ too.

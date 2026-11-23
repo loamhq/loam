@@ -83,8 +83,11 @@ lf.cfg.VAULT = vault
 lf.cfg.roster = lambda: ["ada"]
 lf.cfg.agent_card = lambda aid: {"id": aid, "name": aid.title()}
 
-HOSTILE_HTML = b"""<!doctype html><html><head><meta charset="utf-8"><title>Interactive Mockup</title></head><body>
-<h1>Interactive Mockup</h1>
+HOSTILE_HTML = b"""<!doctype html><html><head><meta charset="utf-8"><title>Interactive Mockup</title>
+<link rel="stylesheet" href="https://fonts.example.test/style.css">
+<script src="https://cdn.example.test/widget.js"></script>
+</head><body>
+<h1 id="headline" class="ext-styled">Interactive Mockup</h1>
 <button id="tap" type="button">Tap me</button>
 <span id="count">0</span>
 <pre id="probe">running</pre>
@@ -95,11 +98,33 @@ document.getElementById('tap').addEventListener('click', () => {
   document.getElementById('count').textContent = String(n);
 });
 (async () => {
-  const res = { origin: window.origin, cookie: 'ok', storage: 'ok', parent: 'ok', fetchApi: 'ok', fetchSelf: 'ok', fetchSibling: 'ok' };
+  try { await document.fonts.ready; } catch {}
+  const fontLoaded = Array.from(document.fonts || []).some(f => f.family.replace(/['"]/g, '') === 'ExternalDemoFont' && f.status === 'loaded');
+  const cssColor = getComputedStyle(document.getElementById('headline')).color;
+  const res = {
+    origin: window.origin,
+    extScript: window.__extScriptLoaded || 'missing',
+    extCssColor: cssColor,
+    extFontLoaded: fontLoaded,
+    cookie: 'ok',
+    storage: 'ok',
+    parent: 'ok',
+    fetchApi: 'ok',
+    fetchSelf: 'ok',
+    fetchSibling: 'ok',
+    fetchParentSibling: 'ok',
+    fetchHttps: 'ok',
+  };
   try { const c = document.cookie; res.cookie = c || 'empty'; } catch (e) { res.cookie = 'blocked:' + e.name; }
   try { localStorage.setItem('k', 'v'); res.storage = 'allowed'; } catch (e) { res.storage = 'blocked:' + e.name; }
   try { const t = window.parent.document.title; res.parent = 'leaked:' + t; } catch (e) { res.parent = 'blocked:' + e.name; }
-  for (const [key, url] of [['fetchApi', '/api/canary'], ['fetchSelf', '/s/probe/api/file'], ['fetchSibling', './sibling-secret.txt']]) {
+  for (const [key, url] of [
+    ['fetchApi', '/api/canary'],
+    ['fetchSelf', '/s/probe/api/file'],
+    ['fetchSibling', './sibling-secret.txt'],
+    ['fetchParentSibling', '../sibling-secret.txt'],
+    ['fetchHttps', 'https://cdn.example.test/data.json'],
+  ]) {
     try {
       const r = await fetch(url);
       res[key] = 'status:' + r.status;
@@ -187,13 +212,22 @@ s_wm = WithMe(s_priv, own_tokens=lambda: {l["token"] for l in s_ln.all()}, door=
 s_srv = s_main.serve(s_st, s_tr, s_ln, s_co, s_dr, s_wm, s_port, reach=lambda: "everywhere")
 threading.Thread(target=s_srv.serve_forever, daemon=True).start()
 
-# Pre-seed an owner comment on diagram.png and create share links for HTML, SVG, PNG, ZIP, MD
+# Pre-seed an owner comment on diagram.png and create share links (named + unnamed group + unnamed view-only)
 c_svc.add({"id": "sam", "name": "Sam", "kind": "owner"}, "vault", "notes/diagram.png", {"kind": "comment", "text": "Owner note on diagram."})
 links_out = {}
-for fname, mode in [("mockup.html", "comment"), ("logo.svg", "view"), ("diagram.png", "comment"), ("bundle.zip", "view"), ("spec.md", "comment")]:
+for key, fname, mode, who_name in [
+    ("mockup.html", "mockup.html", "comment", "Robin"),
+    ("logo.svg", "logo.svg", "view", "Robin"),
+    ("diagram.png", "diagram.png", "comment", "Robin"),
+    ("bundle.zip", "bundle.zip", "view", None),
+    ("spec.md", "spec.md", "comment", "Robin"),
+    ("grp-png", "diagram.png", "comment", None),
+    ("grp-md", "spec.md", "comment", None),
+    ("named-md", "spec.md", "comment", "Taylor"),
+]:
     fid = s_tr.ensure("vault", f"notes/{fname}")
-    l, tok, pw = s_ln.create(fid, mode, "Robin", 30, "amber-river-42")
-    links_out[fname] = {"token": tok, "password": pw}
+    l, tok, pw = s_ln.create(fid, mode, who_name, 30, "amber-river-42")
+    links_out[key] = {"token": tok, "password": pw}
 
 class Front(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -272,9 +306,42 @@ async function openShare(page, token, password) {
 }
 
 try {
-  console.log('\n1. Real Chromium HTML & SVG active-content isolation')
+  console.log('\n1. Real Chromium HTML & SVG active-content isolation (with external https: font & script loads)')
   {
+    const woffBytes = await readFile(path.join(ROOT, 'plugins/sharing/assets/fonts/caprasimo-400-latin.woff2'))
+    const extRequests = []
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+    await ctx.route('https://*.example.test/**', (route) => {
+      const req = route.request()
+      const url = req.url()
+      extRequests.push({ url, referer: req.headers()['referer'] || '' })
+      if (url.endsWith('/style.css')) {
+        return route.fulfill({
+          status: 200,
+          contentType: 'text/css; charset=utf-8',
+          headers: { 'access-control-allow-origin': '*' },
+          body: `@font-face { font-family: 'ExternalDemoFont'; src: url('https://fonts.example.test/demo.woff2') format('woff2'); font-display: block; }
+.ext-styled { color: rgb(17, 136, 68); font-family: 'ExternalDemoFont', serif; }`,
+        })
+      }
+      if (url.endsWith('/demo.woff2')) {
+        return route.fulfill({
+          status: 200,
+          contentType: 'font/woff2',
+          headers: { 'access-control-allow-origin': '*' },
+          body: woffBytes,
+        })
+      }
+      if (url.endsWith('/widget.js')) {
+        return route.fulfill({
+          status: 200,
+          contentType: 'text/javascript; charset=utf-8',
+          headers: { 'access-control-allow-origin': '*' },
+          body: `window.__extScriptLoaded = 'ok-from-https';`,
+        })
+      }
+      return route.fulfill({ status: 200, contentType: 'application/json', body: '{"leaked":true}' })
+    })
     const page = await ctx.newPage()
     const pageErrors = []
     page.on('pageerror', e => pageErrors.push(e.message))
@@ -294,14 +361,16 @@ try {
     ok('HTML iframe sandbox omits allow-same-origin', sbAttr.includes('allow-scripts') && !sbAttr.includes('allow-same-origin'), sbAttr)
 
     const frame = page.frameLocator('iframe.sh-html')
-    await frame.locator('#probe').waitFor()
-    await page.waitForFunction(() => {
-      const f = document.querySelector('iframe.sh-html')
-      return Boolean(f)
-    })
-    // Wait until async fetch probes settle inside the sandboxed frame
-    await frame.locator('#probe').filter({ hasText: 'fetchSibling' }).waitFor()
+    await frame.locator('#probe').filter({ hasText: 'fetchHttps' }).waitFor()
     const probe = JSON.parse(await frame.locator('#probe').textContent())
+    ok('Sandboxed HTML loads external https: script', probe.extScript === 'ok-from-https', JSON.stringify(probe))
+    ok('Sandboxed HTML loads external https: stylesheet', probe.extCssColor === 'rgb(17, 136, 68)', JSON.stringify(probe))
+    ok('Sandboxed HTML loads external https: webfont', probe.extFontLoaded === true, JSON.stringify(probe))
+    const directExt = extRequests.filter(r => r.url.endsWith('/style.css') || r.url.endsWith('/widget.js'))
+    ok('Direct external https: requests send empty Referer and ZERO requests leak Loam host/token',
+      directExt.length >= 2 && directExt.every(r => r.referer === '') &&
+      extRequests.every(r => !r.referer.includes('127.0.0.1') && !r.referer.includes('/s/')),
+      JSON.stringify(extRequests))
     ok('Sandboxed HTML has opaque origin "null"', probe.origin === 'null', JSON.stringify(probe))
     ok('Sandboxed HTML document.cookie throws SecurityError', probe.cookie.startsWith('blocked:'), probe.cookie)
     ok('Sandboxed HTML localStorage throws SecurityError', probe.storage.startsWith('blocked:'), probe.storage)
@@ -309,6 +378,8 @@ try {
     ok('Sandboxed HTML fetch("/api/canary") blocked by CSP', probe.fetchApi.startsWith('blocked:'), probe.fetchApi)
     ok('Sandboxed HTML fetch("/s/.../api/file") blocked by CSP', probe.fetchSelf.startsWith('blocked:'), probe.fetchSelf)
     ok('Sandboxed HTML fetch("./sibling-secret.txt") blocked', probe.fetchSibling.startsWith('blocked:'), probe.fetchSibling)
+    ok('Sandboxed HTML fetch("../sibling-secret.txt") blocked', probe.fetchParentSibling.startsWith('blocked:'), probe.fetchParentSibling)
+    ok('Sandboxed HTML fetch("https://cdn.example.test/data.json") blocked by connect-src none', probe.fetchHttps.startsWith('blocked:'), probe.fetchHttps)
 
     // Harmless interactive mockup JS still works inside sandbox!
     await frame.locator('#tap').click()
@@ -317,12 +388,16 @@ try {
     // 1b. Direct top-level navigation to /s/<token>/frame ALSO stays in opaque null origin!
     const directPage = await ctx.newPage()
     await directPage.goto(`${ready.url}/s/${ready.links['mockup.html'].token}/frame`, { waitUntil: 'networkidle' })
-    await directPage.locator('#probe').filter({ hasText: 'fetchSibling' }).waitFor()
+    await directPage.locator('#probe').filter({ hasText: 'fetchHttps' }).waitFor()
     const dprobe = JSON.parse(await directPage.locator('#probe').textContent())
+    ok('Direct /frame navigation also loads external https: font & script', dprobe.extScript === 'ok-from-https' && dprobe.extFontLoaded === true, JSON.stringify(dprobe))
     ok('Direct /frame navigation also has opaque origin "null"', dprobe.origin === 'null', JSON.stringify(dprobe))
     ok('Direct /frame document.cookie blocked', dprobe.cookie.startsWith('blocked:'), dprobe.cookie)
     ok('Direct /frame localStorage blocked', dprobe.storage.startsWith('blocked:'), dprobe.storage)
     ok('Direct /frame fetch("/api/canary") blocked', dprobe.fetchApi.startsWith('blocked:'), dprobe.fetchApi)
+    ok('Direct /frame fetch("./sibling-secret.txt") blocked', dprobe.fetchSibling.startsWith('blocked:'), dprobe.fetchSibling)
+    ok('Direct /frame external https: requests leak ZERO Loam host/token in Referer',
+      extRequests.every(r => !r.referer.includes('127.0.0.1') && !r.referer.includes('/s/')), JSON.stringify(extRequests))
     await directPage.close()
 
     // 1c. Shared SVG rendered via <img> (never inline <svg>), zero script execution!
@@ -377,11 +452,41 @@ try {
     await page.locator('.cm-content').waitFor()
     ok('Markdown share page mounts calm CodeMirror editor when Comments is ON', true)
 
-    // 2c. ZIP download card (view-only link, Comments ON): shows Download card, zero comment composer
+    // 2c. Unnamed view-only ZIP link goes straight from password gate to Download card (NO name prompt!)
     await openShare(page, ready.links['bundle.zip'].token, ready.links['bundle.zip'].password)
     await page.locator('.sh-filecard').getByText('bundle.zip').waitFor()
+    ok('Unnamed view-only ZIP skips "What should we call you?" completely', (await page.getByText('What should we call you?').count()) === 0)
     ok('ZIP share page renders Download card', (await page.locator('.sh-dlprimary').count()) === 1)
     ok('View-only ZIP share page hides comment composer (zero dead controls)', (await page.locator('.dc-panel-in').count()) === 0)
+
+    // 2c2. Visitor name asked ONCE per browser across unnamed writable links; named link keeps its own name!
+    const nameCtx = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+    const namePage = await nameCtx.newPage()
+    await openShare(namePage, ready.links['grp-png'].token, ready.links['grp-png'].password)
+    await namePage.getByText('What should we call you?').waitFor()
+    ok('First unnamed comment link asks visitor name once', true)
+    await namePage.locator('.sh-gate-in').fill('Jordan')
+    await Promise.all([
+      namePage.waitForNavigation({ waitUntil: 'networkidle' }),
+      namePage.locator('.sh-gate-go').click(),
+    ])
+    await namePage.locator('img.sh-img').waitFor()
+    ok('First unnamed comment link opens as Jordan', (await namePage.locator('.sh-mebtn').getAttribute('title')) === 'Jordan')
+
+    // Second unnamed comment link in the SAME browser context goes straight to editor without asking again!
+    await openShare(namePage, ready.links['grp-md'].token, ready.links['grp-md'].password)
+    await namePage.locator('.cm-content').waitFor()
+    ok('Second unnamed comment link reuses remembered browser name with zero name prompt',
+      (await namePage.getByText('What should we call you?').count()) === 0 && (await namePage.locator('.sh-mebtn').getAttribute('title')) === 'Jordan')
+
+    // Named per-person link keeps its own name ("Taylor") without overwriting Jordan in localStorage!
+    await openShare(namePage, ready.links['named-md'].token, ready.links['named-md'].password)
+    await namePage.locator('.cm-content').waitFor()
+    const savedAfterNamed = await namePage.evaluate(() => localStorage.getItem('sh:visitor_name'))
+    ok('Named per-person link keeps Taylor and preserves remembered browser name Jordan',
+      (await namePage.locator('.sh-mebtn').getAttribute('title')) === 'Taylor' && savedAfterNamed === 'Jordan',
+      `saved=${savedAfterNamed}`)
+    await nameCtx.close()
 
     // 2d. Turn Comments OFF -> PNG & Markdown share pages become clean view-only with ZERO Comments UI!
     await fetch(`${ready.url}/__ctrl/comments/off`)
@@ -464,7 +569,26 @@ try {
       await page.route('**/x/sharing/**', (route) => {
         const u = new URL(route.request().url())
         if (u.pathname.endsWith('/config')) return route.fulfill({ json: { reach: 'everywhere', default_days: 30, collab: st.comments } })
-        if (u.pathname.endsWith('/shared')) return route.fulfill({ json: { files: [], collab: st.comments, owner: 'Sam' } })
+        if (u.pathname.endsWith('/shared')) {
+          return route.fulfill({
+            json: {
+              files: [
+                {
+                  id: 'f-md1', root: 'vault', path: 'Notes/plan.md', filename: 'plan.md',
+                  kind: 'markdown', label: 'Markdown', last: new Date(Date.now() - 180000).toISOString(),
+                  new: 1, open: 1, links: [{ id: 'l-1', on: true, mode: 'comment', effective_mode: st.comments ? 'comment' : 'view', name: 'Robin', people: [] }],
+                },
+                {
+                  id: 'f-img1', root: 'vault', path: 'Notes/pic.png', filename: 'pic.png',
+                  kind: 'image', label: 'Image', last: new Date(Date.now() - 240000).toISOString(),
+                  new: 0, open: 0, links: [{ id: 'l-2', on: true, mode: 'comment', effective_mode: st.comments ? 'comment' : 'view', name: null, people: ['Jordan'] }],
+                },
+              ],
+              collab: st.comments,
+              owner: 'Sam',
+            },
+          })
+        }
         if (u.pathname.endsWith('/withme')) return route.fulfill({ json: { items: [] } })
         if (u.pathname.endsWith('/file/links/password')) return route.fulfill({ json: { password: 'amber-river-42' } })
         if (u.pathname.endsWith('/file/links')) {
@@ -506,6 +630,29 @@ try {
         await page.waitForTimeout(500)
         const shareBtnCount = await page.locator('.sh-sharebtn').count()
         ok(`[${st.name} ${width}px] PNG Share button ${st.sharing ? 'present' : 'absent'}`, (shareBtnCount > 0) === st.sharing)
+        const roTagCount = await page.locator('.fs-tag').filter({ hasText: 'Read-only' }).count()
+        const roReasonCount = await page.locator('.fs-reason').count()
+        ok(`[${st.name} ${width}px] Viewable PNG hides "Read-only" badge and "Only text files…" reason`, roTagCount === 0 && roReasonCount === 0, `tags=${roTagCount} reasons=${roReasonCount}`)
+
+        if (st.sharing && width === 1440) {
+          // Verify Files > Shared rows at 1440 never truncate their second line with an ellipsis
+          await page.goto(`${app.url}/files/@sharing`, { waitUntil: 'domcontentloaded' })
+          await page.locator('.sh-sd-entry .fs-meta').first().waitFor()
+          const metaCheck = await page.locator('.sh-sd-entry .fs-meta').evaluateAll((els) =>
+            els.map(el => ({
+              text: el.textContent,
+              ws: getComputedStyle(el).whiteSpace,
+              to: getComputedStyle(el).textOverflow,
+              clipped: el.scrollWidth > el.clientWidth + 1,
+            }))
+          )
+          ok(`[${st.name} 1440px] Files > Shared row second lines never clip or ellipsis`,
+            metaCheck.length >= 2 && metaCheck.every(m => !m.clipped && m.to !== 'ellipsis'),
+            JSON.stringify(metaCheck))
+          await page.goto(`${app.url}/files/vault/Notes/pic.png`, { waitUntil: 'domcontentloaded' })
+          await page.locator('.fs-img').waitFor()
+          await page.waitForTimeout(400)
+        }
 
         if (st.sharing && width === 1440) {
           await page.locator('.sh-sharebtn').click()

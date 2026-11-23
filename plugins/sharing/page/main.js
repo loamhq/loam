@@ -102,8 +102,8 @@ export function activate(loam) {
     const fresh = f.new > 0 && !shared.seen.has(f.id)
     const meta = [
       fresh ? H('span', { class: 'sh-sd-new', text: `${f.new} new` }) : null,
-      fresh ? ' · ' : null,
-      [f.label, modeText, ago].filter(Boolean).join(' · '),
+      fresh && (modeText || ago) ? ' · ' : null,
+      [modeText, ago].filter(Boolean).join(' · '),
     ].filter(Boolean)
     const hadNew = f.new > 0
     return entry(rowOf(f), {

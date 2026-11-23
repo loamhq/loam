@@ -2815,13 +2815,25 @@ listener for immediate notification in an open page.
   "The host does not offer this file for download." Extending `metadataLoading`
   to all non-text views fixes cold opens across every file type.
 - **Active-content isolation on `/s/<token>`.** Shared HTML renders only inside
-  an `<iframe sandbox="allow-scripts">` with no `allow-same-origin` and a
-  restrictive CSP (`sandbox allow-scripts; default-src 'none'; ...`) so both
-  framed and direct `/frame` opens stay in an opaque `null` origin. Shared SVG
-  renders statically via `<img>` with `Content-Security-Policy: sandbox; default-src 'none'`
-  on `/raw`. `DOOR_HEADERS` in `bin/plugin-gateway` adds `range` (206 audio/video
-  seeking) and `x-loam-agent-name`.
-  recoverably into `<vault>/.trash/loam-cleanup-<stamp>/`, and migrates
-  `quick-actions` on or off directly by `folder_has_substance()` on the
-  configured inbox and daily folders. New installs seed only `About me.md`,
-  `<projects>/Loam/Start here.html`, `README.md`, and Loam files.
+  an `<iframe sandbox="allow-scripts allow-forms" referrerpolicy="no-referrer">`
+  with no `allow-same-origin` and a `/frame` CSP allowing `https:` for
+  `script-src`, `style-src`, `img-src`, `font-src`, and `media-src` while
+  keeping `connect-src 'none'`, `worker-src 'none'`, `frame-src 'none'`,
+  `object-src 'none'`, `base-uri 'none'`, `form-action 'none'`, and
+  `Referrer-Policy: no-referrer` so both framed and direct `/frame` opens stay
+  in an opaque `null` origin and real external-font/CDN mockups render intact.
+  Shared SVG renders statically via `<img>` with `Content-Security-Policy:
+  sandbox; default-src 'none'` on `/raw`. `DOOR_HEADERS` in
+  `bin/plugin-gateway` adds `range` (206 audio/video seeking) and
+  `x-loam-agent-name`.
+- **`loam_contributions.real_layer()` must never trust `LOAM_CONFIG` alone.**
+  When a test points `LOAM_CONFIG` at a scratch `loam.toml` whose
+  `paths.plugins` is a temp folder without also setting `paths.home`,
+  `loam_plugins.YOURS_DEFAULT` resolved from the fake `LOAM_CONFIG`, so
+  `yours_root() == YOURS_DEFAULT` returned `True` while `lc.USER_UNIT_DIR`
+  still pointed at the real `~/.config/systemd/user/`, letting `apply_units()`
+  remove live plugin timer units during `tests/run-all` and landings.
+  `real_layer()` now returns `False` whenever `LOAM_OFFLINE=1`,
+  `LOAM_PLUGIN_SHIPPED` is set, `LOAM_CONFIG` / `lc.CONFIG_FILE` differs from
+  `INSTALL_CONFIG_FILE`, or `yours_root()` does not match
+  `loam_config.install_plugins_dir()`.

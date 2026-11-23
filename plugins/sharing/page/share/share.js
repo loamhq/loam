@@ -12,6 +12,20 @@ const P = boot.prefix
 const HOME = /^https:\/\//.test(boot.home || '') ? boot.home : null
 const mount = document.getElementById('sh-root')
 const SHARE = { 'X-Loam-Share': '1' }
+const VISITOR_NAME_KEY = 'sh:visitor_name'
+
+function savedVisitorName() {
+  try { return (localStorage.getItem(VISITOR_NAME_KEY) || '').trim() } catch { return '' }
+}
+function saveVisitorName(v) {
+  try {
+    const clean = (v || '').trim()
+    if (clean) localStorage.setItem(VISITOR_NAME_KEY, clean)
+  } catch { /* private mode */ }
+}
+function clearVisitorName() {
+  try { localStorage.removeItem(VISITOR_NAME_KEY) } catch { /* private mode */ }
+}
 
 async function post(route, body) {
   const res = await fetch(`${P}/${route}`, {
@@ -70,7 +84,12 @@ function gate() {
     if (!input.value) { shake(card); input.focus(); return }
     btn.disabled = true
     btn.textContent = 'Opening…'
-    const r = await post('open', { password: input.value })
+    const payload = { password: input.value }
+    if (!boot.named && boot.mode !== 'view') {
+      const remembered = savedVisitorName()
+      if (remembered) payload.name = remembered
+    }
+    const r = await post('open', payload)
     if (r.ok) { card.classList.add('sh-gate-ok'); setTimeout(() => location.reload(), 240); return }
     btn.disabled = false
     btn.textContent = 'Open'
@@ -94,15 +113,22 @@ function gone() {
 
 // -- group link name prompt ---------------------------------------------------
 
-function askName() {
+async function askName() {
+  const remembered = !boot.named ? savedVisitorName() : ''
+  let initialErr = ''
+  if (remembered) {
+    const r = await post('api/name', { name: remembered })
+    if (r.ok) return location.reload()
+    if (r.status === 409 && r.data?.error) initialErr = r.data.error
+  }
   const input = h('input', {
     class: 'sh-gate-in', type: 'text', placeholder: 'Your name',
-    autocomplete: 'name', 'aria-label': 'Your name', maxlength: '60',
+    autocomplete: 'name', 'aria-label': 'Your name', maxlength: '60', value: remembered,
   })
   const btn = h('button', { class: 'sh-gate-go', type: 'submit' }, 'Continue')
   const msg = h('p', {
-    class: 'sh-gate-msg', role: 'status',
-    text: boot.collab ? 'Your comments show under this name. Asked once on this browser.' : 'Asked once on this browser.',
+    class: `sh-gate-msg${initialErr ? ' bad' : ''}`, role: 'status',
+    text: initialErr || 'Your comments show under this name. Asked once on this browser.',
   })
   const card = h('form', { class: 'sh-gate-card' },
     h('div', { class: 'sh-gate-who' }, face(boot.owner, 22), h('span', { text: `${boot.owner} shared this with you` })),
@@ -113,14 +139,17 @@ function askName() {
     if (!input.value.trim()) { shake(card); return }
     btn.disabled = true
     const r = await post('api/name', { name: input.value })
-    if (r.ok) return location.reload()
+    if (r.ok) {
+      if (!boot.named) saveVisitorName(input.value)
+      return location.reload()
+    }
     btn.disabled = false
     msg.textContent = r.data?.error || 'That did not work.'
     msg.classList.add('bad')
     shake(card)
   })
   put(mount, h('main', { class: 'sh-gate' }, card), made())
-  setTimeout(() => input.focus(), 50)
+  setTimeout(() => { input.focus(); if (remembered) input.select() }, 50)
 }
 
 // -- shared file page ---------------------------------------------------------
@@ -143,7 +172,8 @@ async function filePage() {
     return
   }
 
-  const name = info.me?.name || boot.name || ''
+  const anonymous = Boolean(info.me?.anonymous) || (!info.me?.name && !boot.name)
+  const name = anonymous ? '' : (info.me?.name || boot.name || '')
   const modeDesc = info.kind === 'markdown'
     ? { view: 'Can view', comment: 'Can comment and suggest', edit: 'Can edit' }[info.mode] || 'Can view'
     : { view: 'Can view', comment: 'Can view and comment' }[info.mode] || 'Can view'
@@ -156,22 +186,29 @@ async function filePage() {
   const agentBtn = h('button', {
     class: 'sh-iconbtn sh-agentbtn', type: 'button',
     title: 'Connect my agent', 'aria-label': 'Connect my agent',
-    onclick: () => openAgent(name, info),
+    onclick: () => openAgent(anonymous ? '' : name, info),
   }, icon('robot', 18))
 
   let menu = null
-  const meBtn = h('button', {
-    class: 'sh-mebtn', type: 'button', title: name, 'aria-label': `You: ${name}`,
-    onclick: () => toggleMe(),
-  }, face(name, 28))
+  const meBtn = anonymous
+    ? h('button', {
+        class: 'sh-iconbtn', type: 'button', title: 'Link options', 'aria-label': 'Link options',
+        onclick: () => toggleMe(),
+      }, icon('dots', 18))
+    : h('button', {
+        class: 'sh-mebtn', type: 'button', title: name, 'aria-label': `You: ${name}`,
+        onclick: () => toggleMe(),
+      }, face(name, 28))
   const meWrap = h('div', { class: 'sh-ddw sh-mewrap' }, meBtn)
 
   function toggleMe() {
     if (menu) { menu.remove(); menu = null; meWrap.classList.remove('open'); return }
     menu = h('div', { class: 'sh-menu sh-memenu', role: 'menu' },
-      h('div', { class: 'sh-mehead' },
-        face(name, 32),
-        h('div', {}, h('b', { text: name }), h('small', { text: modeDesc }))),
+      anonymous
+        ? h('div', { class: 'sh-mehead' }, h('div', {}, h('b', { text: 'Viewing link' }), h('small', { text: modeDesc })))
+        : h('div', { class: 'sh-mehead' },
+            face(name, 32),
+            h('div', {}, h('b', { text: name }), h('small', { text: modeDesc }))),
       h('button', { class: 'sh-mi', type: 'button', role: 'menuitem', onclick: forget },
         icon('x', 17),
         h('span', { class: 'sh-l' },
@@ -183,6 +220,7 @@ async function filePage() {
   document.addEventListener('mousedown', (e) => { if (menu && !meWrap.contains(e.target)) toggleMe() })
 
   async function forget() {
+    if (!boot.named && !anonymous) clearVisitorName()
     await post('forget', {})
     location.reload()
   }
@@ -347,10 +385,10 @@ async function openAgent(name, info) {
   agentDialog = h('div', { class: 'sh-dlg sh-agentdlg', role: 'dialog', 'aria-label': 'Connect my agent' },
     h('button', { class: 'sh-ib sh-dlg-x', type: 'button', 'aria-label': 'Close', onclick: close }, icon('x', 17)),
     h('div', { class: 'sh-dlg-head' },
-      h('span', { class: 'sh-agentface' }, face(name, 40)),
+      h('span', { class: 'sh-agentface' }, name ? face(name, 40) : icon('robot', 22)),
       h('div', {},
         h('h2', { text: 'Connect my agent' }),
-        h('p', { text: `It joins as ${name}’s agent and can ${canDesc}.` }))),
+        h('p', { text: name ? `It joins as ${name}’s agent and can ${canDesc}.` : `Your agent can ${canDesc}.` }))),
     body)
   scrim.append(agentDialog)
   document.body.append(scrim)

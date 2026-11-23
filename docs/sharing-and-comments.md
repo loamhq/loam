@@ -84,6 +84,16 @@ imports `page/share-collab.js` (`mountMarkdown` for Markdown, `mountPanel` for
 every other file type). When no collaboration plugin is active, Sharing serves
 view-only pages with zero collaboration scripts or controls.
 
+Visitor identity on `/s/<token>`:
+
+- **View-only links** (or any link when Comments is off): open straight from
+  the password gate to the file without asking for a name.
+- **Unnamed writable links** (`comment` or `edit`): ask for a display name
+  once per browser on that Loam (`localStorage`), reusing it across other
+  unnamed links on the same Loam (unless taken on that file).
+- **Named per-person links**: always sign in under the link's own name without
+  reading or overwriting the browser's remembered group name.
+
 ---
 
 ## Unified comment model
@@ -132,17 +142,24 @@ nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store`, and
 
 - **HTML (`.html`, `.htm`)**: rendered exclusively inside `<iframe
   sandbox="allow-scripts allow-forms" referrerpolicy="no-referrer"
-  src="/s/<token>/frame">`. The `/frame` response carries
+  src="/s/<token>/frame">`. The `/frame` response carries `Referrer-Policy:
+  no-referrer`, `X-Frame-Options: SAMEORIGIN`, and
   `Content-Security-Policy: sandbox allow-scripts allow-forms; default-src
-  'none'; script-src 'unsafe-inline' 'unsafe-eval' data: blob:; style-src
-  'unsafe-inline' data: blob:; img-src data: blob:; font-src data: blob:;
-  media-src data: blob:; connect-src 'none'; frame-src 'none'; object-src
-  'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'` and
-  `X-Frame-Options: SAMEORIGIN`. Omitting `allow-same-origin` guarantees an
-  opaque `null` origin both framed and on direct top-level navigation to
-  `/frame` (`document.cookie`, `localStorage`, `window.parent`, and every
-  `fetch`/`XHR` fail), while single-file interactive HTML mockups continue to
-  work. `/raw` for HTML always forces `application/octet-stream` download.
+  'none'; script-src 'unsafe-inline' 'unsafe-eval' https: data: blob:;
+  style-src 'unsafe-inline' https: data: blob:; img-src https: data: blob:;
+  font-src https: data: blob:; media-src https: data: blob:; connect-src
+  'none'; frame-src 'none'; object-src 'none'; worker-src 'none'; base-uri
+  'none'; form-action 'none'; frame-ancestors 'self'`. Omitting
+  `allow-same-origin` guarantees an opaque `null` origin both framed and on
+  direct top-level navigation to `/frame` (`document.cookie`, `localStorage`,
+  `window.parent`, and every `fetch`/`XHR` fail), while HTML mockups that load
+  external `https:` fonts, stylesheets, images, media, or CDN scripts render
+  intact without leaking a `Referer` header. `/raw` for HTML always forces
+  `application/octet-stream` download. (By comparison, the app's own live HTML
+  viewer in `app/src/content.js` serves multi-file vault HTML on a separate
+  `content.<domain>` origin with signed per-root URLs and `allow-same-origin`
+  on that separate origin; its static fallback `app/src/preview.js` is
+  scriptless with inline local assets only.)
 - **SVG (`.svg`)**: displayed in `<img src="/s/<token>/raw">` and served with
   `Content-Security-Policy: sandbox; default-src 'none'; style-src
   'unsafe-inline'; img-src data:` (no `allow-scripts`, no `allow-same-origin`),

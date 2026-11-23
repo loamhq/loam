@@ -292,7 +292,12 @@ test('read-only says why, from the host’s authority', () => {
   assert.match(readOnlyReason(row('vault', '15_CONVERSATIONS/x.md', { authority: 'transcripts' })), /Conversation records/)
   assert.match(readOnlyReason(row('spaces', 'agent/MEMORY.md', { authority: 'persona' })), /agent/)
   assert.match(readOnlyReason(row('system', 'Engineer/Role.md', { authority: 'runtime' })), /host keeps/)
-  assert.match(readOnlyReason(row('vault', 'pic.png')), /Only text/)
+  assert.equal(readOnlyReason(row('vault', 'pic.png')), '')
+  assert.equal(readOnlyReason(row('vault', 'report.pdf')), '')
+  assert.equal(readOnlyReason(row('vault', 'clip.mp3')), '')
+  assert.equal(readOnlyReason(row('vault', 'demo.mp4')), '')
+  assert.equal(readOnlyReason(row('vault', 'page.html', { capabilities: { read: true, download: true, write: false } })), '')
+  assert.match(readOnlyReason(row('vault', 'bundle.zip')), /download/i)
 })
 
 test('the roots, keyed by root, named by the host, with no seeded shortcuts and no count', () => {

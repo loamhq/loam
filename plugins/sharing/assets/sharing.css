@@ -110,7 +110,7 @@
 .sh-sd-face.grp, .sh-sd-face.more { color: var(--paper-ink-2, #4B4741); }
 .sh-sd-face.more { font-size: 10px; }
 .setrow.on .sh-sd-face, .setrow.on .sh-sd-dot { box-shadow: 0 0 0 2px var(--latte-control-selected, #D9C2A6); }
-.sh-sd-entry .fs-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sh-sd-entry .fs-meta, .sh-wm-entry .fs-meta { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
 .sh-sd-new { color: color-mix(in oklab, var(--signal-crema, #B4733A) 72%, var(--paper-ink, #1C1B19)); font-weight: 650; }
 .setrow.on .sh-sd-new { color: inherit; }
 .sh-sd-dot { position: absolute; top: -2px; right: -2px; width: 9px; height: 9px; border-radius: 50%; background: var(--signal-crema, #B4733A); box-shadow: 0 0 0 2px var(--paper-card, #E9E4DC); transition: transform .35s, opacity .35s; }

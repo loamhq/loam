@@ -15,15 +15,17 @@ from pathlib import Path
 # Strict Content-Security-Policy headers per delivery mode:
 # - HTML_FRAME_CSP: sandbox WITHOUT allow-same-origin -> opaque `null` origin
 #   both inside <iframe sandbox="allow-scripts allow-forms"> AND if opened directly!
-#   connect-src 'none' blocks all fetch/XHR/WS/beacon; default-src 'none' blocks
-#   external resources while allowing interactive single-file mockups (inline
-#   JS/CSS, data:/blob: images/fonts/media).
+#   Allows https: for script/style/font/image/media so real HTML mockups using
+#   Google Fonts or CDNs render intact, while connect-src 'none', frame-src 'none',
+#   object-src 'none', worker-src 'none', base-uri 'none', form-action 'none',
+#   and Referrer-Policy: no-referrer keep Loam, cookies, storage, parent, and
+#   sibling vault files unreachable.
 HTML_FRAME_CSP = (
     "sandbox allow-scripts allow-forms; default-src 'none'; "
-    "script-src 'unsafe-inline' 'unsafe-eval' data: blob:; "
-    "style-src 'unsafe-inline' data: blob:; "
-    "img-src data: blob:; font-src data: blob:; media-src data: blob:; "
-    "connect-src 'none'; frame-src 'none'; object-src 'none'; "
+    "script-src https: 'unsafe-inline' 'unsafe-eval' data: blob:; "
+    "style-src https: 'unsafe-inline' data: blob:; "
+    "img-src https: data: blob:; font-src https: data: blob:; media-src https: data: blob:; "
+    "connect-src 'none'; frame-src 'none'; object-src 'none'; worker-src 'none'; "
     "base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
 )
 
@@ -240,5 +242,6 @@ def download_response_meta(name: str) -> tuple[str, list[tuple[str, str]]]:
 def frame_response_meta() -> tuple[str, list[tuple[str, str]]]:
     return "text/html; charset=utf-8", [
         ("Content-Security-Policy", HTML_FRAME_CSP),
+        ("Referrer-Policy", "no-referrer"),
         ("X-Frame-Options", "SAMEORIGIN"),
     ]

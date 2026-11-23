@@ -412,11 +412,14 @@ class TestEnv:
             os.environ["LOAM_FILES_EVENTS"] = self._old_events
 
 
-def door_open(port: int, token: str, password: str) -> tuple[int, str, dict]:
+def door_open(port: int, token: str, password: str, *, name: str | None = None) -> tuple[int, str, dict]:
+    payload = {"password": password}
+    if name is not None:
+        payload["name"] = name
     st, hdrs, _raw, data = http_req(
         port, "POST", f"/door/{token}/open",
         headers={"X-Loam-Door": "1", "Host": "loam.example"},
-        body={"password": password},
+        body=payload,
     )
     cookie = ""
     sc = hdrs.get("set-cookie") or ""
@@ -603,6 +606,46 @@ def test_four_states_and_workflows(env: TestEnv):
     check("turning Comments off downgrades active comment link cleanly to view", (st, f_now["mode"], f_now["collab"]), (200, "view", False))
     env.comments_on = True
 
+    # -- Visitor identity: view-only skips name; group links reuse browser name; named links keep theirs --
+    st, _, _, c_zip = http_req(env.s_port, "POST", "/file/links", body={"root": "vault", "path": "notes/bundle.zip", "mode": "view"})
+    ztok, zpw = c_zip["link"]["url_path"].split("/")[-1], c_zip["password"]
+    st, zcookie, zopen = door_open(env.s_port, ztok, zpw)
+    check("unnamed view-only link skips name prompt (need=None)", (st, zopen["need"], zopen["name"]), (200, None, None))
+    st, _, zshell, _ = http_req(env.s_port, "GET", f"/door/{ztok}/",
+                                headers={"X-Loam-Door": "1", "Host": "loam.example", "Cookie": f"loam_share={zcookie}"})
+    check("unnamed view-only shell opens straight to file state", (st, '"state": "file"' in zshell.decode() or '"state":"file"' in zshell.decode()), (200, True))
+    st, _, _, zfile = http_req(env.s_port, "GET", f"/door/{ztok}/api/file",
+                               headers={"X-Loam-Door": "1", "Host": "loam.example", "Cookie": f"loam_share={zcookie}"})
+    check("unnamed view-only /api/file works anonymously", (st, zfile["filename"], zfile["me"].get("anonymous")), (200, "bundle.zip", True))
+
+    # Unnamed comment link #1 without remembered name asks for a name
+    st, _, _, c_grp1 = http_req(env.s_port, "POST", "/file/links", body={"root": "vault", "path": "notes/diagram.png", "mode": "comment"})
+    g1_tok, g1_pw = c_grp1["link"]["url_path"].split("/")[-1], c_grp1["password"]
+    st, g1_cookie, g1_open = door_open(env.s_port, g1_tok, g1_pw)
+    check("unnamed comment link without saved name asks name", (st, g1_open["need"]), (200, "name"))
+    st, _, g1_shell, _ = http_req(env.s_port, "GET", f"/door/{g1_tok}/",
+                                  headers={"X-Loam-Door": "1", "Host": "loam.example", "Cookie": f"loam_share={g1_cookie}"})
+    check("unnamed comment shell shows state=name before naming", (st, '"state": "name"' in g1_shell.decode() or '"state":"name"' in g1_shell.decode()), (200, True))
+
+    # Unnamed comment link #2 reuses browser's remembered name directly on /open!
+    st, _, _, c_grp2 = http_req(env.s_port, "POST", "/file/links", body={"root": "vault", "path": "notes/spec.md", "mode": "comment"})
+    g2_tok, g2_pw = c_grp2["link"]["url_path"].split("/")[-1], c_grp2["password"]
+    st, g2_cookie, g2_open = door_open(env.s_port, g2_tok, g2_pw, name="Jordan")
+    check("second unnamed comment link reuses remembered name on /open", (st, g2_open["need"], g2_open["name"]), (200, None, "Jordan"))
+    st, _, _, g2_file = http_req(env.s_port, "GET", f"/door/{g2_tok}/api/file",
+                                 headers={"X-Loam-Door": "1", "Host": "loam.example", "Cookie": f"loam_share={g2_cookie}"})
+    check("second unnamed comment link opens directly as Jordan", (st, g2_file["me"]["name"]), (200, "Jordan"))
+
+    # If the remembered name is already taken on that file, /open falls back cleanly to need="name"
+    st, _, g2_taken = door_open(env.s_port, g2_tok, g2_pw, name="Jordan")
+    check("taken remembered name on /open falls back to need=name", (st, g2_taken["need"], g2_taken["name"]), (200, "name", None))
+
+    # Named per-person link always keeps its own name even if browser sends a remembered name
+    st, _, _, c_named = http_req(env.s_port, "POST", "/file/links", body={"root": "vault", "path": "notes/spec.md", "mode": "comment", "name": "Taylor"})
+    ntok, npw = c_named["link"]["url_path"].split("/")[-1], c_named["password"]
+    st, ncookie, nopen = door_open(env.s_port, ntok, npw, name="Jordan")
+    check("named per-person link ignores remembered browser name", (st, nopen["need"], nopen["name"]), (200, None, "Taylor"))
+
 
 # -- 3. Rename, move, delete, restore, copy lifecycle -----------------------
 
@@ -692,8 +735,16 @@ def test_security_and_containment(env: TestEnv):
     csp = hdrs.get("content-security-policy", "")
     check("HTML /frame returns 200 text/html", (st, hdrs["content-type"]), (200, "text/html; charset=utf-8"))
     check("HTML /frame CSP has sandbox WITHOUT allow-same-origin", ("sandbox allow-scripts" in csp and "allow-same-origin" not in csp), True)
-    check("HTML /frame CSP has connect-src 'none' & frame-ancestors 'self'", ("connect-src 'none'" in csp and "frame-ancestors 'self'" in csp), True)
-    check("HTML /frame has X-Frame-Options SAMEORIGIN + nosniff", (hdrs["x-frame-options"], hdrs["x-content-type-options"]), ("SAMEORIGIN", "nosniff"))
+    check("HTML /frame CSP allows https: for script/style/img/font/media",
+          all(f"{d} " in csp and "https:" in csp.split(f"{d} ")[1].split(";")[0]
+              for d in ("script-src", "style-src", "img-src", "font-src", "media-src")), True)
+    check("HTML /frame CSP locks down connect/frame/object/worker/base/form",
+          all(part in csp for part in ("connect-src 'none'", "frame-src 'none'", "object-src 'none'",
+                                       "worker-src 'none'", "base-uri 'none'", "form-action 'none'",
+                                       "frame-ancestors 'self'")), True)
+    check("HTML /frame has Referrer-Policy no-referrer + X-Frame-Options SAMEORIGIN + nosniff",
+          (hdrs.get("referrer-policy"), hdrs["x-frame-options"], hdrs["x-content-type-options"]),
+          ("no-referrer", "SAMEORIGIN", "nosniff"))
 
     st, hdrs_raw, _, _ = http_req(env.s_port, "GET", f"/door/{htok}/raw",
                                   headers={"X-Loam-Door": "1", "Host": "loam.example", "Cookie": f"loam_share={hcookie}"})

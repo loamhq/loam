@@ -212,10 +212,17 @@ class Door:
                     return _json(409, {"error": f"You are {session['v']} on this link; a name, once given, stays."})
                 return self._name(link, body, headers, prefix, root, fpath)
             if not visitor:
-                if rest.startswith("/api/"):
-                    return _json(409, {"error": "say your name first", "need": "name"})
-                return self._not_found(prefix)
-            who = self._who(link, visitor, eff_mode, key=_vkey(link, session))
+                if eff_mode == "view":
+                    who = {
+                        **self._who(link, "Viewer", "view", key=_vkey(link, session) or "viewer"),
+                        "anonymous": True,
+                    }
+                else:
+                    if rest.startswith("/api/"):
+                        return _json(409, {"error": "say your name first", "need": "name"})
+                    return self._not_found(prefix)
+            else:
+                who = self._who(link, visitor, eff_mode, key=_vkey(link, session))
         else:
             if rest.startswith("/api/"):
                 return _json(401, {"error": "this link needs its password"})
@@ -411,15 +418,31 @@ class Door:
             return _json(429, {"error": refusal})
         if not ok:
             return _json(403, {"error": "That password does not open this link."})
-        value, age = self.links.session_cookie(link, link["name"])
-        if link["name"]:
-            self.links.join(link["id"], link["name"])
+        resolved_name = link["name"]
+        vid = None
+        if resolved_name:
+            self.links.join(link["id"], resolved_name)
+        elif eff_mode == "view":
+            vid = "b" + secrets.token_hex(5)
+        elif isinstance(args.get("name"), str) and args["name"].strip():
+            # Reuse the visitor's remembered browser name across group links on
+            # this Loam if valid and available on this link.
+            try:
+                candidate = links_mod.clean_name(args["name"])
+            except ShareError:
+                candidate = None
+            if candidate and not self._taken(link, candidate, root, fpath):
+                vid = "b" + secrets.token_hex(5)
+                self.links.join(link["id"], candidate, vid)
+                resolved_name = candidate
+        value, age = self.links.session_cookie(link, resolved_name, vid)
+        need = None if (resolved_name or eff_mode == "view") else "name"
         info = self._file_info(root, fpath, filename, kind)
         return _json(
             200,
             {
                 "ok": True,
-                "need": None if link["name"] else "name",
+                "need": need,
                 "protocol": PROTOCOL,
                 "title": info["title"],
                 "filename": info["filename"],
@@ -429,7 +452,7 @@ class Door:
                 "owner": self.owner_name(),
                 "mode": eff_mode,
                 "collab": collab_on,
-                "name": link["name"],
+                "name": resolved_name,
                 "days": link["days"],
             },
             [("Set-Cookie", _cookie_header(value, age, prefix))],
@@ -478,7 +501,7 @@ class Door:
         owner = self.owner_name()
         if not session:
             state = "gate"
-        elif not (link["name"] or session.get("v")):
+        elif eff_mode != "view" and not (link["name"] or session.get("v")):
             state = "name"
         else:
             state = "file"
@@ -629,7 +652,7 @@ def _name_key(name: str) -> str:
 def _vkey(link, session) -> str:
     if link["name"]:
         return links_mod.slug(link["name"])
-    return (session or {}).get("i") or links_mod.slug((session or {}).get("v") or "")
+    return (session or {}).get("i") or links_mod.slug((session or {}).get("v") or "") or "viewer"
 
 
 def _made(home: str) -> str:

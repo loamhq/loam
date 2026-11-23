@@ -83,7 +83,7 @@ export function createWithMe({ base, root, schedule, toast, side, registry, agen
     if (d.state === 'password') return 'Its password no longer opens it'
     if (d.state === 'version') return 'That Loam is a version this one can’t open'
     const whose = d.owner ? `${d.owner}’s Loam` : d.host
-    return [whose, d.label || null, MODE[d.mode] || 'View'].filter(Boolean).join(' · ')
+    return [whose, MODE[d.mode] || 'View'].filter(Boolean).join(' · ')
   }
 
   function row(d, { entry, go, leaving, H = h }) {
