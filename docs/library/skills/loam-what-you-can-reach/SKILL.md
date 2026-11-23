@@ -70,9 +70,10 @@ section, use `do keys.project.set` with `provider/project` as the target
 when the owner gives you the token. Deleting a thread or ending a session
 waits for their word, and never happens from a wake.
 
-**Images in a reply.** Put `![a few words](path)` on a line of its own, a
-picture in the vault or the workspaces, and it shows in your message; up to
-three. With the Images plugin on, use its `generate_image` MCP tool on any
+**Images in a reply.** Put `![a few words](path)` on a line of its own — a
+picture in the vault, a workspace, `/tmp`, or a screenshot path returned by
+the browser tool — and it shows in your message; up to three. With the Images
+plugin on, use its `generate_image` MCP tool on any
 provider. It uses the installation's OpenAI or Google Gemini API key. With
 Images off, Codex and Antigravity can use their subscription's image tools.
 

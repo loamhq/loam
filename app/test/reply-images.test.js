@@ -129,11 +129,16 @@ test('a file that cannot be read becomes a calm frame, and a tap does nothing', 
 })
 
 test('a legacy temporary reference shows its caption without requesting the old path', () => {
-  const { nodes } = render('![Dashboard preview](/tmp/probe/gone.png)', { attachments: [] })
-  assert.equal(byClass(nodes, 'known-missing').length, 1)
-  assert.equal(byClass(nodes, 'reply-image-missing')[0].textContent, 'Image no longer available')
-  assert.equal(byClass(nodes, 'reply-caption')[0].textContent, 'Dashboard preview')
-  assert.ok(!deep(nodes).some((n) => n.tag === 'img'))
+  for (const [caption, path] of [
+    ['Dashboard preview', '/tmp/probe/gone.png'],
+    ['Browser shot', '/var/lib/loam/browser/page-gone.png'],
+  ]) {
+    const { nodes } = render(`![${caption}](${path})`, { attachments: [] })
+    assert.equal(byClass(nodes, 'known-missing').length, 1)
+    assert.equal(byClass(nodes, 'reply-image-missing')[0].textContent, 'Image no longer available')
+    assert.equal(byClass(nodes, 'reply-caption')[0].textContent, caption)
+    assert.ok(!deep(nodes).some((n) => n.tag === 'img'))
+  }
 })
 
 test('a completed image survives replacing the streaming frame and redrawing', () => {

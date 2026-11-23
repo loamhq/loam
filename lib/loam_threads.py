@@ -21,6 +21,7 @@ module usable by bin/thread without the broker's environment.
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import json
 import os
@@ -41,6 +42,7 @@ import loam_thread_files as thread_files
 VAULT = Path(os.environ.get("LOAM_VAULT") or lc.VAULT)
 AI_LABS = Path(os.environ.get("LOAM_AI_LABS") or lc.WORKSPACES)
 STATE = Path(os.environ.get("LOAM_THREADS_STATE") or lc.STATE / "threads")
+BROWSER_OUTPUT = Path(os.environ.get("LOAM_BROWSER_OUTPUT") or lc.BROWSER_OUTPUT)
 
 CONVERSATIONS = lc.vault_folder("conversations")
 GENERAL_ID = "general"
@@ -408,32 +410,88 @@ def _image_reference(raw: str) -> Path | None:
     return VAULT / raw
 
 
-def _image_location(path: Path) -> tuple[str, Path, list[str]] | None:
-    """The allowed sources for an explicitly posted image."""
+def _strip_markdown_code(text: str) -> str:
+    """Replace fenced code blocks and inline backtick code spans with spaces so
+    examples like `` `![caption](path.png)` `` are not treated as image refs."""
+    if "`" not in text and "~" not in text:
+        return text
+    lines = text.split("\n")
+    out_lines: list[str] = []
+    fence_char = ""
+    fence_len = 0
+    for line in lines:
+        if fence_char:
+            stripped = line.lstrip(" ")
+            indent = len(line) - len(stripped)
+            if (indent <= 3 and stripped.startswith(fence_char * fence_len)
+                    and stripped.rstrip(" \t").strip(fence_char) == ""):
+                fence_char = ""
+                fence_len = 0
+            out_lines.append("")
+            continue
+        m = re.match(r"^[ ]{0,3}(`{3,}|~{3,})(.*)$", line)
+        if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+            fence_char = m.group(1)[0]
+            fence_len = len(m.group(1))
+            out_lines.append("")
+            continue
+        out_lines.append(line)
+    masked = "\n".join(out_lines)
+    if "`" not in masked:
+        return masked
+    buf: list[str] = []
+    i = 0
+    n = len(masked)
+    while i < n:
+        if masked[i] != "`":
+            buf.append(masked[i])
+            i += 1
+            continue
+        j = i
+        while j < n and masked[j] == "`":
+            j += 1
+        ticks = masked[i:j]
+        end = masked.find(ticks, j)
+        while end != -1 and ((end > 0 and masked[end - 1] == "`")
+                             or (end + len(ticks) < n and masked[end + len(ticks)] == "`")):
+            end = masked.find(ticks, end + 1)
+        if end != -1 and "\n\n" not in masked[j:end]:
+            buf.append(" " * (end + len(ticks) - i))
+            i = end + len(ticks)
+        else:
+            buf.append(ticks)
+            i = j
+    return "".join(buf)
+
+
+def _image_location_checked(path: Path) -> tuple[tuple[str, Path, list[str]] | None, str | None]:
+    """The allowed source for an explicitly posted image, or why it was refused."""
     import loam_files as files  # noqa: PLC0415
     if path.suffix.lower() not in IMAGE_TYPES:
-        return None
+        return None, None
     if path.is_relative_to(VAULT / CONVERSATIONS):
-        return None
+        return None, "inside the conversations folder"
     if path.is_relative_to(VAULT):
         root, base = "vault", VAULT
     elif path.is_relative_to(AI_LABS):
         root, base = "spaces", AI_LABS
+    elif path.is_relative_to(BROWSER_OUTPUT):
+        root, base = "local", BROWSER_OUTPUT
     elif path.is_relative_to(lc.JOBS):
         job = path.relative_to(lc.JOBS).parts
         if len(job) < 3 or job[1] != "captures":
-            return None
+            return None, "outside the allowed image folders"
         root, base = "local", lc.JOBS
     elif path.is_relative_to("/tmp"):
         root, base = "local", Path("/tmp")
     else:
-        return None
+        return None, "outside the allowed image folders"
     try:
         parts = files.parse_path(str(path.relative_to(base)))
     except files.FilesError:
-        return None
+        return None, "invalid image path"
     if not parts:
-        return None
+        return None, "invalid image path"
     agents = None
     if root == "spaces":
         import loam_agents  # noqa: PLC0415
@@ -441,51 +499,86 @@ def _image_location(path: Path) -> tuple[str, Path, list[str]] | None:
     for i, part in enumerate(parts):
         if root == "spaces" and i > 0 and part == "scratch":
             continue
+        if base == Path("/tmp"):
+            if files.SECRET_NAME.search(part):
+                return None, "in a hidden or private path"
+            continue
         if not files.visible(root, parts[:i], part, agents):
-            return None
-    return root, base, parts
+            return None, "in a hidden or private path"
+    return (root, base, parts), None
+
+
+def _image_location(path: Path) -> tuple[str, Path, list[str]] | None:
+    """The allowed sources for an explicitly posted image."""
+    return _image_location_checked(path)[0]
 
 
 def _open_image(path: Path) -> tuple[int, os.stat_result, str, str]:
     import loam_files as files  # noqa: PLC0415
-    location = _image_location(path)
+    location, reason = _image_location_checked(path)
     if location is None:
-        raise OSError("image outside the allowed sources")
+        raise OSError(reason or "image outside the allowed sources")
     root, base, parts = location
     fd, info = files.open_regular_at(base, parts)
-    if info.st_size > REPLY_IMAGE_BYTES or (root == "local" and info.st_uid != os.getuid()):
+    allowed_uids = {os.getuid()}
+    if base == BROWSER_OUTPUT:
+        try:
+            allowed_uids.add(os.stat(base, follow_symlinks=False).st_uid)
+        except OSError:
+            pass
+    if info.st_size > REPLY_IMAGE_BYTES:
         os.close(fd)
-        raise OSError("image is oversized or belongs to another user")
+        raise OSError("larger than the 40 MB image limit")
+    if root == "local" and info.st_uid not in allowed_uids:
+        os.close(fd)
+        raise OSError("owned by another user")
     return fd, info, root, str(path if root == "local" else path.relative_to(base))
 
 
-def _image_file(raw: str) -> dict | None:
+def _describe_image_error(exc: OSError) -> str:
+    if isinstance(exc, FileNotFoundError):
+        return "file not found"
+    if isinstance(exc, (IsADirectoryError, NotADirectoryError)):
+        return "not a regular file"
+    if isinstance(exc, PermissionError):
+        return "permission denied"
+    if exc.errno == errno.ELOOP:
+        return "symbolic links are not allowed"
+    return str(exc) or "could not be read"
+
+
+def _image_file_checked(raw: str) -> tuple[dict | None, str | None]:
     path = _image_reference(raw)
-    if path is None:
-        return None
+    if path is None or path.suffix.lower() not in IMAGE_TYPES:
+        return None, None
     try:
         fd, info, root, rel = _open_image(path)
-    except OSError:
-        return None
+    except OSError as exc:
+        return None, _describe_image_error(exc)
     os.close(fd)
     out = {"path": rel, "root": root, "name": path.name,
            "type": IMAGE_TYPES[path.suffix.lower()], "size": info.st_size}
     dims = image_size(path)
     if dims:
         out["width"], out["height"] = dims
-    return out
+    return out, None
 
 
-def reply_images(text: str) -> tuple[str, list[dict]]:
-    """The images a reply shows: ``(text, attachments)``. At most
-    REPLY_IMAGES_MAX files, each once, every destination that named it in
-    its ``refs``. The text comes back as it was: each reference is where
-    its image is drawn."""
+def _image_file(raw: str) -> dict | None:
+    return _image_file_checked(raw)[0]
+
+
+def reply_images_checked(text: str) -> tuple[str, list[dict], list[dict]]:
+    """Like ``reply_images``, plus any local image references that could not be
+    kept (within the ``REPLY_IMAGES_MAX`` budget), each with ``ref``, ``path``
+    and ``reason``."""
     if not text or "![" not in text:
-        return text, []
+        return text, [], []
     found: list[dict] = []
     by_file: dict[tuple[str, str], dict] = {}
-    for m in IMAGE_REF_RE.finditer(text):
+    unkept: list[dict] = []
+    seen_unkept: set[str] = set()
+    for m in IMAGE_REF_RE.finditer(_strip_markdown_code(text)):
         ref = m.group(2).strip()
         known = next((f for f in found if ref in f["refs"]), None)
         if known is not None:
@@ -497,8 +590,13 @@ def reply_images(text: str) -> tuple[str, list[dict]]:
             if f is not None and (f["root"], f["path"]) in by_file:
                 by_file[(f["root"], f["path"])]["refs"].append(ref)
             continue
-        f = _image_file(ref)
+        f, reason = _image_file_checked(ref)
         if f is None:
+            if reason is not None and ref not in seen_unkept:
+                seen_unkept.add(ref)
+                resolved = _image_reference(ref)
+                unkept.append({"ref": ref, "path": str(resolved) if resolved else ref,
+                               "reason": reason})
             continue
         key = (f["root"], f["path"])
         if key in by_file:
@@ -510,7 +608,29 @@ def reply_images(text: str) -> tuple[str, list[dict]]:
         f["refs"] = [ref]
         by_file[key] = f
         found.append(f)
+    return text, found, unkept
+
+
+def reply_images(text: str) -> tuple[str, list[dict]]:
+    """The images a reply shows: ``(text, attachments)``. At most
+    REPLY_IMAGES_MAX files, each once, every destination that named it in
+    its ``refs``. The text comes back as it was: each reference is where
+    its image is drawn."""
+    text, found, _ = reply_images_checked(text)
     return text, found
+
+
+def unkept_image_note(msg_id: str, unkept: list[dict]) -> str:
+    """Internal note to a persona when one or more images in its reply could not
+    be copied into the thread's attachment store."""
+    items = "\n".join(f"- {u['ref']} ({u['reason']})" for u in unkept)
+    word = "an image" if len(unkept) == 1 else f"{len(unkept)} images"
+    return (
+        f"[Loam: {word} in your message ({msg_id}) could not be kept and will "
+        f"not show for {lc.OWNER_NAME}:\n{items}\n"
+        f"Put the image in the vault, your workspace, /tmp, or take a fresh "
+        f"browser screenshot (which saves to {BROWSER_OUTPUT}), then share it again.]"
+    )
 
 
 def attachment_path(a: dict) -> str:
@@ -903,7 +1023,8 @@ def append(thread_id: str, author: str, text: str, kind: str = "message",
 
 
 def append_once(thread_id: str, author: str, text: str, kind: str = "message",
-                did: list[dict] | None = None, **extra) -> tuple[dict, bool]:
+                did: list[dict] | None = None, *, strict_images: bool = False,
+                **extra) -> tuple[dict, bool]:
     """Atomically find or file a keyed message under the thread's existing lock."""
     if kind not in KINDS:
         raise ThreadError(400, f"`kind` is one of {', '.join(KINDS)}")
@@ -935,13 +1056,23 @@ def append_once(thread_id: str, author: str, text: str, kind: str = "message",
                "kind": kind, "text": text.strip(), "did": did or [], **extra}
         if author != "system" and not is_owner(author) and msg.get("attachments"):
             saved = []
+            created: list[Path] = []
             for attachment in msg["attachments"]:
                 if not attachment.get("refs"):
                     saved.append(attachment)
                     continue
                 try:
-                    saved.append(_save_reply_image(attachment, msg["at"][:10]))
-                except OSError:
+                    saved.append(_save_reply_image(attachment, msg["at"][:10], created=created))
+                except OSError as exc:
+                    if strict_images:
+                        for target in created:
+                            target.unlink(missing_ok=True)
+                        ref = (attachment.get("refs") or [attachment.get("path") or ""])[0]
+                        raise ThreadError(
+                            400,
+                            f"Could not keep image in this post: {ref} "
+                            f"({_describe_image_error(exc)})",
+                        ) from None
                     saved.append({**attachment, "missing": True})
             msg["attachments"] = saved
         with open(path, "a", encoding="utf-8") as fh:
@@ -1079,7 +1210,7 @@ def backfill_reply_images(thread_id: str, *, dry_run: bool = False) -> list[tupl
 
 def migrate_reply_images() -> dict | None:
     """The thread writer's one-time upgrade of older image references."""
-    name = "reply-images-v1.json"
+    name = "reply-images-v2.json"
     if _state_path(name).is_file():
         return None
     changed, errors = {}, {}

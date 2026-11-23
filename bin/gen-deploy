@@ -229,6 +229,33 @@ def ensure_static_roots(dry: bool) -> None:
                     os.chown(d, uid, gid)
 
 
+def ensure_browser_output_dir(dry: bool) -> None:
+    """Shared directory bind-mounted into loam-browser for screenshots and
+    snapshots. Owned by the container's remapped `node` user and world-readable
+    (0755) so the broker and every agent lane can read its files directly."""
+    out = dep.BROWSER_OUTPUT
+    uid, gid = dep.browser_output_owner()
+    parent = out.parent
+    if not parent.exists():
+        print(f"  {'would create' if dry else 'created'} {parent}")
+        if not dry:
+            parent.mkdir(parents=True, mode=0o755, exist_ok=True)
+            os.chmod(parent, 0o755)
+    if not out.exists():
+        print(f"  {'would create' if dry else 'created'} {out} ({uid}:{gid})")
+        if not dry:
+            out.mkdir(mode=0o755)
+            os.chown(out, uid, gid)
+            os.chmod(out, 0o755)
+        return
+    st = os.stat(out)
+    if st.st_uid != uid or st.st_gid != gid or (st.st_mode & 0o777) != 0o755:
+        print(f"  {'would chown/chmod' if dry else 'chowned/chmodded'} {out} ({uid}:{gid}, 0755)")
+        if not dry:
+            os.chown(out, uid, gid)
+            os.chmod(out, 0o755)
+
+
 def wait_for_login() -> None:
     """Leave the claim page reachable until Authelia can accept sign-ins."""
     url = f"http://127.0.0.1:{dep.AUTHELIA_PORT}/api/health"
@@ -266,6 +293,7 @@ def generate(dry: bool) -> int:
     validate_sudoers(files[dep.SUDOERS])
     validate_authelia(files[dep.AUTHELIA_CONFIG])
     ensure_static_roots(dry)
+    ensure_browser_output_dir(dry)
     warn_unresolved()
     caddy = files[dep.CADDYFILE]
     switching_claim = (dep.CADDYFILE.exists()

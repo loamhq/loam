@@ -186,6 +186,7 @@ def exercise_claim_edge(unclaimed: str, claimed: str) -> None:
                         sight_wall_missing=lambda: [], inbound_wall_status=lambda: ""), \
          patch.multiple(gen, ensure_access_log_dir=Mock(), validate_caddyfile=Mock(),
                         validate_sudoers=Mock(), validate_authelia=Mock(), ensure_static_roots=Mock(),
+                        ensure_browser_output_dir=Mock(),
                         warn_unresolved=Mock(), write_root=lambda path, text, *_: path.write_text(text),
                         diff=Mock(side_effect=lambda path, _new: path == caddyfile),
                         compose=Mock(return_value=Mock(returncode=0)), run=Mock(return_value=Mock(returncode=0)),

@@ -70,13 +70,21 @@ ROTATE_SHARE = 0.4
 ROTATE_TOKENS = 150_000
 
 
-def reply_images(text: str, extra: dict) -> tuple[str, dict]:
-    """Collect up to three images in reading order while retaining their positions in the reply text."""
+def reply_images_checked(text: str, extra: dict) -> tuple[str, dict, list[dict]]:
+    """Collect up to three images in reading order while retaining their
+    positions in the reply text, plus any local image references that could
+    not be kept."""
     said = [seg["text"] for seg in extra.get("segments") or []
             if isinstance(seg, dict) and isinstance(seg.get("text"), str)]
-    _, found = threads.reply_images("\n\n".join([*said, text or ""]))
+    _, found, unkept = threads.reply_images_checked("\n\n".join([*said, text or ""]))
     if found:
         extra = {**extra, "attachments": found}
+    return text, extra, unkept
+
+
+def reply_images(text: str, extra: dict) -> tuple[str, dict]:
+    """Collect up to three images in reading order while retaining their positions in the reply text."""
+    text, extra, _ = reply_images_checked(text, extra)
     return text, extra
 
 
@@ -2453,7 +2461,7 @@ class ThreadEngine:
         if before and any("text" in seg for seg in before):
             extra["segments"] = before
         text, extra = self.reply_mark(turn, text, extra)
-        text, extra = reply_images(text, extra)
+        text, extra, unkept = reply_images_checked(text, extra)
         # The messages steered into this turn since its last reply
         # (2026-11-14): the record says which ones this reply took in.
         active = self.turns.get(turn.key) or {}
@@ -2482,6 +2490,23 @@ class ThreadEngine:
                                  engine, read, seq=seq if seq is not None else getattr(session, "seq", None),
                                  context=session_context(session), summary_due=self.summary_due(turn, session))
         self.publish(turn.thread_id, {"type": "message.done", "message": msg})
+        if created:
+            seen_refs = {u["ref"] for u in unkept}
+            for att in msg.get("attachments") or []:
+                if isinstance(att, dict) and att.get("missing"):
+                    ref = (att.get("refs") or [att.get("path") or ""])[0]
+                    if ref and ref not in seen_refs:
+                        seen_refs.add(ref)
+                        unkept.append({"ref": ref, "path": att.get("path") or ref,
+                                       "reason": "could not be copied when saving the message"})
+            if unkept:
+                detail = "; ".join(f"{u['ref']} ({u['reason']})" for u in unkept)
+                steps.log(f"{turn.thread_id} {turn.persona}: {len(unkept)} image(s) in "
+                          f"{msg['id']} could not be kept: {detail}")
+                if not str(turn.reason).startswith("unkept-image:"):
+                    self.schedule(Turn(turn.thread_id, turn.persona, turn.chain,
+                                       f"unkept-image:{msg['id']}", model=turn.model,
+                                       note=threads.unkept_image_note(msg["id"], unkept)))
         if reply.launched:
             self.stamp_launched(turn.key, reply, msg)
         if mentions:

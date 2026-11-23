@@ -5,11 +5,14 @@ positions.
 Run: python3 tests/test_reply_images.py
 """
 
+import json
 import os
 import re
 import struct
+import subprocess
 import sys
 import tempfile
+import types
 import zlib
 from pathlib import Path
 from unittest.mock import patch
@@ -17,9 +20,12 @@ from unittest.mock import patch
 scratch = tempfile.TemporaryDirectory(prefix="loam-reply-images-")
 TMP = Path(scratch.name)
 VAULT, SPACES = TMP / "vault", TMP / "ai-labs"
+BROWSER_OUT = TMP / "browser-out"
+BROWSER_OUT.mkdir()
 os.environ["LOAM_VAULT"] = str(VAULT)
 os.environ["LOAM_AI_LABS"] = str(SPACES)
 os.environ["LOAM_THREADS_STATE"] = str(TMP / "state")
+os.environ["LOAM_BROWSER_OUTPUT"] = str(BROWSER_OUT)
 AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 import loam_threads as threads  # noqa: E402
@@ -249,6 +255,148 @@ check("the broker's migration remembers completion",
       threads.migrate_reply_images() == {
           "errors": {}, "threads": {legacy: {"m1": {"copied": 0, "unavailable": 1}}},
       } and threads.migrate_reply_images() is None)
+
+# -- browser screenshots and post-time feedback --------------------------------
+shot = BROWSER_OUT / "page-2026-11-23T03-55-03-150Z.png"
+shot_bytes = png(390, 844)
+shot.write_bytes(shot_bytes)
+shot_reply = f"Week five on a phone:\n\n![Week five on a phone]({shot})"
+text, extra, unkept = engine.reply_images_checked(shot_reply, {})
+check("a browser-tool screenshot resolves with no unkept warnings",
+      not unkept and len(extra.get("attachments") or []) == 1
+      and extra["attachments"][0]["path"] == str(shot)
+      and extra["attachments"][0]["width"] == 390, (extra, unkept))
+posted_shot = threads.append(thread, "iris", text, **extra)
+shot.unlink()
+_, msgs, _ = threads.read(thread)
+saved_shot = threads.find(msgs, posted_shot["id"])["attachments"][0]
+check("a browser-tool screenshot stays loadable after the browser output is evicted",
+      saved_shot["root"] == "vault"
+      and saved_shot["path"].startswith(f"{threads.REPLY_ATTACHMENTS}/")
+      and downloaded(saved_shot["root"], saved_shot["path"]) == (200, shot_bytes)
+      and saved_shot["refs"] == [str(shot)], saved_shot)
+
+# Simulate Docker userns-remapped node uid (201000) owning BROWSER_OUTPUT and its files.
+shot.write_bytes(shot_bytes)
+real_open_regular_at = files.open_regular_at
+real_stat = os.stat
+
+
+def _fake_stat(uid):
+    st = real_stat(shot)
+    return types.SimpleNamespace(st_size=st.st_size, st_uid=uid, st_mode=st.st_mode)
+
+
+with patch.object(files, "open_regular_at",
+                  side_effect=lambda base, parts: (real_open_regular_at(base, parts)[0], _fake_stat(201000))), \
+     patch.object(os, "stat", side_effect=lambda p, **kw: _fake_stat(201000) if Path(p) == BROWSER_OUT else real_stat(p, **kw)):
+    _, found_remapped, unkept_remapped = threads.reply_images_checked(f"![Remapped]({shot})")
+check("a browser screenshot owned by the container's remapped uid is accepted",
+      len(found_remapped) == 1 and not unkept_remapped, (found_remapped, unkept_remapped))
+
+with patch.object(files, "open_regular_at",
+                  side_effect=lambda base, parts: (real_open_regular_at(base, parts)[0], _fake_stat(999999))), \
+     patch.object(os, "stat", side_effect=lambda p, **kw: _fake_stat(201000) if Path(p) == BROWSER_OUT else real_stat(p, **kw)):
+    _, found_stranger, unkept_stranger = threads.reply_images_checked(f"![Stranger]({shot})")
+check("a browser-dir file owned by an unrelated user is refused",
+      not found_stranger and len(unkept_stranger) == 1
+      and "another user" in unkept_stranger[0]["reason"], (found_stranger, unkept_stranger))
+
+# Dotted subdirectory under /tmp (such as /tmp/.playwright-mcp) owned by this user is accepted;
+# secret names under /tmp remain blocked.
+pw_tmp = TMP / ".playwright-mcp"
+pw_tmp.mkdir()
+pw_shot = pw_tmp / "page-2026-11-23T03-55-03-150Z.png"
+pw_shot.write_bytes(shot_bytes)
+pw_secret = pw_tmp / ".env.png"
+pw_secret.write_bytes(shot_bytes)
+_, pw_found, pw_unkept = threads.reply_images_checked(f"![Old path]({pw_shot})")
+check("a user-owned image under /tmp/.playwright-mcp/ is accepted for backfill",
+      len(pw_found) == 1 and not pw_unkept, (pw_found, pw_unkept))
+_, sec_found, sec_unkept = threads.reply_images_checked(f"![Secret]({pw_secret})")
+check("a secret-named file under /tmp is still refused",
+      not sec_found and len(sec_unkept) == 1, (sec_found, sec_unkept))
+
+# Code spans and fenced code blocks are ignored as image references.
+code_text = (
+    "Show an image with `![caption](/tmp/does-not-exist.png)`.\n\n"
+    "```markdown\n![example](/var/lib/loam/browser/not-real.png)\n```\n"
+)
+_, code_found, code_unkept = threads.reply_images_checked(code_text)
+check("image examples inside inline code or fenced blocks are not flagged",
+      not code_found and not code_unkept, (code_found, code_unkept))
+
+# Unkept local images report clear reasons; web URLs and non-images do not.
+_, mix_found, mix_unkept = threads.reply_images_checked(
+    f"![web](https://example.com/a.png)\n![doc](notes.md)\n"
+    f"![gone](/tmp/definitely-absent-12345.png)\n![bad]({blocked_job})"
+)
+check("reply_images_checked reports unkept local images and ignores web/non-image refs",
+      not mix_found and [u["ref"] for u in mix_unkept]
+      == ["/tmp/definitely-absent-12345.png", str(blocked_job)]
+      and "not found" in mix_unkept[0]["reason"]
+      and "outside" in mix_unkept[1]["reason"], mix_unkept)
+
+# bin/thread post refuses unkept images at post time and accepts a real browser screenshot.
+bin_thread = str(AGENTS / "bin" / "thread")
+env = {**os.environ, "LOAM_VAULT": str(VAULT), "LOAM_AI_LABS": str(SPACES),
+       "LOAM_THREADS_STATE": str(TMP / "state"), "LOAM_BROWSER_OUTPUT": str(BROWSER_OUT)}
+before_count = len(threads.read(thread)[1])
+bad_post = subprocess.run(
+    [sys.executable, bin_thread, "post", thread,
+     "Here it is:\n\n![Missing](/tmp/not-here-99999.png)", "--by", "iris"],
+    capture_output=True, text=True, env=env,
+)
+bad_json = json.loads(bad_post.stdout)
+check("bin/thread post refuses a message with an unkept local image at post time",
+      bad_post.returncode == 1 and bad_json.get("ok") is False
+      and "/tmp/not-here-99999.png" in bad_json.get("error", "")
+      and len(threads.read(thread)[1]) == before_count, (bad_post.returncode, bad_json))
+
+good_post = subprocess.run(
+    [sys.executable, bin_thread, "post", thread,
+     f"Here is the browser shot:\n\n![Shot]({shot})", "--by", "iris"],
+    capture_output=True, text=True, env=env,
+)
+good_json = json.loads(good_post.stdout)
+shot.unlink()
+saved_via_bin = (good_json.get("message") or {}).get("attachments") or []
+check("bin/thread post copies a browser screenshot into attachments before returning ok",
+      good_post.returncode == 0 and good_json.get("ok") is True
+      and len(saved_via_bin) == 1 and saved_via_bin[0]["root"] == "vault"
+      and downloaded("vault", saved_via_bin[0]["path"]) == (200, shot_bytes),
+      (good_post.returncode, good_json))
+
+# ThreadEngine.post_reply schedules one immediate follow-up notice when a reply has an unkept image.
+te = engine.ThreadEngine.__new__(engine.ThreadEngine)
+te.turns = {}
+te.publish = lambda *a, **kw: None
+te.summary_due = lambda *a, **kw: 0
+te.agent_mentions = lambda *a, **kw: None
+scheduled = []
+te.schedule = lambda t, **kw: scheduled.append(t)
+fake_session = types.SimpleNamespace(id="sess-1", provider="claude-code", seq=1, turns=[])
+bad_reply = types.SimpleNamespace(
+    spoken=lambda: "Look here:\n\n![Broken](/tmp/missing-reply-shot.png)",
+    before=lambda: [],
+    did=[],
+    events=[{"seq": 10}],
+    launched=[],
+    model=None,
+)
+turn1 = engine.Turn(thread, "iris", 0, "m1")
+m_bad = te.post_reply(turn1, fake_session, bad_reply, "claude-code", None, "end_turn", mentions=False)
+check("post_reply notifies the persona once when an image in its reply cannot be kept",
+      len(scheduled) == 1
+      and scheduled[0].persona == "iris"
+      and scheduled[0].reason == f"unkept-image:{m_bad['id']}"
+      and "/tmp/missing-reply-shot.png" in (scheduled[0].note or "")
+      and "file not found" in (scheduled[0].note or ""), scheduled)
+# A reply to an unkept-image notice must not trigger another loop.
+turn2 = engine.Turn(thread, "iris", 0, f"unkept-image:{m_bad['id']}")
+te.post_reply(turn2, fake_session, bad_reply, "claude-code", None, "end_turn", mentions=False)
+check("an unkept-image follow-up turn does not loop",
+      len(scheduled) == 1, len(scheduled))
 
 print(f"\n{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)

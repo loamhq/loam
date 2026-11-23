@@ -160,11 +160,22 @@ def main() -> int:
         if not reply_to:
             text = args.text
         # Images it shows, as a reply's (2026-11-18): ![words](path) lines.
-        text, images = threads.reply_images(text)
+        # Refuse the post if a local image cannot be kept so the agent hears it
+        # at post time instead of leaving a missing placeholder in the thread.
+        text, images, unkept = threads.reply_images_checked(text)
+        if unkept:
+            detail = "; ".join(f"{u['ref']} ({u['reason']})" for u in unkept)
+            raise threads.ThreadError(
+                400,
+                f"Could not keep image(s) in this post: {detail}. "
+                f"Put the image in the vault, your workspace, /tmp, or take a "
+                f"browser screenshot ({threads.BROWSER_OUTPUT}) and post again.",
+            )
         if not text.strip() and not images:
             raise threads.ThreadError(400, "the text is empty")
         msg, made = threads.append_once(args.thread, by, text,
                                         kind="bulletin" if args.bulletin else "message",
+                                        strict_images=True,
                                         **({"reply_to": reply_to} if reply_to else {}),
                                         **({"attachments": images} if images else {}),
                                         **occasion)

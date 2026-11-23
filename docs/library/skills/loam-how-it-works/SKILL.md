@@ -72,11 +72,14 @@ browser supports its codec. Antigravity uses a smaller viewing copy for
 large videos. Claude Code and Codex receive the original file path. Other
 chat attachments can be up to 10 MB each.
 
-When an agent adds a local image to a thread with `![caption](path)`,
-Loam saves a copy in the vault's attachments folder and shows it where the
-agent wrote it. The image stays with the thread after the working file is
-removed. An unavailable image keeps its caption and shows **Image no
-longer available**.
+When an agent adds a local image to a thread with `![caption](path)` — from
+the vault, a workspace, `/tmp`, or the browser tool's shared output folder
+(`/var/lib/loam/browser`) — Loam saves a copy in the vault's attachments
+folder and shows it where the agent wrote it. The image stays with the thread
+after the working file is removed. If a referenced local image cannot be kept,
+`thread post` refuses the post at call time and a thread reply immediately
+notifies the agent so it can fix or retake it; an unavailable image keeps its
+caption and shows **Image no longer available**.
 
 **Dictation and Read aloud.** These Market plugins work without a key in browsers that support speech recognition or speech synthesis, respectively. With a server key, they select Google first and OpenAI second. A provider error stays with that provider. Each plugin’s settings show the active provider. The Gemini key guide walks through creating, checking and saving a shared key. Dictation can suggest it once after a take that used browser recognition. Record first and Polish, spoken Briefs and generated table descriptions need a server key.
 

@@ -213,6 +213,9 @@ _guard_test_config()
 USER_SLICE = Path(f"/sys/fs/cgroup/user.slice/user-{UID}.slice/"
                   f"user@{UID}.service")
 RUNTIME_DIR = Path(f"/run/user/{UID}")
+# Shared output directory bind-mounted into the persona browser container so
+# screenshots and snapshots land on the host at the exact path the tool returns.
+BROWSER_OUTPUT = Path("/var/lib/loam/browser")
 # The PATH a unit or a lane starts with: the user's tools first.
 UNIT_PATH = f"{LOCAL_BIN}:/usr/local/bin:/usr/bin:/bin"
 

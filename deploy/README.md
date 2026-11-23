@@ -722,6 +722,14 @@ in `bin/provision`), rendered from the deployment records.
   of both handles and unchanged.
 - **Each MCP session is its own browser context.** Two clients, one
   navigated, the other's tab list still empty (caused 2026-09-08).
+- **Shared screenshot output (`/var/lib/loam/browser`).** `gen-deploy` creates
+  `/var/lib/loam/browser` owned by the container's remapped `node` user
+  (`0755`) and bind-mounts it at the same path inside `loam-browser`, with
+  `working_dir`, `--ignore-roots`, `--output-dir /var/lib/loam/browser`,
+  `--file-paths absolute`, and `--output-max-size` (256 MiB eviction). Every
+  provider lane receives the exact host path for both auto-named and
+  explicit-filename screenshots, so agents can read them and the broker copies
+  them into `98_ATTACHMENTS/loam-ui/` when posted in a thread.
 - **The inbound wall: this server's own ports** (2026-11-19). Every agent
   is root and can start a server on `0.0.0.0`; without a firewall that
   server is on the open web with no login. `gen-deploy` renders

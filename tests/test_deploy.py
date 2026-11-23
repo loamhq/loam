@@ -353,6 +353,26 @@ try:
     check("browser on its own subnet", dep.SIGHT_SUBNET in browser and dep.SIGHT_NETWORK in browser)
     check("browser: a page's WebMCP tools never become MCP tools", "- --no-webmcp\n" in browser)
     check("browser: image pinned, never latest", ":latest" not in dep.BROWSER_IMAGE and ":v0.0." in dep.BROWSER_IMAGE)
+    browser_doc = dep.yaml.safe_load(browser)["services"]["browser"]
+    out_dir = str(dep.BROWSER_OUTPUT)
+    check("browser: mounts shared output directory at the same path and sets working_dir",
+          browser_doc.get("working_dir") == out_dir
+          and f"{out_dir}:{out_dir}" in (browser_doc.get("volumes") or [])
+          and browser_doc.get("ulimits", {}).get("core") == 0, str(browser_doc))
+    cmd = browser_doc.get("command") or []
+    check("browser: writes absolute paths into the shared output dir across every provider",
+          "--ignore-roots" in cmd
+          and "--output-dir" in cmd and cmd[cmd.index("--output-dir") + 1] == out_dir
+          and "--file-paths" in cmd and cmd[cmd.index("--file-paths") + 1] == "absolute"
+          and "--output-max-size" in cmd
+          and cmd[cmd.index("--output-max-size") + 1] == str(dep.BROWSER_OUTPUT_MAX_BYTES), str(cmd))
+    subuid = root / "subuid"
+    subgid = root / "subgid"
+    subuid.write_text("loam:100000:65536\ndockremap:200000:65536\n")
+    subgid.write_text("loam:100000:65536\ndockremap:300000:65536\n")
+    check("browser: output owner maps node (1000:1000) through dockremap",
+          dep.browser_output_owner(subuid, subgid) == (201000, 301000)
+          and dep.browser_output_owner(root / "no-subuid", root / "no-subgid") == (1000, 1000))
 
     # -- the wall -----------------------------------------------------------
     wall = dep.sight_firewall_script()

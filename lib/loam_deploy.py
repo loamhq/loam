@@ -87,6 +87,12 @@ PLUGIN_DOOR_PORT = 8936
 BROWSER_PORT = 8931
 BROWSER_URL = f"http://127.0.0.1:{BROWSER_PORT}/mcp"
 BROWSER_SERVER_NAME = "browser"   # the MCP server's name in every persona
+BROWSER_OUTPUT = lc.BROWSER_OUTPUT
+# Evict oldest browser-tool outputs once the shared folder exceeds 256 MiB.
+BROWSER_OUTPUT_MAX_BYTES = 256 * 1024 * 1024
+# The Playwright MCP image runs as `node` (1000:1000) inside its user namespace.
+BROWSER_UID = 1000
+BROWSER_GID = 1000
 
 # Use a host header the browser server accepts for its loopback MCP endpoint.
 BROWSER_ALLOWED_HOSTS = f"127.0.0.1:{BROWSER_PORT},localhost:{BROWSER_PORT}"
@@ -2305,7 +2311,27 @@ def inbound_wall_words(status: str) -> str:
             "Loam left it as it is.")
 
 
+def _subid_base(path: Path, name: str = "dockremap") -> int:
+    """Base host id for Docker's default user namespace, or 0 if unremapped."""
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            parts = line.strip().split(":")
+            if len(parts) >= 3 and parts[0] == name and parts[1].isdigit():
+                return int(parts[1])
+    except OSError:
+        pass
+    return 0
+
+
+def browser_output_owner(subuid: Path = Path("/etc/subuid"),
+                         subgid: Path = Path("/etc/subgid")) -> tuple[int, int]:
+    """Host (uid, gid) that maps to `node` (1000:1000) inside loam-browser."""
+    return (_subid_base(subuid) + BROWSER_UID,
+            _subid_base(subgid) + BROWSER_GID)
+
+
 def browser_compose() -> str:
+    output = str(BROWSER_OUTPUT)
     doc = {
         "name": BROWSER_PROJECT,
         "services": {
@@ -2313,12 +2339,19 @@ def browser_compose() -> str:
                 "image": BROWSER_IMAGE,
                 "container_name": BROWSER_PROJECT,
                 "restart": "unless-stopped",
+                "working_dir": output,
                 "entrypoint": ["node", "/app/cli.js"],
                 "command": [
                     "--headless", "--browser", "chromium", "--no-sandbox",
                     "--isolated",
                     # Keep page-advertised WebMCP tools out of the persona's browser tool set.
                     "--no-webmcp",
+                    # Write all screenshots and snapshots into the shared host-mounted output
+                    # directory and always report their absolute host path on every provider lane.
+                    "--ignore-roots",
+                    "--output-dir", output,
+                    "--file-paths", "absolute",
+                    "--output-max-size", str(BROWSER_OUTPUT_MAX_BYTES),
                     "--host", "0.0.0.0", "--port", str(BROWSER_PORT),
                     "--allowed-hosts", BROWSER_ALLOWED_HOSTS,
                     # Use the browser's origin restrictions alongside the kernel network boundary. The
@@ -2326,9 +2359,11 @@ def browser_compose() -> str:
                     "--blocked-origins", browser_blocked_origins(),
                 ],
                 "ports": [f"127.0.0.1:{BROWSER_PORT}:{BROWSER_PORT}"],
+                "volumes": [f"{output}:{output}"],
                 "networks": ["sight"],
                 "cap_drop": ["ALL"],
                 "security_opt": ["no-new-privileges:true"],
+                "ulimits": {"core": 0},
                 "shm_size": "256m",
                 "mem_limit": "1g",
                 "pids_limit": 512,

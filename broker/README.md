@@ -3039,13 +3039,16 @@ folder nobody can read; the app is in it so two front ends never collide.
 
 Agent replies and `thread post` save up to three referenced local images in
 the same dated `loam-ui` store, with unique names. The writer can read
-images from the vault, AI Spaces (including scratch), `/tmp`, and engineer
-job `captures/` folders. Each attachment keeps its Markdown destinations
+images from the vault, AI Spaces (including scratch), `/tmp`, engineer
+job `captures/` folders, and the browser tool's shared output folder
+(`/var/lib/loam/browser`). Each attachment keeps its Markdown destinations
 in `refs` for placement and points to its saved copy for download. Files
-keeps its usual visibility rules. On its first startup with this change,
-the broker recovers older attachments whose source still exists and writes
-only their metadata comments. Its journal and the thread state's
-`reply-images-v1.json` record the result.
+keeps its usual visibility rules. When a referenced local image cannot be
+kept, `bin/thread post` refuses the post at call time, and a thread reply
+schedules a one-shot note telling the agent which image failed and why. On
+its first startup with this change, the broker recovers older attachments
+whose source still exists and writes only their metadata comments. Its
+journal and the thread state's `reply-images-v2.json` record the result.
 
 - **The name is sanitised into a name.** Directory parts go (both separators —
   a Windows browser sends backslashes), anything that is not a letter, digit,

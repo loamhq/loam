@@ -245,7 +245,7 @@ const refPath = (dest) => {
 const volatilePicture = (dest) => {
   const path = refPath(dest)
   return LOCAL_PICTURE.test(path) &&
-    (path.startsWith('/tmp/') || /^\/[^\n]*\/jobs\/\d{8}-\d{6}-[a-f0-9]{8}\/captures\//.test(path))
+    (path.startsWith('/tmp/') || path.startsWith('/var/lib/loam/browser/') || /^\/[^\n]*\/jobs\/\d{8}-\d{6}-[a-f0-9]{8}\/captures\//.test(path))
 }
 export function replyImages(message, key = null, { streaming = false } = {}) {
   const presetImage = hasPlacesGreeting(message)
