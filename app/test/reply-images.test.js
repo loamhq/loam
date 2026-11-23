@@ -160,3 +160,64 @@ test('a completed image survives replacing the streaming frame and redrawing', (
   assert.equal(deep([frame]).find(n => n.tag === 'img'), img)
   assert.equal(all(frame, 'reply-caption')[0].textContent, 'a fox')
 })
+
+test('portrait screenshots mark portrait rows and clamp ultra-tall frames to 9:20', () => {
+  const phone = { path: 'Images/phone.png', root: 'vault', name: 'phone.png', type: 'image/png', size: 9, width: 390, height: 844, refs: ['Images/phone.png'] }
+  const tall = { path: 'Images/tall.png', root: 'vault', name: 'tall.png', type: 'image/png', size: 9, width: 390, height: 2000, refs: ['Images/tall.png'] }
+  const one = render('![Phone screen](Images/phone.png)', { attachments: [phone] })
+  const phoneRow = byClass(one.nodes, 'reply-figures-row')[0]
+  const phoneFig = byClass(one.nodes, 'reply-figure')[0]
+  assert.ok(phoneRow.getAttribute('class').includes('portrait-row'))
+  assert.equal(phoneRow.getAttribute('data-count'), '1')
+  assert.equal(phoneFig.style.getPropertyValue('--ratio'), '0.4621')
+  assert.equal(phoneFig.style.getPropertyValue('--frame-ratio'), '0.4621')
+
+  const long = render('![Full-page phone capture](Images/tall.png)', { attachments: [tall] })
+  const tallRow = byClass(long.nodes, 'reply-figures-row')[0]
+  const tallFig = byClass(long.nodes, 'reply-figure')[0]
+  assert.ok(tallRow.getAttribute('class').includes('portrait-row'))
+  assert.equal(tallFig.style.getPropertyValue('--ratio'), '0.1950')
+  assert.equal(tallFig.style.getPropertyValue('--frame-ratio'), '0.4500')
+  assert.equal(tallRow.style.getPropertyValue('--ratio-sum'), '0.4500')
+})
+
+test('mixed landscape and phone groups split rows before squeezing a portrait below readable width', () => {
+  const deskA = { path: 'Images/desk-a.png', root: 'vault', name: 'desk-a.png', type: 'image/png', size: 9, width: 1440, height: 900, refs: ['Images/desk-a.png'] }
+  const deskB = { path: 'Images/desk-b.png', root: 'vault', name: 'desk-b.png', type: 'image/png', size: 9, width: 1440, height: 900, refs: ['Images/desk-b.png'] }
+  const phoneA = { path: 'Images/phone-a.png', root: 'vault', name: 'phone-a.png', type: 'image/png', size: 9, width: 390, height: 844, refs: ['Images/phone-a.png'] }
+  const phoneB = { path: 'Images/phone-b.png', root: 'vault', name: 'phone-b.png', type: 'image/png', size: 9, width: 390, height: 844, refs: ['Images/phone-b.png'] }
+
+  // Two 1440x900 desktops + one 390x844 phone -> Row 1: two desktops; Row 2: one portrait phone.
+  const mixed = render('![Desk light](Images/desk-a.png)\n![Desk dark](Images/desk-b.png)\n![Phone light](Images/phone-a.png)', { attachments: [deskA, deskB, phoneA] })
+  const mixedRows = byClass(mixed.nodes, 'reply-figures-row')
+  assert.equal(mixedRows.length, 2)
+  assert.equal(mixedRows[0].getAttribute('data-count'), '2')
+  assert.ok(!mixedRows[0].getAttribute('class').includes('portrait-row'))
+  assert.equal(mixedRows[1].getAttribute('data-count'), '1')
+  assert.ok(mixedRows[1].getAttribute('class').includes('portrait-row'))
+
+  // Two phone screenshots stay side by side in one portrait row.
+  const pair = render('![Phone light](Images/phone-a.png)\n![Phone dark](Images/phone-b.png)', { attachments: [phoneA, phoneB] })
+  const pairRows = byClass(pair.nodes, 'reply-figures-row')
+  assert.equal(pairRows.length, 1)
+  assert.equal(pairRows[0].getAttribute('data-count'), '2')
+  assert.ok(pairRows[0].getAttribute('class').includes('portrait-row'))
+})
+
+test('a portrait image without header dimensions updates its row on load', () => {
+  const unknown = { path: 'Images/no-size.png', root: 'vault', name: 'no-size.png', type: 'image/png', size: 9, refs: ['Images/no-size.png'] }
+  const host = h('div')
+  const pictures = replyImages({ attachments: [unknown] }, 't:no-size')
+  morph(host, markdown('![Phone shot](Images/no-size.png)', { images: pictures.images }))
+  const row = all(host, 'reply-figures-row')[0]
+  const fig = all(host, 'reply-figure')[0]
+  const img = deep([fig]).find((n) => n.tag === 'img')
+  assert.ok(!row.getAttribute('class').includes('portrait-row'))
+  img.naturalWidth = 390
+  img.naturalHeight = 844
+  img.__on.load({ target: img })
+  assert.equal(fig.style.getPropertyValue('--ratio'), '0.4621')
+  assert.equal(fig.style.getPropertyValue('--frame-ratio'), '0.4621')
+  assert.equal(row.style.getPropertyValue('--ratio-sum'), '0.4621')
+  assert.ok(row.getAttribute('class').includes('portrait-row'))
+})

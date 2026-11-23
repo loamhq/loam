@@ -213,3 +213,14 @@ have never met.
   renders. The other module flags (`imaging`, `softening`, `vaulting`,
   `anchoring`) are read only during rendering. See `test/markdown.test.js` and
   `docs/evidence/chat-wikilink-cache/README.md`.
+- **Inline reply images and portrait sizing** (`public/chat-ui.js`,
+  `public/style.css`): never use raw `< 1` ratios as `flex-grow` on
+  `.reply-figure` — when `flex-grow` sums below `1`, CSS Flexbox §9.7 distributes
+  only `sum × free space` and shrinks portrait images a second time. Scale
+  `flex-grow` by `100` (`calc(var(--frame-ratio) * 100)`), clamp `--frame-ratio`
+  to at least `0.45` (9:20, top-aligned) for ultra-tall captures, give
+  portrait-only rows (`.portrait-row`) a `min(520px, 58vh)` desktop height cap,
+  pack multi-image rows so no item drops below `190 px` in the `760 px` desktop
+  column, and size single/stacked `.reply-image` frames directly so
+  `.reply-caption` keeps a `62ch` reading measure. See `test/reply-images.test.js`,
+  `test/portrait-images-browser.mjs`, and `docs/evidence/portrait-images/README.md`.

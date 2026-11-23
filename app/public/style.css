@@ -2899,26 +2899,39 @@ html.image-view-open, html.image-view-open body { overflow:hidden; }
 .image-view-step.prev { left:max(8px, env(safe-area-inset-left)); }
 .image-view-step.next { right:max(8px, env(safe-area-inset-right)); }
 .image-view-step.next svg { transform:scaleX(-1); }
-/* Show files without inline positions below the reply. */
-.say .bubble-files { margin:10px 0 2px; }
+/* Show files without inline positions below an agent reply, and keep a single
+   attached phone screenshot readable with clean rounded corners in any bubble. */
+.say.agent .bubble-files { margin:10px 0 2px; }
 .say .bubble-files:has(.message-image) { max-width:560px; }
 .say .bubble-files:has(.message-image:only-child) { max-width:420px; }
 .say .message-image img { aspect-ratio:auto 4 / 3; max-height:320px; object-fit:contain; object-position:left top; }
+.say .bubble-files:has(.message-image:only-child) .message-image:not(.missing) img { width:auto; max-width:100%; max-height:min(460px, 56vh); }
 @media (max-width: 480px) { .image-view-save span { display:none; } .image-view-save { padding:0; } }
-/* Reserve each image’s aspect ratio before loading. Groups share a height until the column is narrow enough to stack them. */
-.reply-figures { --figure-h:min(440px, 62vh); --figure-gap:10px; container-type:inline-size; margin:12px 0 14px; }
+/* Reserve each image's aspect ratio before loading. Portrait rows get a taller
+   desktop budget so phone screenshots stay readable without dominating the
+   thread, ultra-tall captures crop to a 9:20 top-aligned preview (tap opens
+   full), and single/stacked figures size the image frame directly so captions
+   keep a comfortable reading measure regardless of image width. */
+.reply-figures { --figure-h:min(440px, 62vh); --figure-gap:10px; container-type:inline-size; display:flex; flex-direction:column; gap:var(--figure-gap); margin:12px 0 14px; }
 .tt-prose-content > .reply-figures:first-child { margin-top:2px; }
 .tt-prose-content > .reply-figures:last-child { margin-bottom:2px; }
 .reply-figures-row { display:flex; align-items:flex-start; gap:var(--figure-gap); max-width:min(100%, calc(var(--ratio-sum) * var(--figure-h) + (var(--count) - 1) * var(--figure-gap))); }
-.reply-figure { flex:var(--ratio) 1 0%; min-width:0; margin:0; }
-.reply-image { position:relative; display:block; aspect-ratio:var(--ratio); border-radius:var(--radius-md); overflow:hidden; background:var(--paper-hover-alpha); color:var(--paper-ink-3); text-decoration:none; cursor:zoom-in; -webkit-tap-highlight-color:transparent; }
+.reply-figures-row.portrait-row { --figure-h:min(520px, 58vh); }
+/* Scale flex-grow by 100 so a row whose ratios sum below 1 (e.g. two portraits)
+   still fills 100% of its row instead of shrinking a second time per Flexbox §9.7. */
+.reply-figure { --frame-ratio:var(--ratio); flex:calc(var(--frame-ratio) * 100) 1 0%; min-width:0; margin:0; }
+.reply-figures-row[data-count="1"] { max-width:none; }
+.reply-figures-row[data-count="1"] > .reply-figure { flex:0 1 auto; width:100%; }
+.reply-image { position:relative; display:block; aspect-ratio:var(--frame-ratio); border-radius:var(--radius-md); overflow:hidden; background:var(--paper-hover-alpha); color:var(--paper-ink-3); text-decoration:none; cursor:zoom-in; -webkit-tap-highlight-color:transparent; }
+.reply-figures-row[data-count="1"] .reply-image { width:min(100%, calc(var(--frame-ratio) * var(--figure-h))); }
+.reply-figures-row.portrait-row[data-count="1"] .reply-image { max-width:min(100%, 380px); }
 /* A hairline over the edge, so a white screenshot still ends on white paper. */
 .reply-image::after { content:''; position:absolute; inset:0; border-radius:inherit; box-shadow:inset 0 0 0 1px var(--paper-rule); pointer-events:none; }
-.reply-image img { display:block; width:100%; height:100%; object-fit:cover; opacity:0; transition:opacity .32s ease, transform .32s ease; transform:scale(1.008); }
+.reply-image img { display:block; width:100%; height:100%; object-fit:cover; object-position:top center; opacity:0; transition:opacity .32s ease, transform .32s ease; transform:scale(1.008); }
 .reply-figure.loaded .reply-image img { opacity:1; transform:none; }
 @media (hover: hover) { .reply-figure.loaded .reply-image:hover img { filter:brightness(.97); } }
 .reply-image:focus-visible { outline:2px solid var(--paper-mark-active); outline-offset:2px; }
-.reply-caption { margin:6px 2px 0; color:var(--paper-ink-3); font-size:var(--type-small); line-height:1.4; overflow-wrap:anywhere; }
+.reply-caption { margin:6px 2px 0; max-width:62ch; color:var(--paper-ink-3); font-size:var(--type-small); line-height:1.4; overflow-wrap:anywhere; }
 .reply-image-missing { display:none; align-items:center; justify-content:center; gap:8px; padding:6px; text-align:center; font-size:var(--type-small); line-height:1.3; color:var(--paper-ink-3); }
 .reply-image-missing svg { flex:none; }
 /* Keep the same frame while loading and if the file cannot be read. */
@@ -2927,14 +2940,23 @@ html.image-view-open, html.image-view-open body { overflow:hidden; }
 .reply-figure.missing .reply-image-missing { position:absolute; inset:0; display:flex; }
 /* A reference with no source can use a compact frame from its first paint. */
 .reply-figure.known-missing { flex:0 1 auto; width:min(100%, 260px); }
-.reply-figure.known-missing .reply-image { aspect-ratio:auto; min-height:80px; }
+.reply-figures-row[data-count="1"] > .reply-figure.known-missing { width:100%; }
+.reply-figure.known-missing .reply-image { width:min(100%, 260px); aspect-ratio:auto; min-height:80px; }
 /* While the reply is still being written, its picture's place, held. */
 .reply-figure.waiting .reply-image { cursor:default; }
+@container (max-width: 680px) {
+  .reply-figures-row[data-count="3"] { flex-direction:column; max-width:none; }
+  .reply-figures-row[data-count="3"] > .reply-figure { flex:none; width:100%; }
+  .reply-figures-row[data-count="3"] .reply-image { width:min(100%, calc(var(--frame-ratio) * var(--figure-h))); }
+  .reply-figures-row.portrait-row[data-count="3"] .reply-image { max-width:min(100%, 380px); }
+}
 @container (max-width: 480px) {
   .reply-figures-row { flex-direction:column; max-width:none; }
-  .reply-figure { flex:none; width:min(100%, calc(var(--ratio) * var(--figure-h))); }
+  .reply-figure { flex:none; width:100%; }
+  .reply-image { width:min(100%, calc(var(--frame-ratio) * var(--figure-h))); }
+  .reply-figures-row.portrait-row .reply-image { max-width:min(100%, 380px); }
 }
-@media (max-width: 600px) { .reply-figures { --figure-h:min(520px, 70vh); } }
+@media (max-width: 600px) { .reply-figures, .reply-figures-row.portrait-row { --figure-h:min(520px, 70vh); } }
 @media (prefers-reduced-motion: reduce) { .reply-image img { transition:none; transform:none; } }
 
 /* A heading the page focuses when a sheet opens (tabindex -1, for screen

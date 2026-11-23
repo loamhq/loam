@@ -231,7 +231,58 @@ export function messageFiles(files = [], key = null) {
 // finished reference to a local picture keeps its place as a quiet empty
 // frame, and an unfinished one at the end is held back, not shown as marks.
 const figureViews = new Map(), FIGURES_MAX = 300
+// Inline reply figure layout bounds (2026-11-23):
+// - Ultra-tall scrolling captures (< 9:20) frame at 0.45 top-aligned so they
+//   stay readable on desktop without becoming a full-height poster; tap opens
+//   the full image. Standard phone screenshots (>= 0.45) are uncropped.
+// - Multi-image rows split onto a new row whenever adding the next image would
+//   squeeze any item below 190px in the 760px desktop column.
+const MIN_FRAME_RATIO = 0.45
+const PORTRAIT_RATIO = 0.85
+const ROW_COLUMN_PX = 760
+const ROW_GAP_PX = 10
+const ROW_MIN_ITEM_PX = 190
+const ROW_LANDSCAPE_H = 440
+const ROW_PORTRAIT_H = 520
+const frameRatio = (ratio) => Math.max(ratio ?? 4 / 3, MIN_FRAME_RATIO)
 const mark = (node, name) => { const now = node.getAttribute('class') ?? ''; if (!now.split(/\s+/).includes(name)) node.setAttribute('class', `${now} ${name}`.trim()) }
+const toggleMark = (node, name, on) => {
+  const parts = (node.getAttribute('class') ?? '').split(/\s+/).filter(Boolean)
+  const has = parts.includes(name)
+  if (on && !has) node.setAttribute('class', [...parts, name].join(' '))
+  else if (!on && has) node.setAttribute('class', parts.filter((c) => c !== name).join(' '))
+}
+function syncRow(row) {
+  if (!row || !(row.getAttribute?.('class') ?? '').split(/\s+/).includes('reply-figures-row')) return
+  const figures = [...(row.childNodes ?? [])].filter((c) => c.nodeType === 1 && (c.getAttribute?.('class') ?? '').split(/\s+/).includes('reply-figure'))
+  if (!figures.length) return
+  const ratios = figures.map((f) => {
+    const raw = parseFloat(f.style?.getPropertyValue?.('--frame-ratio') || f.style?.getPropertyValue?.('--ratio'))
+    return Number.isFinite(raw) && raw > 0 ? Math.max(raw, MIN_FRAME_RATIO) : 4 / 3
+  })
+  row.style.setProperty('--ratio-sum', ratios.reduce((a, b) => a + b, 0).toFixed(4))
+  row.style.setProperty('--count', String(figures.length))
+  row.setAttribute('data-count', String(figures.length))
+  toggleMark(row, 'portrait-row', ratios.every((r) => r < PORTRAIT_RATIO))
+}
+function rowFits(items) {
+  if (items.length <= 1) return true
+  const ratios = items.map((node) => frameRatio(node.__ratio))
+  const sum = ratios.reduce((a, b) => a + b, 0)
+  const maxH = ratios.every((r) => r < PORTRAIT_RATIO) ? ROW_PORTRAIT_H : ROW_LANDSCAPE_H
+  const avail = ROW_COLUMN_PX - (items.length - 1) * ROW_GAP_PX
+  const h = Math.min(maxH, avail / sum)
+  return Math.min(...ratios) * h >= ROW_MIN_ITEM_PX
+}
+function packFigureRows(nodes) {
+  const rows = []
+  for (const node of nodes) {
+    const current = rows[rows.length - 1]
+    if (current && rowFits([...current, node])) current.push(node)
+    else rows.push([node])
+  }
+  return rows
+}
 const LOCAL_PICTURE = /^<?\s*(?![a-z][a-z0-9+.-]*:(?!\/\/\/))[^<>]*\.(png|jpe?g|webp|gif|avif)\s*>?(\s+"[^"]*")?$/i
 const PICTURE_REF = /!\[([^\]\n]{0,300})\]\(\s*(<[^>\n]+>|[^)\n]+?)\s*\)/g
 const refPath = (dest) => {
@@ -276,8 +327,9 @@ export function replyImages(message, key = null, { streaming = false } = {}) {
     const had = cacheKey === null ? null : figureViews.get(cacheKey)
     if (had?.signature === signature) { had.open = open; had.failed = failed; had.file = file; if (had.missing) failed.add(file); return had.stub }
     const record = { signature, open, failed, file, missing: !href }
+    const framed = frameRatio(ratio)
     // Insert the kept figure itself when it takes the streaming frame's place.
-    const node = h('figure', { key: `figure:${++mediaViewSerial}`, class: `reply-figure${href ? '' : ' missing known-missing'}`, style: { '--ratio': ratio ? ratio.toFixed(4) : '1.3333' } })
+    const node = h('figure', { key: `figure:${++mediaViewSerial}`, class: `reply-figure${href ? '' : ' missing known-missing'}`, style: { '--ratio': ratio ? ratio.toFixed(4) : '1.3333', '--frame-ratio': framed.toFixed(4) } })
     const view = h(href ? 'a' : 'span', { class: 'reply-image', href, 'aria-label': href ? (words ? `Open image: ${words}` : 'Open image') : null, onclick: (e) => {
       // A plain tap opens it full size; a modified click keeps the browser's own.
       if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button > 0) return
@@ -289,7 +341,14 @@ export function replyImages(message, key = null, { streaming = false } = {}) {
       loading: 'lazy', decoding: 'async',
       onload: (e) => {
         const img = e.target
-        if (!ratio && img.naturalWidth > 0 && img.naturalHeight > 0) node.style.setProperty('--ratio', (img.naturalWidth / img.naturalHeight).toFixed(4))
+        if (!ratio && img.naturalWidth > 0 && img.naturalHeight > 0) {
+          const actual = img.naturalWidth / img.naturalHeight
+          const next = frameRatio(actual)
+          node.style.setProperty('--ratio', actual.toFixed(4))
+          node.style.setProperty('--frame-ratio', next.toFixed(4))
+          record.stub.__ratio = next
+          syncRow(node.parentNode)
+        }
         mark(node, 'loaded')
       },
       onerror: () => {
@@ -303,7 +362,7 @@ export function replyImages(message, key = null, { streaming = false } = {}) {
     node.append(view)
     if (words) node.append(h('figcaption', { class: 'reply-caption', text: words }))
     record.stub = kept(node)
-    record.stub.__ratio = ratio ?? 4 / 3
+    record.stub.__ratio = framed
     if (cacheKey !== null) {
       figureViews.delete(cacheKey); figureViews.set(cacheKey, record)
       if (figureViews.size > FIGURES_MAX) figureViews.delete(figureViews.keys().next().value)
@@ -311,7 +370,7 @@ export function replyImages(message, key = null, { streaming = false } = {}) {
     return record.stub
   }
   function waiting() {
-    const node = h('figure', { class: 'reply-figure waiting', style: { '--ratio': '1.3333' }, 'aria-hidden': 'true' }, h('span', { class: 'reply-image' }))
+    const node = h('figure', { class: 'reply-figure waiting', style: { '--ratio': '1.3333', '--frame-ratio': '1.3333' }, 'aria-hidden': 'true' }, h('span', { class: 'reply-image' }))
     node.__ratio = 4 / 3
     return node
   }
@@ -326,9 +385,16 @@ export function replyImages(message, key = null, { streaming = false } = {}) {
     },
     group(nodes) {
       if (presetImage && nodes.length === 1 && nodes[0].getAttribute?.('class') === 'hello-places') return nodes[0]
-      const ratios = nodes.map((node) => node.__ratio ?? 4 / 3)
-      return h('div', { class: 'reply-figures', 'data-count': String(nodes.length) },
-        h('div', { class: 'reply-figures-row', style: { '--ratio-sum': ratios.reduce((a, b) => a + b, 0).toFixed(4), '--count': String(nodes.length) } }, ...nodes))
+      const rows = packFigureRows(nodes).map((row) => {
+        const ratios = row.map((node) => frameRatio(node.__ratio))
+        const allPortrait = ratios.every((r) => r < PORTRAIT_RATIO)
+        return h('div', {
+          class: `reply-figures-row${allPortrait ? ' portrait-row' : ''}`,
+          'data-count': String(row.length),
+          style: { '--ratio-sum': ratios.reduce((a, b) => a + b, 0).toFixed(4), '--count': String(row.length) },
+        }, ...row)
+      })
+      return h('div', { class: 'reply-figures', 'data-count': String(nodes.length) }, ...rows)
     },
   }
   return {
