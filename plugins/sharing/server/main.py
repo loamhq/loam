@@ -107,6 +107,13 @@ def make_handler(
         def log_message(self, fmt, *args):
             sys.stderr.write("%s %s\n" % (self.command, fmt % args))
 
+        def end_headers(self):
+            # Mirror Connection: close so reverse proxies behind plugin-gateway
+            # do not pool sockets that the gateway closes after one request.
+            if self.close_connection:
+                self.send_header("Connection", "close")
+            super().end_headers()
+
         def _send(self, status: int, body: dict):
             data = json.dumps(body, ensure_ascii=False).encode()
             self._raw(status, data, "application/json; charset=utf-8", [
