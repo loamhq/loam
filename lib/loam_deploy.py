@@ -2323,6 +2323,21 @@ def _subid_base(path: Path, name: str = "dockremap") -> int:
     return 0
 
 
+def docker_root_owner(subuid: Path = Path("/etc/subuid"),
+                      subgid: Path = Path("/etc/subgid")) -> tuple[int, int]:
+    """Host (uid, gid) that maps to root (0:0) inside userns-remapped containers."""
+    return (_subid_base(subuid), _subid_base(subgid))
+
+
+def login_data_dir() -> Path | None:
+    """Host directory backing `authelia-data` when `storage.data_dir` is set,
+    or None on an ordinary install (which lets Docker manage the volume)."""
+    if lc.DATA_DIR is None:
+        return None
+    import loam_data_disk as dd  # noqa: PLC0415
+    return dd.login_data_dir(lc.DATA_DIR)
+
+
 def browser_output_owner(subuid: Path = Path("/etc/subuid"),
                          subgid: Path = Path("/etc/subgid")) -> tuple[int, int]:
     """Host (uid, gid) that maps to `node` (1000:1000) inside loam-browser."""

@@ -55,6 +55,7 @@ place on a particular machine. Added 2026-11-14 (first release, job L1).
 | `keys.providers` | provider definitions for this host’s plugins, including optional key checks and named projects (docs/plugins.md, “Keys”) | empty |
 | `marketplace.list`, `marketplace.repo` | the marketplace's list (an https URL; `""` turns the section off) and the repository a listing is asked for in (docs/plugins.md, "The marketplace") | absent: `loamhq/marketplace`'s `list.json` on `main` |
 | `edge.*` | an install's name on the web: its domain, address, the app at the domain itself, the records it serves, how DNS is asked, local certificates for a rehearsal, the DNS gate, and `own_domain` when the domain is the owner's own rather than a name under Loam's (first release L12; 0.2.8; docs/install.md) | absent: the deploy layer reads `deploy/loam.toml` and serves every record, as the first install always has |
+| `storage.data_dir` | mounted data disk holding all of the person's data (`install.sh --data-dir DIR`, docs/install.md); when set, `bin/gen-deploy` backs `authelia-data` onto `<data_dir>/login/authelia-data` and `bin/check-drift` / `loam status` check the mounts and `/etc/fstab` | absent: ordinary single-disk install |
 
 `lib/loam_broker` and `lib/loam_engineer` re-export the paths under their
 historical names (`AGENTS_ROOT`, `AI_LABS`, `VAULT`, `STATE_DIR`, …), so

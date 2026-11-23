@@ -99,6 +99,18 @@ def gather() -> dict:
             part("install", "Install", BAD, f"stopped at step {nxt} of 11 ({label.lower()})",
                  "run the install command again; it carries on from there")
 
+    # Separate data disk, when configured (`install.sh --data-dir`).
+    if lc.DATA_DIR is not None:
+        import shutil  # noqa: PLC0415
+        import loam_data_disk as dd  # noqa: PLC0415
+        issues = dd.drift_findings(lc.DATA_DIR, lc.HOME, etc=lc.CONFIG_FILE.parent)
+        if issues:
+            part("data-disk", "Data disk", BAD, f"{issues[0][0]}: {issues[0][2]}",
+                 "check `findmnt` and `/etc/fstab`, or run `sudo " + str(lc.ROOT / "bin" / "check-drift") + "`")
+        else:
+            free_gb = shutil.disk_usage(lc.DATA_DIR).free / 1e9
+            part("data-disk", "Data disk", OK, f"mounted at {lc.DATA_DIR} ({free_gb:.1f} GB free)")
+
     # The name and its certificate.
     state = dep.edge_state()
     if edge.get("dns_gate"):

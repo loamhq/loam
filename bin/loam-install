@@ -3,7 +3,8 @@
 which fetched this release; run as root.
 
   loam-install [--domain DOMAIN | --name NAME] [--owner "NAME"]
-               [--timezone ZONE] [--yes] [--source URL] [--version TAG]
+               [--timezone ZONE] [--data-dir DIR] [--yes]
+               [--source URL] [--version TAG]
   rehearsal only: [--address IP] [--resolver system] [--local-certs]
                   [--base DOMAIN]
 
@@ -24,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import grp
 import itertools
 import json
 import os
@@ -36,6 +38,7 @@ import sys
 import textwrap
 import threading
 import time
+import tomllib
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -53,6 +56,7 @@ os.environ.setdefault("LOAM_CONFIG", str(CONFIG))
 # put there refuses the next update (L13's clean-tree rule).
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE / "lib"))
+import loam_data_disk as dd  # noqa: E402
 import loam_install as li  # noqa: E402  (no loam_config yet: the file may not exist)
 
 WIDTH = 72
@@ -212,14 +216,14 @@ def save_answers(ans: dict) -> None:
 
 
 def config_values() -> dict:
-    import tomllib  # noqa: PLC0415
     raw = tomllib.loads(CONFIG.read_text(encoding="utf-8"))
     paths = raw.get("paths", {})
     return {"user": raw.get("user", li.USER), "home": paths["home"], "root": paths["root"],
             "vault": paths["vault"], "workspaces": paths["workspaces"],
             "projects": paths["projects"], "plugins": paths["plugins"],
             "edge": raw.get("edge", {}), "timezone": raw.get("timezone", "UTC"),
-            "owner": raw.get("owner", {}).get("name", "")}
+            "owner": raw.get("owner", {}).get("name", ""),
+            "data_dir": (raw.get("storage") or {}).get("data_dir")}
 
 
 def mark_done(n: int) -> None:
@@ -283,8 +287,25 @@ def step_preflight(a, ans: dict) -> None:
                    f"(it sends from {address or 'nowhere'}), so nobody could reach Loam on it.",
                    "use a server with a public IPv4 address")
 
+    # Optional separate data disk (`--data-dir DIR`): validate early and either
+    # adopt an existing Loam data disk or prepare a fresh one.
+    raw_data_dir = a.data_dir or ans.get("data_dir")
+    data_dir: Path | None = None
+    if raw_data_dir:
+        data_dir, why = dd.validate_path(raw_data_dir, etc=CONFIG.parent)
+        if why or data_dir is None:
+            raise Stop(f"Cannot use --data-dir {raw_data_dir}: {why}.",
+                       "mount a writable disk at that directory first and run the install command again")
+
     if CONFIG.exists():
         cfg = config_values()
+        have_data_dir = cfg.get("data_dir")
+        if data_dir is not None and not dd.is_bind_mounted(data_dir / "etc", CONFIG.parent):
+            raise Stop(f"{CONFIG} already exists on this server; refusing to mount {data_dir} over it.",
+                       "use a fresh server when adopting or starting on a data disk")
+        if data_dir is not None and have_data_dir and Path(have_data_dir) != data_dir:
+            raise Stop(f"This server is already set up with data disk {have_data_dir}, not {data_dir}.",
+                       f"run the install command with --data-dir {have_data_dir}, or without it")
         name = cfg["edge"].get("name")
         have = cfg["edge"].get("domain")
         own = bool(cfg["edge"].get("own_domain"))
@@ -294,10 +315,88 @@ def step_preflight(a, ans: dict) -> None:
             raise Stop(f"This server is already set up as {have}.",
                        f"run the install command with {again}, or without it")
         ans.update({"name": name, "owner": cfg["owner"], "timezone": cfg["timezone"],
-                    "address": cfg["edge"].get("address", address)})
+                    "address": cfg["edge"].get("address", address),
+                    "source": a.source or ans.get("source") or DEFAULT_SOURCE,
+                    "version": ans.get("version") or a.version})
+        if have_data_dir:
+            ans["data_dir"] = have_data_dir
         save_answers(ans)
         say(f"This server is already set up for {cfg['edge'].get('domain')}; carrying on.", 2)
         return
+
+    if data_dir is not None:
+        info = dd.classify(data_dir)
+        if info["kind"] == "unrecognized":
+            raise Stop(f"{data_dir} is not empty and is not a Loam data disk ({info['reason']}).",
+                       "point --data-dir at an empty mounted disk for a fresh install, or a disk "
+                       "created by an earlier Loam install")
+        free_data_gb = shutil.disk_usage(data_dir).free / 1e9
+        if info["kind"] == "existing":
+            if free_data_gb < dd.MIN_FREE_GB_ADOPT:
+                raise Stop(f"The data disk at {data_dir} has only {free_data_gb:.1f} GB free "
+                           f"(Loam needs at least {dd.MIN_FREE_GB_ADOPT:.0f} GB).",
+                           "free space on or resize the data disk and run the install command again")
+            disk_cfg_text = (data_dir / "etc" / "loam.toml").read_text(encoding="utf-8")
+            disk_raw = tomllib.loads(disk_cfg_text)
+            disk_edge = disk_raw.get("edge") or {}
+            have = disk_edge.get("domain")
+            disk_name = disk_edge.get("name")
+            disk_own = bool(disk_edge.get("own_domain"))
+            if (a.domain and a.domain.lower().rstrip(".") != have) or \
+                    (a.name and (disk_own or (disk_name and a.name != disk_name))):
+                again = f"--domain {have}" if disk_own else f"--name {disk_name}"
+                raise Stop(f"The data disk at {data_dir} already belongs to {have}.",
+                           f"run the install command with --data-dir {data_dir} (or with {again})")
+            try:
+                dd.ensure_bind_mount(data_dir / "etc", CONFIG.parent)
+                adopted_text = dd.adopt_config_text(
+                    disk_cfg_text,
+                    address=address,
+                    data_dir=str(data_dir),
+                    resolver=a.resolver,
+                    tls="internal" if a.local_certs else None,
+                )
+            except dd.DataDiskError as exc:
+                raise Stop(str(exc)) from exc
+            tmp_cfg = CONFIG.with_suffix(".adopt-tmp")
+            tmp_cfg.write_text(adopted_text, encoding="utf-8")
+            os.chmod(tmp_cfg, 0o644)
+            os.replace(tmp_cfg, CONFIG)
+            dd.update_fstab([dd.etc_spec(data_dir, CONFIG.parent)])
+            run(["systemctl", "daemon-reload"], check=False)
+            cfg = config_values()
+            edge = cfg["edge"]
+            dd.write_marker(
+                data_dir,
+                last_adopted_at=dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+                domain=edge.get("domain"),
+                user=cfg["user"],
+            )
+            ans.update({
+                "adopted": True,
+                "data_dir": str(data_dir),
+                "previous_address": disk_edge.get("address"),
+                "name": edge.get("name"),
+                "domain": edge.get("domain") if edge.get("own_domain") else "",
+                "owner": cfg["owner"],
+                "timezone": cfg["timezone"],
+                "address": edge.get("address", address),
+                "base": (edge.get("domain", "").split(".", 1)[1]
+                         if "." in edge.get("domain", "") and not edge.get("own_domain")
+                         else li.BASE_DOMAIN),
+                "resolver": edge.get("resolver", "public"),
+                "tls": edge.get("tls", "acme"),
+                "source": a.source or ans.get("source") or DEFAULT_SOURCE,
+                "version": ans.get("version") or a.version,
+            })
+            save_answers(ans)
+            say(f"Found an existing Loam on {data_dir} ({edge.get('domain')}, for {cfg['owner']}); "
+                "adopting it on this server without overwriting your data.", 2)
+            return
+        if free_data_gb < dd.MIN_FREE_GB_FRESH:
+            raise Stop(f"The data disk at {data_dir} has only {free_data_gb:.1f} GB free "
+                       f"(a fresh install needs at least {dd.MIN_FREE_GB_FRESH:.0f} GB).",
+                       "choose a larger data disk and run the install command again")
 
     base = a.base or ans.get("base") or li.BASE_DOMAIN
     if a.name and a.domain:
@@ -329,19 +428,40 @@ def step_preflight(a, ans: dict) -> None:
     if valid_zone(tz):
         raise Stop(f"\"{tz}\" is not a time zone this server knows.",
                    "use a name like Europe/Berlin or America/Los_Angeles")
+    resolver = a.resolver or ans.get("resolver") or "public"
+    tls = "internal" if a.local_certs else "acme"
     ans.update({"name": name, "domain": domain, "owner": owner, "timezone": tz,
-                "address": address, "base": base, "resolver": a.resolver, "tls": "internal" if a.local_certs else "acme",
+                "address": address, "base": base, "resolver": resolver, "tls": tls,
                 "source": a.source or ans.get("source") or DEFAULT_SOURCE,
                 "version": ans.get("version") or a.version})
+    if data_dir is not None:
+        ans["data_dir"] = str(data_dir)
+        ans["adopted"] = False
     save_answers(ans)
     home = f"/home/{li.USER}"
     text = li.render_config(name=name, owner=owner, timezone=tz, address=address, home=home,
-                            base=base, resolver=a.resolver, domain=domain or None,
-                            tls="internal" if a.local_certs else "acme")
-    CONFIG.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG.write_text(text, encoding="utf-8")
-    os.chmod(CONFIG, 0o644)
-    say(f"Your Loam will be {where}, for {owner}, in {tz}.", 2)
+                            base=base, resolver=resolver, domain=domain or None,
+                            tls=tls, data_dir=str(data_dir) if data_dir else None)
+    if data_dir is not None:
+        for d, mode in ((data_dir / "etc", 0o755), (data_dir / "home", 0o755),
+                        (data_dir / "login", 0o755), (dd.login_data_dir(data_dir), 0o700)):
+            d.mkdir(parents=True, mode=mode, exist_ok=True)
+            os.chmod(d, mode)
+        try:
+            dd.ensure_bind_mount(data_dir / "etc", CONFIG.parent)
+        except dd.DataDiskError as exc:
+            raise Stop(str(exc)) from exc
+        CONFIG.write_text(text, encoding="utf-8")
+        os.chmod(CONFIG, 0o644)
+        dd.write_marker(data_dir, user=li.USER, domain=where)
+        dd.update_fstab([dd.etc_spec(data_dir, CONFIG.parent)])
+        run(["systemctl", "daemon-reload"], check=False)
+        say(f"Your Loam will be {where}, for {owner}, in {tz}, with your data on {data_dir}.", 2)
+    else:
+        CONFIG.parent.mkdir(parents=True, exist_ok=True)
+        CONFIG.write_text(text, encoding="utf-8")
+        os.chmod(CONFIG, 0o644)
+        say(f"Your Loam will be {where}, for {owner}, in {tz}.", 2)
 
 
 def ask_where(base: str) -> tuple[str, str]:
@@ -395,6 +515,12 @@ def step_name(a, ans: dict) -> None:
     ans["name_check"] = found
     save_answers(ans)
     if found["state"] == "taken":
+        if ans.get("adopted"):
+            say(f"{edge['domain']} still points to another server ({', '.join(found['apex'])}). "
+                "Carrying on; move these two DNS records to this server when ready:", 2)
+            for rec in li.records_to_ask_for(edge["name"], edge["address"], base):
+                say(rec, 6)
+            return
         raise Stop(f"{edge['domain']} is already someone else's: it points to another server "
                    f"({', '.join(found['apex'])}).",
                    "choose another name and run the install command again with --name")
@@ -598,13 +724,120 @@ def step_packages(a, ans: dict) -> None:
 # 4. The user
 # ---------------------------------------------------------------------------
 
+def _uid_free(uid: int) -> bool:
+    if uid < 1000:
+        return False
+    try:
+        pwd.getpwuid(uid)
+        return False
+    except KeyError:
+        return True
+
+
+def _gid_free(gid: int) -> bool:
+    if gid < 1000:
+        return False
+    try:
+        grp.getgrgid(gid)
+        return False
+    except KeyError:
+        return True
+
+
+def _prepare_data_disk_user(cfg: dict, ans: dict) -> None:
+    """Create `user`, bind-mount `<data_dir>/home` to `<home>`, bind-mount the
+    seven server-local overlays on top inside `<home>`, and record all mounts
+    in `/etc/fstab`."""
+    user, home = cfg["user"], Path(cfg["home"])
+    data_dir = Path(cfg["data_dir"])
+    data_home = data_dir / "home"
+    data_home.mkdir(parents=True, mode=0o755, exist_ok=True)
+    adopted = bool(ans.get("adopted"))
+
+    old_uid: int | None = None
+    old_gid: int | None = None
+    if adopted:
+        marker = dd.read_marker(data_dir) or {}
+        st = data_home.stat()
+        old_uid = st.st_uid if st.st_uid >= 1000 else marker.get("uid")
+        old_gid = st.st_gid if st.st_gid >= 1000 else marker.get("gid")
+
+    try:
+        pw = pwd.getpwnam(user)
+    except KeyError:
+        if (adopted and isinstance(old_uid, int) and isinstance(old_gid, int)
+                and _uid_free(old_uid) and _gid_free(old_gid)):
+            run(["groupadd", "--gid", str(old_gid), user])
+            run(["useradd", "--no-create-home", "--home-dir", str(home),
+                 "--uid", str(old_uid), "--gid", str(old_gid),
+                 "--shell", "/bin/bash", user])
+        else:
+            run(["useradd", "--no-create-home", "--home-dir", str(home),
+                 "--shell", "/bin/bash", user])
+        pw = pwd.getpwnam(user)
+
+    uid, gid = pw.pw_uid, pw.pw_gid
+    if adopted:
+        if isinstance(old_uid, int) and isinstance(old_gid, int) and (old_uid, old_gid) != (uid, gid):
+            with progress("Adjusting file ownership on the data disk for this server",
+                          "Data disk ownership aligned."):
+                run(["chown", "-R", f"--from={old_uid}:{old_gid}", f"{uid}:{gid}", str(data_home)])
+    else:
+        if not (data_home / ".bashrc").exists() and Path("/etc/skel").is_dir():
+            for item in Path("/etc/skel").iterdir():
+                dest = data_home / item.name
+                if not dest.exists():
+                    if item.is_dir():
+                        shutil.copytree(item, dest, symlinks=True)
+                    else:
+                        shutil.copy2(item, dest)
+        run(["chown", "-R", f"{uid}:{gid}", str(data_home)])
+        os.chmod(data_home, 0o755)
+
+    home.mkdir(parents=True, mode=0o755, exist_ok=True)
+    os.chown(home, uid, gid)
+    os.chmod(home, 0o755)
+    try:
+        dd.ensure_bind_mount(data_home, home)
+    except dd.DataDiskError as exc:
+        raise Stop(str(exc)) from exc
+
+    # Ensure server-local overlay root is traversable while keeping installer
+    # state root-only (0700).
+    dd.LOCAL_BASE.parent.mkdir(parents=True, mode=0o755, exist_ok=True)
+    os.chmod(dd.LOCAL_BASE.parent, 0o755)
+    if STATE.exists():
+        os.chmod(STATE, 0o700)
+    dd.LOCAL_BASE.mkdir(parents=True, mode=0o755, exist_ok=True)
+    os.chmod(dd.LOCAL_BASE, 0o755)
+
+    for sub, rel, mode in dd.LOCAL_OVERLAYS:
+        src = dd.LOCAL_BASE / sub
+        src.mkdir(parents=True, mode=mode, exist_ok=True)
+        os.chown(src, uid, gid)
+        os.chmod(src, mode)
+        tgt = dd.ensure_owned_path(home, rel, uid, gid, mode=mode)
+        try:
+            dd.ensure_bind_mount(src, tgt)
+        except dd.DataDiskError as exc:
+            raise Stop(str(exc)) from exc
+
+    specs = dd.mount_specs(data_dir, home, etc=CONFIG.parent)
+    dd.update_fstab(specs)
+    run(["systemctl", "daemon-reload"], check=False)
+    dd.write_marker(data_dir, uid=uid, gid=gid, user=user)
+
+
 def step_user(a, ans: dict) -> None:
     cfg = config_values()
     user, home = cfg["user"], cfg["home"]
-    try:
-        pwd.getpwnam(user)
-    except KeyError:
-        run(["useradd", "--create-home", "--home-dir", home, "--shell", "/bin/bash", user])
+    if cfg.get("data_dir"):
+        _prepare_data_disk_user(cfg, ans)
+    else:
+        try:
+            pwd.getpwnam(user)
+        except KeyError:
+            run(["useradd", "--create-home", "--home-dir", home, "--shell", "/bin/bash", user])
     run(["usermod", "-aG", "sudo", user])
     sudoers = Path("/etc/sudoers.d/loam")
     text = (f"# Loam's agents get the whole machine (first release, decision 1).\n"
@@ -735,8 +968,12 @@ def step_loam(a, ans: dict) -> None:
 def step_vault(a, ans: dict) -> None:
     cfg = config_values()
     root = cfg["root"]
-    with progress("Making your vault", "Vault folders ready."):
-        as_user(cfg, ["python3", f"{root}/bin/library", "seed-vault"])
+    if ans.get("adopted"):
+        with progress("Refreshing Loam's library on your vault", "Library refreshed."):
+            as_user(cfg, ["python3", f"{root}/bin/library", "install"])
+    else:
+        with progress("Making your vault", "Vault folders ready."):
+            as_user(cfg, ["python3", f"{root}/bin/library", "seed-vault"])
     ident = ["-c", "user.name=loam", "-c", f"user.email=loam@{cfg['edge']['domain']}"]
     for key in ("vault", "workspaces"):
         where = cfg[key]
@@ -754,8 +991,11 @@ def step_vault(a, ans: dict) -> None:
                              "import loam_install; print(loam_install.reach_text(), end='')"]).stdout
         as_user(cfg, ["mkdir", "-p", str(reach.parent)])
         as_user(cfg, ["sh", "-c", f"cat > {shlex.quote(str(reach))}"], input=text)
-    say(f"Made your vault at {cfg['vault']} (Inbox, Conversations, Projects, "
-        f"Attachments, System).", 2)
+    if ans.get("adopted"):
+        say(f"Kept your existing vault at {cfg['vault']} and refreshed Loam's library.", 2)
+    else:
+        say(f"Made your vault at {cfg['vault']} (Inbox, Conversations, Projects, "
+            f"Attachments, System).", 2)
 
 
 # ---------------------------------------------------------------------------
@@ -806,6 +1046,29 @@ def step_providers(a, ans: dict) -> None:
 
 def step_starter(a, ans: dict) -> None:
     cfg = config_values()
+    if ans.get("adopted"):
+        for option in ("--managed-settings", "--reviewer"):
+            as_user(cfg, ["python3", f"{cfg['root']}/bin/provision", option])
+        with progress("Setting up the engineer", "Engineer ready to make changes your agents ask for."):
+            res = as_user(cfg, ["python3", f"{cfg['root']}/bin/provision", "--engineer"],
+                          check=False)
+            if res.returncode != 0:
+                raise Stop("The engineer, which changes Loam itself when your agents ask, "
+                           "could not be set up.",
+                           "run the install command again; the details are at the end of "
+                           "/var/log/loam-install.log")
+        listed = as_user(cfg, ["python3", "-c",
+                               f"import json, sys; sys.path.insert(0, {cfg['root'] + '/lib'!r}); "
+                               "import loam_agents as a; print(json.dumps(a.live(a.every())))"])
+        agents = json.loads(listed.stdout) if listed.stdout.strip() else []
+        with progress("Re-provisioning your existing agents"):
+            for name in agents:
+                as_user(cfg, ["python3", f"{cfg['root']}/bin/provision", name])
+        if agents:
+            say(f"✓ Kept your existing agents ({', '.join(agents)}) and re-provisioned them for this server.", 2)
+        else:
+            say("✓ Kept your existing workspaces (no active agents to re-provision).", 2)
+        return
     with progress("Making Iris, your first agent"):
         res = as_user(cfg, ["python3", f"{cfg['root']}/bin/library", "seed-starter"],
                       check=False, timeout=3600)
@@ -902,6 +1165,12 @@ def step_units(a, ans: dict) -> None:
         else:
             raise Stop("Loam's engine (the session broker) did not start.",
                        f"its log: sudo -u {cfg['user']} journalctl --user -u {brk.SERVICE} -n 50")
+    # Reconcile every agent schedule and enabled plugin server/timer right away
+    # (essential on an adopted disk whose generated unit directory is fresh, and
+    # leaves any install with zero drift immediately after step 9).
+    with progress("Reconciling schedules and plugins", "Schedules and plugins reconciled."):
+        as_user(cfg, ["python3", f"{root}/bin/schedule", "reconcile"], check=False)
+        as_user(cfg, ["python3", f"{root}/bin/plugin-servers", "reconcile"], check=False)
     # The host's own setup is kept from here on, and can be put back with
     # `loam host restore` (lib/loam_host.py, docs/host-history.md).
     with progress("Saving the server's setup", "Server setup saved."):
@@ -1083,11 +1352,13 @@ def main() -> int:
                    f"issue at {li.ASK_FOR_A_NAME}")
     p.add_argument("--owner", help="your first name, as Loam should call you")
     p.add_argument("--timezone", help="for example Europe/Berlin")
+    p.add_argument("--data-dir", help="existing mounted directory for all of your data "
+                   "(or to adopt an existing Loam data disk)")
     p.add_argument("--yes", action="store_true", help="take the defaults; ask nothing")
     p.add_argument("--source", help=argparse.SUPPRESS)
     p.add_argument("--version", help=argparse.SUPPRESS)
     p.add_argument("--address", help=argparse.SUPPRESS)       # rehearsal: behind NAT
-    p.add_argument("--resolver", default="public", choices=("public", "system"),
+    p.add_argument("--resolver", default=None, choices=("public", "system"),
                    help=argparse.SUPPRESS)                     # rehearsal: /etc/hosts
     p.add_argument("--local-certs", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--base", help=argparse.SUPPRESS)          # rehearsal: a .test name

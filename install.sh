@@ -19,6 +19,8 @@
 # Other options (everything else is asked, or passed to bin/loam-install):
 #   --owner "NAME"     your first name, as Loam should call you
 #   --timezone ZONE    for example Europe/Berlin
+#   --data-dir DIR     put all of your data on an existing mounted disk at DIR
+#                      (or adopt an existing Loam data disk already mounted there)
 #   --version TAG      a release (default: the newest)
 #   --source URL       where the release is fetched from (default: Loam's repository)
 #
@@ -56,7 +58,7 @@ while [ $# -gt 0 ]; do
     --version=*) VERSION=${1#*=}; shift ;;
     -h|--help)
       if [ -f "$0" ]; then sed -n '2,/^set -E/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'
-      else echo "Usage: install.sh [--domain DOMAIN | --name NAME] [--owner \"NAME\"] [--timezone ZONE]"; fi
+      else echo "Usage: install.sh [--domain DOMAIN | --name NAME] [--owner \"NAME\"] [--timezone ZONE] [--data-dir DIR]"; fi
       exit 0 ;;
     *) shift ;;
   esac

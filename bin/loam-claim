@@ -91,9 +91,8 @@ def run(argv: list[str], **kw) -> subprocess.CompletedProcess:
 # ---------------------------------------------------------------------------
 
 def volume_dir() -> Path | None:
-    res = run(["docker", "volume", "inspect", "authelia-data", "-f", "{{.Mountpoint}}"])
-    path = res.stdout.strip()
-    return Path(path) if res.returncode == 0 and path else None
+    import loam_data_disk as dd  # noqa: PLC0415
+    return dd.docker_volume_path("authelia-data", run=run)
 
 
 def users() -> dict:

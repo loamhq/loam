@@ -119,12 +119,14 @@ def toml_str(value: str) -> str:
 def render_config(*, name: str, owner: str, timezone: str, address: str,
                   home: str, user: str = USER, base: str = BASE_DOMAIN,
                   resolver: str = "public", tls: str = "acme",
-                  root: str | None = None, domain: str | None = None) -> str:
+                  root: str | None = None, domain: str | None = None,
+                  data_dir: str | None = None) -> str:
     """The install's /etc/loam/loam.toml. Every key docs/config.md lists that
     a fresh install needs spelled out, and the `[edge]` table that makes the
     box one person's name. With `domain`, the install is on a domain its
     owner has (`own_domain = true`): `name` is then only that domain's first
-    label, kept for anything that wants a short name."""
+    label, kept for anything that wants a short name. With `data_dir`, the
+    `[storage]` table records the mounted data disk holding the person's data."""
     own = bool(domain)
     if own:
         domain = domain.lower().rstrip(".")
@@ -133,6 +135,7 @@ def render_config(*, name: str, owner: str, timezone: str, address: str,
         domain = f"{name}.{base}"
     root = root or f"{home}/loam"
     today = dt.date.today().isoformat()
+    storage = f"\n[storage]\ndata_dir = {toml_str(data_dir)}\n" if data_dir else ""
     return f"""\
 # This Loam's configuration: where everything is, who it is for, and its
 # name on the web. Written by install.sh on {today}; yours from then on (an
@@ -169,7 +172,7 @@ apps = ["loam-ui", "files", "vault"]
 resolver = {toml_str(resolver)}
 tls = {toml_str(tls)}
 dns_gate = true
-""" + ("own_domain = true\n" if own else "")
+""" + ("own_domain = true\n" if own else "") + storage
 
 
 def reach_text(lc=None) -> str:

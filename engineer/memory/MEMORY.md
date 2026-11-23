@@ -2910,3 +2910,31 @@ listener for immediate notification in an open page.
   persona `agent.prompt`'s `when:` clause on a live install, it calls
   `render_personas()` immediately so `CLAUDE.md`, Codex, and Antigravity
   instructions stay in sync without a manual re-provision.
+## 2026-11-23 — Optional separate data disk (`install.sh --data-dir DIR`)
+
+- **Whole-home + `/etc/loam` bind mounts with seven local NVMe overlays (`lib/loam_data_disk.py`).**
+  Symlinks fail Loam's symlink-rejecting guards and break atomic replaces like
+  `~/.claude.json` and cross-folder renames (`agents/` -> `state/`). Instead,
+  `--data-dir DIR` bind-mounts `<DIR>/etc` -> `/etc/loam` and `<DIR>/home` ->
+  `/home/<user>`, then bind-mounts seven server-local directories under
+  `/var/lib/loam/local/` back on top inside `/home/<user>` (`loam`, `.local/bin`,
+  `.local/share`, `.cache`, `.config/systemd/user`, `.config/environment.d`,
+  `.local/state/loam/worktrees`), persisted via a managed `# >>> loam:data-disk`
+  block in `/etc/fstab` with `x-systemd.requires-mounts-for=...`. Without
+  `--data-dir`, single-disk installs are unchanged.
+- **Bind-backed `authelia-data` Docker volume under `userns-remap`.**
+  `bin/gen-deploy` creates `authelia-data` with `--driver local --opt type=none
+  --opt o=bind --opt device=<DIR>/login/authelia-data` when `storage.data_dir`
+  is set, and aligns ownership to the host's `dockremap` subuid/subgid base
+  (which can differ across servers). Because Docker reports the container
+  mountpoint rather than the host bind target in `{{.Mountpoint}}`, both
+  `bin/loam-claim` and `lib/loam_host.py` inspect `{{json .}}` and prefer
+  `Options.device` over `Mountpoint`.
+- **Adoption on a second fresh server.** `bin/loam-install --data-dir DIR`
+  classifies the directory (ignoring ext4 `lost+found`), refuses unrecognized
+  non-empty directories, adopts existing disks (updating only `edge.address`,
+  `storage.data_dir`, and explicit rehearsal overrides in `loam.toml`), matches
+  or re-owns UID/GID, skips `seed-vault`/`seed-starter`/`preinstall-plugins`,
+  refreshes `System/Loam/`, re-provisions live agents, and runs `bin/schedule
+  reconcile` and `bin/plugin-servers reconcile` in step 9 so timers and plugins
+  come up immediately with zero drift.

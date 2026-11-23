@@ -351,6 +351,18 @@ the job ends. Nightly housekeeping sweeps leftovers and removes generated
 Python bytecode for vanished source directories, along with bytecode left
 idle for 14 days.
 
+**Data on its own disk.** A fresh install can place all of the owner's data on
+a separate mounted disk (`install.sh --data-dir DIR`): configuration, login
+database, vault, agent workspaces, plugins, projects, settings, threads,
+history and provider sign-in files live on that disk while ordinary paths stay
+the same. Loam's own checkout, pinned AI tool binaries, caches, generated
+service units and engineer worktrees stay on the server's local disk. Moving
+that disk to a fresh server and running `install.sh --data-dir DIR` adopts the
+existing Loam without overwriting it, keeping the same login, agents, threads,
+settings and plugins while rebuilding the server-local parts and re-issuing web
+certificates once DNS moves. Without `--data-dir`, everything stays on the
+server's single disk.
+
 **Plugins** add themes, page code, tools and servers. Loam's own ship with
 it; the owner's live in their own folder, which updates never touch (see
 `loam-building-a-plugin`). A customisation is a plugin wherever one can do

@@ -120,6 +120,8 @@ VAULT = _path("paths.vault", HOME / "vault")
 WORKSPACES = _path("paths.workspaces", HOME / "ai-labs")
 PROJECTS = _path("paths.projects", HOME / "projects")
 PLUGINS = _path("paths.plugins", HOME / "plugins")
+_data_dir = get("storage.data_dir")
+DATA_DIR: Path | None = Path(_data_dir).expanduser() if _data_dir else None
 
 # -- where: what the runtime writes (never inside ROOT on a fresh install) ----
 
@@ -368,6 +370,7 @@ def as_dict() -> dict:
         "paths.wake_env": str(WAKE_ENV), "paths.mcp_venv": str(MCP_VENV),
         "paths.pycache": str(PYCACHE),
         "paths.reviewer_state": str(REVIEWER_STATE),
+        "storage.data_dir": str(DATA_DIR) if DATA_DIR else "",
         "bin.claude": str(CLAUDE_BIN), "bin.codex": str(CODEX_BIN),
         "bin.agy": str(AGY_BIN), "bin.uv": str(UV_BIN),
         "owner.id": OWNER_ID, "owner.name": OWNER_NAME,
