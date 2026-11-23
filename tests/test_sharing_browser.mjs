@@ -43,6 +43,20 @@ sys.path.insert(0, str(ROOT / "lib"))
 sys.path.insert(0, str(SHARING / "server"))
 sys.path.insert(0, str(COMMENTS / "server"))
 
+tmp = Path(tempfile.mkdtemp(prefix="loam-pw-"))
+vault = tmp / "vault"
+(vault / "notes").mkdir(parents=True)
+cfg_file = tmp / "loam.toml"
+cfg_file.write_text(f"""[paths]
+home = {json.dumps(str(tmp))}
+root = {json.dumps(str(ROOT))}
+vault = {json.dumps(str(vault))}
+""", encoding="utf-8")
+os.environ["LOAM_CONFIG"] = str(cfg_file)
+os.environ["LOAM_OFFLINE"] = "1"
+events = tmp / "events.jsonl"
+os.environ["LOAM_FILES_EVENTS"] = str(events)
+
 import loam_files as lf
 from comments import appear as c_appear, store as c_store
 from comments.remote import RemoteClient
@@ -74,11 +88,6 @@ def make_png(w=120, h=80):
     raw = b"".join(b"\\x00" + b"\\x91\\x68\\x44" * w for _ in range(h))
     return b"\\x89PNG\\r\\n\\x1a\\n" + ch(b"IHDR", ihdr) + ch(b"IDAT", zlib.compress(raw)) + ch(b"IEND", b"")
 
-tmp = Path(tempfile.mkdtemp(prefix="loam-pw-"))
-vault = tmp / "vault"
-(vault / "notes").mkdir(parents=True)
-events = tmp / "events.jsonl"
-os.environ["LOAM_FILES_EVENTS"] = str(events)
 lf.cfg.VAULT = vault
 lf.cfg.roster = lambda: ["ada"]
 lf.cfg.agent_card = lambda aid: {"id": aid, "name": aid.title()}
@@ -142,10 +151,33 @@ HOSTILE_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" width="160" height="10
 <text x="80" y="55" text-anchor="middle" fill="#FFF8EE" font-size="16">Safe SVG</text>
 </svg>"""
 
+def make_pdf(text="Quarterly Brief"):
+    stream = f"BT /F1 18 Tf 54 720 Td ({text}) Tj ET\\n".encode("ascii")
+    objs = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+        b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\\nstream\\n" + stream + b"endstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    out = bytearray(b"%PDF-1.4\\n")
+    offs = [0]
+    for i, obj in enumerate(objs, 1):
+        offs.append(len(out))
+        out += f"{i} 0 obj\\n".encode("ascii") + obj + b"\\nendobj\\n"
+    xref = len(out)
+    out += f"xref\\n0 {len(objs) + 1}\\n0000000000 65535 f \\n".encode("ascii")
+    for off in offs[1:]:
+        out += f"{off:010d} 00000 n \\n".encode("ascii")
+    out += f"trailer\\n<< /Size {len(objs) + 1} /Root 1 0 R >>\\nstartxref\\n{xref}\\n%%EOF\\n".encode("ascii")
+    return bytes(out)
+
 (vault / "notes" / "mockup.html").write_bytes(HOSTILE_HTML)
 (vault / "notes" / "logo.svg").write_bytes(HOSTILE_SVG)
 (vault / "notes" / "diagram.png").write_bytes(make_png())
 (vault / "notes" / "spec.md").write_text("# Quarterly Plan\\n\\nThe river runs clear through the valley.\\n", encoding="utf-8")
+(vault / "notes" / "view.md").write_text("# Reading Note\\n\\nQuiet river morning.\\n", encoding="utf-8")
+(vault / "notes" / "brief.pdf").write_bytes(make_pdf("Shared PDF Brief"))
 (vault / "notes" / "bundle.zip").write_bytes(b"PK\\x03\\x04" + b"\\x00" * 30 + b"archive")
 (vault / "notes" / "sibling-secret.txt").write_text("TOP SECRET SIBLING", encoding="utf-8")
 
@@ -212,8 +244,10 @@ s_wm = WithMe(s_priv, own_tokens=lambda: {l["token"] for l in s_ln.all()}, door=
 s_srv = s_main.serve(s_st, s_tr, s_ln, s_co, s_dr, s_wm, s_port, reach=lambda: "everywhere")
 threading.Thread(target=s_srv.serve_forever, daemon=True).start()
 
-# Pre-seed an owner comment on diagram.png and create share links (named + unnamed group + unnamed view-only)
+# Pre-seed an owner comment on diagram.png, a resolved comment on spec.md, and create share links
 c_svc.add({"id": "sam", "name": "Sam", "kind": "owner"}, "vault", "notes/diagram.png", {"kind": "comment", "text": "Owner note on diagram."})
+_spec_res = c_svc.add({"id": "sam", "name": "Sam", "kind": "owner"}, "vault", "notes/spec.md", {"kind": "comment", "quote": "river runs clear", "text": "Resolved owner note."})
+c_svc.resolve({"id": "sam", "name": "Sam", "kind": "owner"}, "vault", "notes/spec.md", _spec_res["note"])
 links_out = {}
 for key, fname, mode, who_name in [
     ("mockup.html", "mockup.html", "comment", "Robin"),
@@ -221,6 +255,8 @@ for key, fname, mode, who_name in [
     ("diagram.png", "diagram.png", "comment", "Robin"),
     ("bundle.zip", "bundle.zip", "view", None),
     ("spec.md", "spec.md", "comment", "Robin"),
+    ("view-md", "view.md", "view", None),
+    ("brief.pdf", "brief.pdf", "view", None),
     ("grp-png", "diagram.png", "comment", None),
     ("grp-md", "spec.md", "comment", None),
     ("named-md", "spec.md", "comment", "Taylor"),
@@ -447,10 +483,60 @@ try {
     await page.locator('.dc-panel-toast').getByText('Comment resolved').waitFor()
     ok('Visitor resolves own comment and sees Undo toast', true)
 
-    // 2b. Markdown with Comments ON: dynamic share-collab.js mounts CodeMirror editor
+    // 2b. Markdown with Comments ON (1 resolved note): dynamic share-collab.js mounts CodeMirror editor,
+    //     keeps More -> Resolved 1, and clamps menu inside 390px viewport!
     await openShare(page, ready.links['spec.md'].token, ready.links['spec.md'].password)
     await page.locator('.cm-content').waitFor()
     ok('Markdown share page mounts calm CodeMirror editor when Comments is ON', true)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.locator('.dc-head button[title="More"]').click()
+    await page.locator('.dc-menu').waitFor()
+    const specMenuText = await page.locator('.dc-menu').textContent()
+    const specMenuBox = await page.locator('.dc-menu').boundingBox()
+    ok('Comment-mode Markdown keeps More -> Resolved 1 when resolved comments exist',
+      specMenuText.includes('Resolved') && specMenuText.includes('1'), specMenuText)
+    ok('Comment-mode More menu is never clipped at 390px',
+      specMenuBox && specMenuBox.x >= 0 && (specMenuBox.x + specMenuBox.width) <= 390,
+      JSON.stringify(specMenuBox))
+    await page.keyboard.press('Escape')
+    await page.setViewportSize({ width: 1440, height: 900 })
+
+    // 2b2. View-only unnamed Markdown share link: <=1 "⋯" button, zero "Resolved 0", zero reachable "Add a block",
+    //      Link options menu unclipped at 390px!
+    await openShare(page, ready.links['view-md'].token, ready.links['view-md'].password)
+    await page.locator('.cm-content').waitFor()
+    ok('View-only Markdown skips "What should we call you?"', (await page.getByText('What should we call you?').count()) === 0)
+    for (const vw of [1440, 390]) {
+      await page.setViewportSize({ width: vw, height: vw === 390 ? 844 : 900 })
+      const moreCount = await page.locator('.dc-head button[title="More"]').count()
+      const linkOptCount = await page.locator('.sh-mewrap > button').count()
+      ok(`[view-md ${vw}px] At most one "⋯" button (zero editor More beside Link options)`,
+        moreCount === 0 && linkOptCount <= 1, `more=${moreCount} linkOpt=${linkOptCount}`)
+      const plusVis = await page.locator('button[aria-label="Add a block"]').isVisible().catch(() => false)
+      const plusAccessible = await page.getByRole('button', { name: 'Add a block' }).count()
+      ok(`[view-md ${vw}px] "Add a block" button is hidden and absent from accessibility tree`,
+        !plusVis && plusAccessible === 0, `vis=${plusVis} accessible=${plusAccessible}`)
+      await page.locator('.sh-mewrap > button').click()
+      await page.locator('.sh-menu').waitFor()
+      const linkMenuBox = await page.locator('.sh-menu').boundingBox()
+      ok(`[view-md ${vw}px] Link options menu is never clipped by viewport`,
+        linkMenuBox && linkMenuBox.x >= 0 && (linkMenuBox.x + linkMenuBox.width) <= vw,
+        JSON.stringify(linkMenuBox))
+      await page.locator('.sh-mewrap > button').click()
+    }
+    await page.setViewportSize({ width: 1440, height: 900 })
+
+    // 2b3. PDF share link: inline PDF frame + direct "Open full PDF" link for mobile Safari
+    const pdfShareResP = page.waitForResponse(r => r.url().includes(`/s/${ready.links['brief.pdf'].token}/raw`))
+    await openShare(page, ready.links['brief.pdf'].token, ready.links['brief.pdf'].password)
+    const pdfShareRes = await pdfShareResP
+    await page.locator('iframe.sh-pdf').waitFor()
+    ok('PDF share page loads inline /raw with 200 application/pdf',
+      pdfShareRes.status() === 200 && (pdfShareRes.headers()['content-type'] || '').startsWith('application/pdf'),
+      `${pdfShareRes.status()} ${pdfShareRes.headers()['content-type']}`)
+    const shareOpenFull = page.locator('a.sh-pdf-open')
+    ok('PDF share page offers direct "Open full PDF" link in new tab',
+      (await shareOpenFull.count()) === 1 && (await shareOpenFull.getAttribute('target')) === '_blank')
 
     // 2c. Unnamed view-only ZIP link goes straight from password gate to Download card (NO name prompt!)
     await openShare(page, ready.links['bundle.zip'].token, ready.links['bundle.zip'].password)
@@ -531,6 +617,22 @@ try {
     for (const width of [1440, 390]) {
       const app = await oneProductFixture()
       const pngBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
+      const pdfStream = 'BT /F1 18 Tf 54 720 Td (Files Viewer PDF) Tj ET\n'
+      const pdfObjs = [
+        '<< /Type /Catalog /Pages 2 0 R >>',
+        '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+        '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+        `<< /Length ${pdfStream.length} >>\nstream\n${pdfStream}endstream`,
+        '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+      ]
+      let pdfStr = '%PDF-1.4\n'
+      const pdfOffs = [0]
+      pdfObjs.forEach((o, i) => { pdfOffs.push(pdfStr.length); pdfStr += `${i + 1} 0 obj\n${o}\nendobj\n` })
+      const pdfXref = pdfStr.length
+      pdfStr += `xref\n0 ${pdfObjs.length + 1}\n0000000000 65535 f \n`
+      pdfOffs.slice(1).forEach(off => { pdfStr += `${String(off).padStart(10, '0')} 00000 n \n` })
+      pdfStr += `trailer\n<< /Size ${pdfObjs.length + 1} /Root 1 0 R >>\nstartxref\n${pdfXref}\n%%EOF\n`
+      const pdfBytes = Buffer.from(pdfStr, 'ascii')
       const fh = filesHost({
         texts: { 'vault:Notes/plan.md': '# Spec\n\nHello from the spec.\n' },
       })
@@ -546,6 +648,17 @@ try {
             'cache-control': 'no-store',
           })
           return res.end(pngBytes)
+        }
+        if (url.searchParams.get('path') === 'Notes/report.pdf') {
+          res.writeHead(200, {
+            'content-type': 'application/pdf',
+            'content-disposition': "attachment; filename*=UTF-8''report.pdf",
+            'content-length': String(pdfBytes.length),
+            'x-content-type-options': 'nosniff',
+            'content-security-policy': "sandbox; default-src 'none'",
+            'cache-control': 'no-store',
+          })
+          return res.end(pdfBytes)
         }
         return origDl(req, res, url)
       }
@@ -691,6 +804,44 @@ try {
         const mdShareCount = await page.locator('.sh-sharebtn').count()
         ok(`[${st.name} ${width}px] Markdown calm editor ${st.comments ? 'active' : 'off'}`, (cmCount > 0) === st.comments)
         ok(`[${st.name} ${width}px] Markdown Share button ${st.sharing ? 'present' : 'absent'}`, (mdShareCount > 0) === st.sharing)
+
+        if (st.name === 'both-on') {
+          // Open PDF from Notes folder -> loads inline /api/files/pdf without sandbox + Open full PDF + Comments -> Back returns to folder!
+          await page.goto(`${app.url}/files/vault/Notes`, { waitUntil: 'domcontentloaded' })
+          await page.locator('.fs-more').waitFor()
+          await page.locator('.fs-more').click()
+          await page.locator('.fs-entry', { hasText: 'report.pdf' }).waitFor()
+          const pdfRespP = page.waitForResponse(r => r.url().includes('/api/files/pdf') && !r.url().includes('check=1'))
+          await page.locator('.fs-entry', { hasText: 'report.pdf' }).click()
+          const pdfResp = await pdfRespP
+          await page.locator('iframe.fs-pdfframe').waitFor()
+          await page.waitForTimeout(400)
+          const pdfSandbox = await page.locator('iframe.fs-pdfframe').getAttribute('sandbox')
+          const pdfOpenFull = await page.locator('a.fs-pdfopen').getAttribute('target')
+          const oldSandWarn = await page.getByText('will not show PDFs in a sandbox').count()
+          ok(`[${st.name} ${width}px] Files PDF iframe loads /api/files/pdf with 200 application/pdf and no sandbox`,
+            pdfResp.status() === 200 && (pdfResp.headers()['content-type'] || '').startsWith('application/pdf') && pdfSandbox === null,
+            `status=${pdfResp.status()} ct=${pdfResp.headers()['content-type']} sandbox=${pdfSandbox}`)
+          ok(`[${st.name} ${width}px] Files PDF shows Open full PDF link and drops sandbox warning`,
+            pdfOpenFull === '_blank' && oldSandWarn === 0, `target=${pdfOpenFull} warn=${oldSandWarn}`)
+          if (width === 1440) {
+            ok(`[${st.name} 1440px] Files PDF mounts Comments side panel`, (await page.locator('.dc-panel').count()) > 0)
+          } else {
+            ok(`[${st.name} 390px] Files PDF mounts phone Comments button`, (await page.locator('.dc-pbtn').count()) > 0)
+          }
+          const backBtn = page.locator('.fs-edhead .panel-history-back, .fs-edhead .fs-back').first()
+          if (await backBtn.count()) {
+            await backBtn.click()
+            await page.locator('iframe.fs-pdfframe').waitFor({ state: 'detached' })
+            ok(`[${st.name} ${width}px] Back from PDF returns cleanly to Notes folder`,
+              new URL(page.url()).pathname === '/files/vault/Notes', page.url())
+          } else {
+            await page.goBack()
+            await page.locator('iframe.fs-pdfframe').waitFor({ state: 'detached' })
+            ok(`[${st.name} ${width}px] Browser Back from PDF returns cleanly to Notes folder`,
+              new URL(page.url()).pathname === '/files/vault/Notes', page.url())
+          }
+        }
 
         ok(`[${st.name} ${width}px] Zero page errors`, errs.length === 0, JSON.stringify(errs))
       } finally {

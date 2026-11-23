@@ -20,7 +20,12 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
-import loam_attention  # noqa: E402
+import loam_offline  # noqa: E402
+try:
+    import loam_attention  # noqa: E402
+except loam_offline.Offline as exc:
+    print(f"failed: {exc}")
+    sys.exit(1)
 
 
 def main(argv: list[str]) -> int:

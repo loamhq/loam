@@ -126,7 +126,7 @@ export function createDocEditor(opts) {
   const col = h('div', { class: 'dc-col' })
   const legend = h('div', { class: 'dc-legend', 'aria-hidden': 'true' })
   const gutter = h('div', { class: 'dc-gutter' })
-  const plus = h('button', { class: 'dc-plus', type: 'button', title: 'Add a block  ·  type / on an empty line', 'aria-label': 'Add a block' }, icon('plus', 17))
+  const plus = h('button', { class: 'dc-plus', type: 'button', hidden: true, title: 'Add a block  ·  type / on an empty line', 'aria-label': 'Add a block' }, icon('plus', 17))
   const margin = h('div', { class: 'dc-margin', role: 'complementary', 'aria-label': 'Comments and suggestions' })
   const selbar = h('div', { class: 'dc-selbar', role: 'toolbar', 'aria-label': 'Formatting and notes' })
   const bmenu = h('div', { class: 'dc-bmenu', role: 'menu' })
@@ -1473,7 +1473,12 @@ export function createDocEditor(opts) {
 
   function renderPlus() {
     const line = st.phone ? null : emptyLineAtCaret()
-    if (!line) { plus.classList.remove('on'); return }
+    if (!line) {
+      if (plus.classList.contains('on')) plus.classList.remove('on')
+      if (!plus.hidden) plus.hidden = true
+      return
+    }
+    if (plus.hidden) plus.hidden = false
     const c = view.coordsAtPos(line.from, 1)
     let top
     if (c) { const l = local(c, col); top = (l.top + l.bottom) / 2 - 13 }
@@ -1485,6 +1490,7 @@ export function createDocEditor(opts) {
 
   plus.addEventListener('mousedown', (e) => e.preventDefault())
   plus.addEventListener('click', () => {
+    if (!st.can.edit || st.mode !== 'edit') return
     if (st.bmenu) return closeBmenu()
     openBmenu({ at: 'plus' })
   })
@@ -1513,6 +1519,7 @@ export function createDocEditor(opts) {
   }
 
   function openBmenu(spec) {
+    if (!st.can.edit || st.mode !== 'edit') return
     st.bmenu = { ...spec, query: '', i: 0 }
     plus.classList.add('open')
     renderBmenu()
@@ -2094,27 +2101,46 @@ export function createDocEditor(opts) {
     }))
   }
 
-  function moreMenu(deleteFile) {
+  function moreMenuItems(deleteFile) {
     const det = detached().length
-    return h('div', { class: 'dc-menu', role: 'menu' },
-      det && opts.history !== false ? h('button', { class: 'dc-mi dc-mi-lost', type: 'button', role: 'menuitem', onclick: () => openDrawer('history', { detached: true }) },
+    const hasHistory = opts.history !== false
+    const showResolved = hasHistory || (st.resolved || 0) > 0
+    const extras = opts.menuExtras?.() || []
+    const top = [
+      det && hasHistory ? h('button', { class: 'dc-mi dc-mi-lost', type: 'button', role: 'menuitem', onclick: () => openDrawer('history', { detached: true }) },
         icon('reattach', 17), h('span', { class: 'dc-l' }, h('b', { text: det === 1 ? '1 note lost its passage' : `${det} notes lost their passages` }), h('small', { text: 'Attach again, or read what it was about' })), h('span', { class: 'dc-chv' }, icon('chevronRight', 14))) : null,
-      det && opts.history !== false ? h('div', { class: 'dc-msep' }) : null,
+      det && hasHistory ? h('div', { class: 'dc-msep' }) : null,
       // History and Show authors read the doc's history, which is the
       // owner's: a share page has neither (opts.history === false).
-      opts.history === false ? null : h('button', { class: `dc-mi${st.authors ? ' on' : ''}`, type: 'button', role: 'menuitemcheckbox', 'aria-checked': String(st.authors), onclick: toggleAuthors },
-        icon('people', 17), h('span', { class: 'dc-l' }, h('b', { text: 'Show authors' })), h('span', { class: `dc-sw${st.authors ? ' on' : ''}` })),
-      opts.history === false ? null : h('button', { class: 'dc-mi', type: 'button', role: 'menuitem', onclick: () => openDrawer('history') },
-        icon('history', 17), h('span', { class: 'dc-l' }, h('b', { text: 'History' })), det && opts.history === false ? h('span', { class: 'dc-ct', text: `${det} detached` }) : null, h('span', { class: 'dc-chv' }, icon('chevronRight', 14))),
-      h('button', { class: 'dc-mi', type: 'button', role: 'menuitem', onclick: () => openDrawer('resolved') },
-        icon('resolved', 17), h('span', { class: 'dc-l' }, h('b', { text: 'Resolved' })), h('span', { class: 'dc-ct', text: String(st.resolved || 0) }), h('span', { class: 'dc-chv' }, icon('chevronRight', 14))),
-      ...(opts.menuExtras?.() || []).map(x => h('button', { class: 'dc-mi', type: 'button', role: 'menuitem', onclick: () => { st.menu = null; render(); x.run() } }, icon(x.icon || 'file', 17), h('span', { class: 'dc-l' }, h('b', { text: x.label })))),
-      fileMenu || deleteFile ? h('div', { class: 'dc-msep', role: 'separator' }) : null,
+      hasHistory ? h('button', { class: `dc-mi${st.authors ? ' on' : ''}`, type: 'button', role: 'menuitemcheckbox', 'aria-checked': String(st.authors), onclick: toggleAuthors },
+        icon('people', 17), h('span', { class: 'dc-l' }, h('b', { text: 'Show authors' })), h('span', { class: `dc-sw${st.authors ? ' on' : ''}` })) : null,
+      hasHistory ? h('button', { class: 'dc-mi', type: 'button', role: 'menuitem', onclick: () => openDrawer('history') },
+        icon('history', 17), h('span', { class: 'dc-l' }, h('b', { text: 'History' })), h('span', { class: 'dc-chv' }, icon('chevronRight', 14))) : null,
+      showResolved ? h('button', { class: 'dc-mi', type: 'button', role: 'menuitem', onclick: () => openDrawer('resolved') },
+        icon('resolved', 17), h('span', { class: 'dc-l' }, h('b', { text: 'Resolved' })), h('span', { class: 'dc-ct', text: String(st.resolved || 0) }), h('span', { class: 'dc-chv' }, icon('chevronRight', 14))) : null,
+      ...extras.map(x => h('button', { class: 'dc-mi', type: 'button', role: 'menuitem', onclick: () => { st.menu = null; render(); x.run() } }, icon(x.icon || 'file', 17), h('span', { class: 'dc-l' }, h('b', { text: x.label })))),
+    ].filter(Boolean)
+    const bottom = [
       fileMenu ? h('button', { class: 'dc-mi', type: 'button', role: 'menuitem', onclick: () => { st.menu = null; render(); fileMenu() } },
         icon('file', 17), h('span', { class: 'dc-l' }, h('b', { text: 'This file…' })), h('span', { class: 'dc-chv' }, icon('chevronRight', 14))) : null,
       deleteFile ? h('button', { class: 'dc-mi dc-mi-delete', type: 'button', role: 'menuitem', onclick: () => { st.menu = null; render(); deleteFile() } },
         icon('trash', 17), h('span', { class: 'dc-l' }, h('b', { text: 'Delete' }))) : null,
-    )
+    ].filter(Boolean)
+    if (top.length && bottom.length) return [...top, h('div', { class: 'dc-msep', role: 'separator' }), ...bottom]
+    return [...top, ...bottom]
+  }
+
+  function clampOpenMenu() {
+    const m = head.querySelector('.dc-ddw.open > .dc-menu')
+    if (!m || !head.isConnected) return
+    m.style.right = ''
+    m.style.left = ''
+    const z = zoom()
+    const r = m.getBoundingClientRect()
+    const vw = document.documentElement.clientWidth
+    const pad = 8
+    if (r.left < pad) m.style.right = `${-((pad - r.left) / z)}px`
+    else if (r.right > vw - pad) m.style.right = `${(r.right - (vw - pad)) / z}px`
   }
 
   function toggleMenu(id) {
@@ -2157,7 +2183,21 @@ export function createDocEditor(opts) {
       icon(m.icon, 15), h('span', { text: m.label }), h('span', { class: 'dc-cv' }, icon('chevronDown', 12)))
     // A note whose passage is gone puts a small quiet mark on ⋯ (no banner).
     const lost = detached().length
-    const dots = h('button', { class: `dc-gbtn${lost ? ' dc-lost' : ''}`, type: 'button', 'aria-label': lost ? `More (${lost} note${lost > 1 ? 's' : ''} lost ${lost > 1 ? 'their passages' : 'its passage'})` : 'More', title: 'More', 'aria-haspopup': 'menu', onclick: () => toggleMenu('more') }, icon('dots', 18))
+    const items = moreMenuItems(deleteFile)
+    const viewOnlyShare = opts.history === false && !st.can.edit && !st.can.suggest
+    let moreCtrl = null
+    if (items.length) {
+      if (viewOnlyShare && items.length === 1 && (st.resolved || 0) > 0) {
+        moreCtrl = h('button', {
+          class: 'dc-gbtn dc-resbtn', type: 'button',
+          title: `Resolved (${st.resolved})`, 'aria-label': `Resolved (${st.resolved})`,
+          onclick: () => openDrawer('resolved'),
+        }, icon('resolved', 16), h('span', { text: String(st.resolved) }))
+      } else {
+        const dots = h('button', { class: `dc-gbtn${lost ? ' dc-lost' : ''}`, type: 'button', 'aria-label': lost ? `More (${lost} note${lost > 1 ? 's' : ''} lost ${lost > 1 ? 'their passages' : 'its passage'})` : 'More', title: 'More', 'aria-haspopup': 'menu', onclick: () => toggleMenu('more') }, icon('dots', 18))
+        moreCtrl = menuWrap('more', dots, h('div', { class: 'dc-menu', role: 'menu' }, ...items))
+      }
+    }
     put(head, 
       opts.back ? h('button', { class: 'dc-gbtn dc-back', type: 'button', 'aria-label': opts.back.label, title: opts.back.label, onclick: opts.back.go }, icon('chevronLeft', 20)) : null,
       opts.titleBar
@@ -2167,10 +2207,11 @@ export function createDocEditor(opts) {
       ...extras.slice(0, extras.indexOf(null)),
       // Only Viewing allowed: a quiet word, no menu.
       !st.can.edit && !st.can.suggest ? h('span', { class: 'dc-mpill dc-mpill-only' }, icon('eye', 15), h('span', { text: 'Viewing' })) : menuWrap('mode', pill, modeMenu()),
-      menuWrap('more', dots, moreMenu(deleteFile)),
+      moreCtrl,
       ...extras.slice(extras.indexOf(null) + 1),
     )
     fitHead()
+    if (st.menu) clampOpenMenu()
   }
 
   // On a phone the title is never cut while the mode pill can give way: it

@@ -23,7 +23,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "lib"))
-import loam_config  # noqa: E402
+# The runner reads only host tool paths (user, home, mcp_venv, pycache) to build
+# each child test's scratch LOAM_CONFIG; allow that import even when invoked
+# under LOAM_OFFLINE=1 (as landings do), without leaking the override to children.
+_prev_allow = os.environ.get("LOAM_TEST_INSTALL_CONFIG")
+os.environ["LOAM_TEST_INSTALL_CONFIG"] = "1"
+try:
+    import loam_config  # noqa: E402
+finally:
+    if _prev_allow is None:
+        os.environ.pop("LOAM_TEST_INSTALL_CONFIG", None)
+    else:
+        os.environ["LOAM_TEST_INSTALL_CONFIG"] = _prev_allow
 
 VENV = loam_config.MCP_VENV / "bin" / "python"
 PER_TEST_TIMEOUT = 600
@@ -61,6 +72,7 @@ SCRATCH_PATHS = {
     "plugins": "plugins", "state": "state", "logs": "state/logs",
     "jobs": "state/jobs", "reviewer_state": "state/reviewer",
     "secrets_env": "config/secrets.env", "wake_env": "config/wake.env",
+    "user_unit_dir": "systemd/user",
 }
 
 # Start slow tests early so a single straggler does not extend the whole suite.
@@ -99,7 +111,7 @@ def fixture_config(scratch: Path) -> str:
     for key, rel in SCRATCH_PATHS.items():
         paths[key] = str(scratch / rel)
     table["paths"] = paths
-    for key in ("vault", "workspaces", "projects", "plugins", "state"):
+    for key in ("vault", "workspaces", "projects", "plugins", "state", "user_unit_dir"):
         Path(paths[key]).mkdir(parents=True, exist_ok=True)
     # The install's starter agent and the shared page every agent imports,
     # as a fresh install has them (install.sh): the guard, the identity gate

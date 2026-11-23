@@ -686,6 +686,26 @@ export function createApp({
       if (!/\.html?$/i.test(filePath)) return sendJson(res, 415, { error: 'Only an HTML file is previewed here.' })
       return await relayPreview(res, root, filePath)
     }
+    // Inline PDF delivery for the app's Files viewer. Verifies `%PDF-` magic
+    // bytes server-side and responds with `Content-Type: application/pdf`,
+    // `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and
+    // `default-src 'none'; object-src 'self'; frame-ancestors 'self'` so Chrome,
+    // Edge, Safari and Firefox render PDFs natively without `<iframe sandbox>`
+    // blocking PDFium while spoofed files can never render inline.
+    if (rest === '/files/pdf' && (method === 'GET' || method === 'HEAD')) {
+      const query = filesQuery(url, FILES_PARAMS.download)
+      if (query.error) return sendJson(res, 400, { error: query.error })
+      const filePath = url.searchParams.get('path') ?? ''
+      if (!/\.pdf$/i.test(filePath)) return sendJson(res, 415, { error: 'Only a PDF file is shown here.' })
+      const params = new URLSearchParams(query.search)
+      if (req.headers.range) params.set('range', req.headers.range)
+      return await relayPdf(res, `/v1/files/download?${params}`, {
+        filePath,
+        headOnly: method === 'HEAD',
+        checkOnly: url.searchParams.get('check') === '1',
+        isRange: Boolean(req.headers.range),
+      })
+    }
     if (rest === '/files/download' && (method === 'GET' || method === 'HEAD')) {
       const query = filesQuery(url, FILES_PARAMS.download)
       if (query.error) return sendJson(res, 400, { error: query.error })
@@ -859,6 +879,60 @@ export function createApp({
     if (!out.stream) return res.end()
     out.stream.on('error', () => res.destroy())
     res.once('close', () => out.stream.destroy())
+    out.stream.pipe(res)
+  }
+
+  async function relayPdf(res, brokerPath, { filePath, headOnly = false, checkOnly = false, isRange = false } = {}) {
+    const out = await broker.download(brokerPath)
+    if (!out.ok) {
+      noteBrokerError(res, out)
+      res.writeHead(out.status, { 'content-type': out.contentType, 'cache-control': 'no-store' })
+      return res.end(out.body)
+    }
+    let head = Buffer.alloc(0)
+    let ended = !out.stream
+    if (!isRange && out.stream) {
+      try {
+        const got = await readLeading(out.stream, 1024)
+        head = got.head
+        ended = got.ended
+      } catch (err) {
+        out.stream.destroy()
+        noteError(res, 502, err?.message ?? 'PDF stream failed.')
+        return sendJson(res, 502, { error: 'Could not read this PDF.' })
+      }
+      if (!head.subarray(0, 1024).includes(PDF_MAGIC)) {
+        out.stream.destroy()
+        const msg = 'This file is not a valid PDF, so it is not shown.'
+        return checkOnly ? sendJson(res, 415, { error: msg }) : send(res, 415, 'text/plain; charset=utf-8', msg)
+      }
+    }
+    if (checkOnly) {
+      out.stream?.destroy()
+      return sendJson(res, 200, { ok: true })
+    }
+    const headers = {
+      'content-type': 'application/pdf',
+      'content-disposition': inlineName(out.disposition, filePath),
+      'content-security-policy': PDF_CSP,
+      'x-frame-options': 'SAMEORIGIN',
+      'x-content-type-options': 'nosniff',
+      'referrer-policy': 'no-referrer',
+      'cache-control': 'private, no-store',
+    }
+    if (out.length) headers['content-length'] = out.length
+    if (out.contentRange) headers['content-range'] = out.contentRange
+    if (out.acceptRanges) headers['accept-ranges'] = out.acceptRanges
+    res.writeHead(out.status, headers)
+    if (headOnly || !out.stream) {
+      out.stream?.destroy()
+      return res.end()
+    }
+    if (head.length) res.write(head)
+    if (ended) return res.end()
+    out.stream.on('error', () => res.destroy())
+    res.once('close', () => out.stream.destroy())
+    out.stream.resume()
     out.stream.pipe(res)
   }
 
@@ -1144,6 +1218,48 @@ function attachmentName(disposition) {
   } catch {}
   name = name.replace(/[\\/\u0000-\u001f\u007f"]/g, '_').slice(0, 200)
   return `attachment; filename*=UTF-8''${encodeURIComponent(name)}`
+}
+
+const PDF_MAGIC = Buffer.from('%PDF-')
+const PDF_CSP = "default-src 'none'; object-src 'self'; frame-ancestors 'self'"
+
+function inlineName(disposition, fallbackPath = 'document.pdf') {
+  const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(String(disposition ?? ''))
+  let name = match ? match[1] : String(fallbackPath).split('/').pop() || 'document.pdf'
+  try {
+    name = decodeURIComponent(name)
+  } catch {}
+  name = name.replace(/[\\/\u0000-\u001f\u007f"]/g, '_').slice(0, 200) || 'document.pdf'
+  return `inline; filename*=UTF-8''${encodeURIComponent(name)}`
+}
+
+async function readLeading(stream, minBytes = 1024) {
+  const chunks = []
+  let total = 0
+  let ended = false
+  await new Promise((resolve, reject) => {
+    const cleanup = () => {
+      stream.off('data', onData)
+      stream.off('end', onEnd)
+      stream.off('error', onErr)
+    }
+    const onData = (chunk) => {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      chunks.push(buf)
+      total += buf.length
+      if (total >= minBytes) {
+        cleanup()
+        stream.pause()
+        resolve()
+      }
+    }
+    const onEnd = () => { ended = true; cleanup(); resolve() }
+    const onErr = (err) => { cleanup(); reject(err) }
+    stream.on('data', onData)
+    stream.once('end', onEnd)
+    stream.once('error', onErr)
+  })
+  return { head: Buffer.concat(chunks), ended }
 }
 
 const GITHUB_RETURNS = new Set(['/integrations/github/registered', '/integrations/github/installed'])

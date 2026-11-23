@@ -64,7 +64,9 @@ def check(label: str, got, want=True) -> None:
 
 def probe(name: str, config: str) -> dict:
     cfg = TMP / f"{name}.toml"
-    cfg.write_text(config, encoding="utf-8")
+    home = TMP / f"{name}-home"
+    home.mkdir(exist_ok=True)
+    cfg.write_text(f'[paths]\nhome = "{home}"\n' + config, encoding="utf-8")
     vault = TMP / f"{name}-vault"
     vault.mkdir()
     env = {**os.environ, "LOAM_CONFIG": str(cfg), "LOAM_VAULT": str(vault),

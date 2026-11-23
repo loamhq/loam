@@ -356,9 +356,11 @@ export function activate(loam) {
         dlBtn)
     }
     if (info.kind === 'pdf') {
-      return H('div', { class: 'fs-media fs-media-pdf' },
-        H('iframe', { class: 'fs-pdf', src: rawUrl, title: info.filename || 'PDF' }),
-        dlBtn)
+      return H('div', { class: 'fs-pdf' },
+        H('iframe', { class: 'fs-pdfframe', referrerpolicy: 'no-referrer', src: rawUrl, title: info.filename || 'PDF' }),
+        H('div', { class: 'fs-pdfbar' },
+          H('a', { class: 'pillbtn content-mark fs-pdfopen', href: rawUrl, target: '_blank', rel: 'noopener noreferrer' }, icon('external', 14), 'Open full PDF'),
+          dlBtn))
     }
     if (info.kind === 'html') {
       return H('div', { class: 'fs-htmlframe sh-wm-html' },

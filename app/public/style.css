@@ -2273,6 +2273,8 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .fs-pdf { flex: 1; margin: 4px 12px 40px; border-radius: 24px; overflow: hidden; display: flex; flex-direction: column; min-height: calc(60vh / var(--ui-scale, 1)); }
 .fs-file.wide .fs-pdf, .fs-file.wide .fs-media { margin: 0 20px 24px; }
 .fs-pdfframe { flex: 1; border: 0; width: 100%; min-height: calc(60vh / var(--ui-scale, 1)); background: var(--reading-ground); }
+.fs-pdfbar { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; padding: 10px 4px 2px; }
+.fs-pdfbar .pillbtn { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 14px; font-size: 13px; text-decoration: none; }
 .fs-audio { width: min(440px, 100%); }
 .fs-video { max-width: 100%; max-height: calc(68vh / var(--ui-scale, 1)); border-radius: var(--radius-lg); background: var(--paper-card); }
 .fs-split { flex: 1; min-height: 0; min-width: 0; display: flex; }

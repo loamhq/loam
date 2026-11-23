@@ -2853,3 +2853,38 @@ listener for immediate notification in an open page.
   - `loam_units.arm_timer()` calls `reset-failed` before moving a failed timer aside for
     `daemon-reload`; without it, systemd kept the failed unit pinned in memory with its
     old `InactiveExitTimestampMonotonic`, causing immediate off-schedule triggers on restart.
+
+## 2026-11-22 — Live-install test guard, inline PDF serving, and share-header polish
+
+- **Centralized test-config guard in `lib/loam_config.py`.** Whenever
+  `loam_offline.offline()` is active (default when running any `tests/test_*.py`
+  directly or via `tests/run-all`, unless `LOAM_TEST_INSTALL_CONFIG=1` is set
+  for `--live`), importing `loam_config` now checks `/etc/loam/loam.toml`
+  independent of `LOAM_CONFIG` and raises `loam_offline.Offline` immediately if
+  `is_install_config()` is true OR if any live path (`vault`, `workspaces`,
+  `projects`, `plugins`, `state`, `logs`, `jobs`, `reviewer_state`,
+  `secrets_env`, `wake_env`, `user_unit_dir`) resolves equal to or inside the
+  host install's path. `paths.user_unit_dir` is now a first-class config path
+  redirected into scratch by `tests/run-all`, so even a standalone test script
+  or partial scratch `LOAM_CONFIG` omitting `paths.home` cannot reach live
+  logs, workspaces, or systemd units.
+- **App PDF viewer (`/api/files/pdf`) vs Chromium sandbox.** Rendering a PDF
+  inside `<iframe sandbox="" src="blob:...">` fails in Chromium/Edge because
+  PDFium refuses to run in a sandboxed iframe. `app/src/server.js` now exposes
+  `GET /api/files/pdf?root=...&path=...` (with `?check=1` preflight) that
+  enforces `.pdf` extension + `%PDF-` magic bytes server-side (`415` on
+  mismatch) and serves `Content-Type: application/pdf`, `Content-Disposition:
+  inline`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`,
+  `Referrer-Policy: no-referrer`, and `Content-Security-Policy: default-src
+  'none'; object-src 'self'; frame-ancestors 'self'`. Both Files and the share
+  page include an **Open full PDF** link (`target="_blank"`) for iOS Safari,
+  whose framed PDFs only show page 1.
+- **View-only Markdown share header & narrow menu clamping.** On share pages
+  (`opts.history === false`), `plugins/comments/page/editor/editor.js` hides
+  the `"Add a block"` button with the `hidden` attribute (removed from the
+  accessibility tree, never keyboard-reachable when read-only), omits `More ⋯`
+  when there are no resolved notes, and uses a dedicated `Resolved` pill on
+  view-only pages when resolved notes exist so visitors never see two `⋯`
+  buttons side-by-side or an empty `Resolved 0` menu. Both `.dc-menu` and
+  `.sh-menu` clamp horizontally into `[8px, innerWidth - 8px]` so menus never
+  clip off-screen at 390px.

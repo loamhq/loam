@@ -512,6 +512,10 @@ export function downloadHref(root, path) {
   return `/api/files/download?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`
 }
 
+export function pdfHref(root, path) {
+  return `/api/files/pdf?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`
+}
+
 export function archiveHref(root, path = '') {
   const qs = new URLSearchParams({ root })
   if (path) qs.set('path', path)
@@ -911,6 +915,7 @@ export function createFiles({
       flash: '',
       fragment,
       blobUrl: null,
+      pdfUrl: null,
       blobError: '',
     }
     st.file = file
@@ -1211,7 +1216,10 @@ export function createFiles({
         f.shareLink = null; f.linkPromise = null
         prepareLink(f)
         if (f.view === 'html') loadLive(f)
-        if ((oldView !== f.view || oldType !== drawnTypeOf(row)?.type) && ['image', 'pdf'].includes(f.view)) {
+        if (f.view === 'pdf') {
+          f.pdfUrl = null
+          loadBytes(f)
+        } else if ((oldView !== f.view || oldType !== drawnTypeOf(row)?.type) && f.view === 'image') {
           if (f.blobUrl) urls?.revokeObjectURL?.(f.blobUrl)
           f.blobUrl = null
           loadBytes(f)
@@ -1348,6 +1356,21 @@ export function createFiles({
       schedule()
     }
     if (!want || !file.caps.download) return done('')
+    if (file.view === 'pdf') {
+      const href = pdfHref(file.root, file.path)
+      try {
+        const res = await fetchBytes(`${href}&check=1`)
+        if (st.file !== file) return
+        if (res.status === 415) return done('This file is not a valid PDF, so it is not shown.')
+        if (!res.ok) return done(`The host would not send this file (${res.status}).`)
+        file.pdfUrl = href
+        done('')
+      } catch (err) {
+        if (st.file !== file) return
+        done(err.message)
+      }
+      return
+    }
     try {
       const res = await fetchBytes(downloadHref(file.root, file.path))
       if (st.file !== file) return
@@ -2495,15 +2518,20 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, s
         : null
     body = errorBox(limited ? f.view === 'html' ? 'Source unavailable' : 'Text view unavailable' : f.error, f.status, limited ? null : () => files.openFile(f.root, f.path, f.row, { mode: f.mode }), extra)
   } else if (f.view === 'image' && f.blobUrl) body = h('div', { class: 'fs-media' }, h('img', { class: 'fs-img', src: f.blobUrl, alt: name }))
-  else if (f.view === 'pdf' && f.blobUrl)
+  else if (f.view === 'pdf' && f.pdfUrl)
     body = h(
       'div',
       { class: 'fs-pdf' },
-      // No scripts and no same-origin: a browser that will not run its own
-      // PDF viewer in a sandbox shows nothing here, and the download beside it
-      // is the way in.
-      h('iframe', { class: 'fs-pdfframe', sandbox: '', referrerpolicy: 'no-referrer', title: `Preview of ${name}`, src: f.blobUrl }),
-      h('div', { class: 'fs-note' }, h('span', { text: 'If the preview stays blank, your browser will not show PDFs in a sandbox. ' }), downloadButton(f, 'Download the PDF')),
+      // Served from `/api/files/pdf` after server-side `%PDF-` magic check,
+      // with `Content-Type: application/pdf`, `nosniff`, `Referrer-Policy:
+      // no-referrer`, and `default-src 'none'; object-src 'self';
+      // frame-ancestors 'self'`. No `<iframe sandbox>`, which Chromium blocks
+      // PDFium inside; "Open full PDF" gives iOS Safari a direct full-document
+      // tab where framed PDFs only show page 1.
+      h('iframe', { class: 'fs-pdfframe', key: `pdf:${f.root}:${f.path}`, referrerpolicy: 'no-referrer', title: `Preview of ${name}`, src: f.pdfUrl }),
+      h('div', { class: 'fs-pdfbar' },
+        h('a', { class: 'pillbtn content-mark fs-pdfopen', href: f.pdfUrl, target: '_blank', rel: 'noopener noreferrer' }, icon.external(14), h('span', { text: 'Open full PDF' })),
+        f.caps.download ? downloadButton(f, 'Download') : null),
     )
   else if (f.view === 'audio' && f.caps.download)
     body = h(

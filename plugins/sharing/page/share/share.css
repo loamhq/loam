@@ -96,7 +96,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .sh-mebtn { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; transition: box-shadow .15s; }
 .sh-mebtn:hover, .sh-mewrap.open .sh-mebtn { box-shadow: 0 0 0 3px var(--paper-hover); }
 .sh-ddw { position: relative; }
-.sh-menu { position: absolute; top: calc(100% + 6px); right: 0; width: 260px; box-sizing: border-box; background: var(--paper-raised); color: var(--paper-ink); border-radius: var(--radius-lg); padding: 6px; z-index: 40; box-shadow: var(--shadow-popover), 0 0 0 1px var(--paper-rule); }
+.sh-menu { position: absolute; top: calc(100% + 6px); right: 0; width: min(260px, calc(100vw - 16px)); box-sizing: border-box; background: var(--paper-raised); color: var(--paper-ink); border-radius: var(--radius-lg); padding: 6px; z-index: 40; box-shadow: var(--shadow-popover), 0 0 0 1px var(--paper-rule); }
 .sh-mehead { display: flex; align-items: center; gap: 10px; padding: 10px 10px 8px; }
 .sh-mehead b { display: block; font-size: 14px; }
 .sh-mehead small { display: block; font-size: 12px; color: var(--paper-ink-3); }
@@ -117,6 +117,9 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .sh-img { max-width: 100%; max-height: calc(100dvh - 114px); border-radius: var(--radius-md); box-shadow: 0 0 0 1px var(--paper-rule), var(--shadow-float); background: var(--paper-raised); object-fit: contain; }
 .sh-video { max-width: 100%; max-height: calc(100dvh - 114px); border-radius: var(--radius-md); box-shadow: var(--shadow-float); background: var(--paper-pane); }
 .sh-frame-stage { flex: 1 1 auto; display: flex; min-height: 0; padding: 16px; box-sizing: border-box; }
+.sh-pdf-stage { flex-direction: column; gap: 10px; }
+.sh-pdf-bar { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.sh-pdf-bar .sh-pdf-open { padding: 0 13px; }
 .sh-pdf, .sh-html { width: 100%; height: 100%; min-height: 460px; border: 0; border-radius: var(--radius-md); box-shadow: 0 0 0 1px var(--paper-rule), var(--shadow-float); background: var(--paper-raised); }
 
 .sh-card-stage { flex: 1 1 auto; display: grid; place-items: center; padding: 28px; box-sizing: border-box; }

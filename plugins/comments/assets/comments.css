@@ -89,10 +89,11 @@ body:has(.dc-dlg-scrim.on) .dc :is(.primary, .secondary) { background: var(--pap
 .dc-ddw.open > .dc-mpill .dc-cv { transform: rotate(180deg); }
 .dc-gbtn { width: 34px; height: 34px; border-radius: var(--dc-pill); display: grid; place-items: center; color: var(--dc-ink3) !important; transition: background .15s, color .15s; }
 .dc-gbtn:hover, .dc-ddw.open > .dc-gbtn { background: var(--dc-hover); color: var(--dc-ink) !important; }
+.dc-resbtn { width: auto; padding: 0 10px !important; gap: 5px; font-size: 12.5px !important; font-weight: 600; display: inline-flex !important; align-items: center; }
 .dc-head .dc-back { margin-left: calc(-18px + min(18px, var(--pane-lead, 0px))); margin-right: 2px; }
 .dc-headx { display: inline-flex; align-items: center; }
 
-.dc-menu { position: absolute; top: calc(100% + 8px); right: 0; width: 284px; background: var(--dc-ground); color: var(--dc-ink); border-radius: var(--dc-r-lg); box-shadow: var(--dc-float); padding: 6px; z-index: 40; transform-origin: top right; animation: dc-pop .16s var(--dc-ease); }
+.dc-menu { position: absolute; top: calc(100% + 8px); right: 0; width: min(284px, calc(100vw - 16px)); box-sizing: border-box; background: var(--dc-ground); color: var(--dc-ink); border-radius: var(--dc-r-lg); box-shadow: var(--dc-float); padding: 6px; z-index: 40; transform-origin: top right; animation: dc-pop .16s var(--dc-ease); }
 @keyframes dc-pop { from { opacity: 0; transform: translateY(-4px) scale(.98); } to { opacity: 1; transform: none; } }
 @keyframes dc-fade { from { opacity: 0; } to { opacity: 1; } }
 .dc-mi { display: flex !important; align-items: center; gap: 12px; width: 100%; padding: 9px 10px !important; border-radius: var(--dc-r-md); text-align: left; transition: background .12s; }
@@ -349,6 +350,7 @@ body:has(.dc-dlg-scrim.on) .dc :is(.primary, .secondary) { background: var(--pap
 
 /* the empty line: + in the gutter, and the block menu */
 .dc-plus { position: absolute; left: 38px; width: 26px; height: 26px; border-radius: var(--dc-r-sm); display: grid !important; place-items: center; color: var(--dc-ink3) !important; opacity: 0; transform: scale(.8); pointer-events: none; transition: opacity .2s, transform .2s var(--dc-ease), background .15s, color .15s; z-index: 3; margin-top: 40px; }
+.dc-plus[hidden] { display: none !important; }
 .dc-plus svg { transition: transform .2s var(--dc-ease); }
 .dc-plus.on { opacity: .6; transform: none; pointer-events: auto; }
 .dc-plus.on:hover, .dc-plus.open { opacity: 1; background: var(--dc-hover); color: var(--dc-ink) !important; }

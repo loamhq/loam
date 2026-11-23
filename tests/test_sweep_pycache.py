@@ -48,7 +48,7 @@ def test(root: Path) -> None:
     unrelated.write_text("keep")
 
     config = root / "loam.toml"
-    config.write_text(f"[paths]\npycache = {json.dumps(str(cache))}\n")
+    config.write_text(f"[paths]\nhome = {json.dumps(str(root / 'home'))}\npycache = {json.dumps(str(cache))}\n")
     argv = [sys.executable, "-IB", str(SWEEP)]
     env = {**os.environ, "LOAM_CONFIG": str(config)}
     out = subprocess.check_output([*argv, "--dry-run"], env=env, text=True)

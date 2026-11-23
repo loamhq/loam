@@ -167,7 +167,17 @@ nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store`, and
 - **PDF and raster images**: leading magic bytes are verified on the server
   before inline serving; spoofed files fall back to `application/octet-stream`
   with `Content-Disposition: attachment` and `Content-Security-Policy: sandbox;
-  default-src 'none'`.
+  default-src 'none'`. In the app's own Files viewer, PDFs are served via
+  `GET /api/files/pdf` (`Content-Type: application/pdf`, `Content-Disposition:
+  inline`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`,
+  `Referrer-Policy: no-referrer`, `Content-Security-Policy: default-src 'none';
+  object-src 'self'; frame-ancestors 'self'`) after verifying the `%PDF-`
+  header server-side, so Chromium, Edge, Safari, and Firefox render PDFs inline
+  without a sandbox attribute that disables Chromium's PDF viewer while keeping
+  PDFs isolated from the app. On iOS Safari (where framed PDFs only paint page
+  1), both Files and the share page provide a direct **Open full PDF** link
+  (`target="_blank"`) to the inline `application/pdf` URL so mobile readers can
+  view every page natively.
 - **Audio and video**: served via `/raw` with `Accept-Ranges: bytes` and `206
   Partial Content` range forwarding.
 - **Path and symlink containment**: the target file is resolved solely from the

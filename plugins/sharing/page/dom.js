@@ -80,6 +80,7 @@ const ICONS = {
   changed: [{ tag: 'circle', cx: 12, cy: 12, r: 8.5 }, 'M12 7.5v5', 'M12 16v.4'],
   file: ['M7 3.5h6.5l4 4V20a.5.5 0 0 1-.5.5H7a.5.5 0 0 1-.5-.5V4a.5.5 0 0 1 .5-.5z', 'M13.5 3.5v4h4'],
   download: ['M12 4v11', 'M7.5 10.5L12 15l4.5-4.5', 'M5 19h14'],
+  external: ['M14 4h6v6', 'M10 14L20 4', 'M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5'],
   trash: ['M5 7h14', 'M10 7V5h4v2', 'M7 7l1 12.5h8L17 7'],
   robot: [
     { tag: 'rect', x: 4.5, y: 8, width: 15, height: 11, rx: 3.5 },

@@ -216,6 +216,12 @@ async function filePage() {
           h('small', { text: 'The password is asked again next time' }))))
     meWrap.append(menu)
     meWrap.classList.add('open')
+    menu.style.right = ''
+    const r = menu.getBoundingClientRect()
+    const vw = document.documentElement.clientWidth
+    const pad = 8
+    if (r.left < pad) menu.style.right = `${-(pad - r.left)}px`
+    else if (r.right > vw - pad) menu.style.right = `${r.right - (vw - pad)}px`
   }
   document.addEventListener('mousedown', (e) => { if (menu && !meWrap.contains(e.target)) toggleMe() })
 
@@ -329,8 +335,11 @@ function renderFileContent(info) {
       h('img', { class: 'sh-img', src: rawUrl, alt: info.filename || '' }))
   }
   if (info.kind === 'pdf') {
-    return h('div', { class: 'sh-frame-stage' },
-      h('iframe', { class: 'sh-pdf', src: rawUrl, title: info.filename || 'PDF document' }))
+    return h('div', { class: 'sh-frame-stage sh-pdf-stage' },
+      h('iframe', { class: 'sh-pdf', referrerpolicy: 'no-referrer', src: rawUrl, title: info.filename || 'PDF document' }),
+      h('div', { class: 'sh-pdf-bar' },
+        h('a', { class: 'sh-barbtn sh-pdf-open', href: rawUrl, target: '_blank', rel: 'noopener noreferrer' },
+          icon('external', 14), h('span', { text: 'Open full PDF' }))))
   }
   if (info.kind === 'html') {
     return h('div', { class: 'sh-frame-stage' },

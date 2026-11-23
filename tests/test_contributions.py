@@ -466,7 +466,7 @@ with tempfile.TemporaryDirectory() as tmp:
     sentinel_s.write_text("[Service]\nExecStart=/bin/true\n", encoding="utf-8")
     conf = t / "loam.toml"
     conf.write_text(
-        f'[paths]\nroot = "{ROOT}"\nvault = "{t / "vault"}"\n'
+        f'[paths]\nhome = "{t / "home"}"\nroot = "{ROOT}"\nvault = "{t / "vault"}"\n'
         f'plugins = "{t / "plugins"}"\nstate = "{t / "state"}"\n',
         encoding="utf-8",
     )
@@ -487,7 +487,7 @@ with tempfile.TemporaryDirectory() as tmp:
           res["real"] is False and res["units"] == [] and "skipped" in res["apply"], res)
     check("...and live systemd plugin timer units are never removed",
           sentinel_t.is_file() and sentinel_s.is_file())
-    # Also verify LOAM_OFFLINE=1 blocks real_layer() even with no LOAM_CONFIG
+    # Also verify LOAM_OFFLINE=1 blocks real_layer() even with scratch config
     probe_off = (
         "import sys; "
         f"sys.path.insert(0, {str(ROOT / 'lib')!r}); "
@@ -495,6 +495,7 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     off_env = {k: v for k, v in subprocess.os.environ.items() if not k.startswith("LOAM_")}
     off_env["LOAM_OFFLINE"] = "1"
+    off_env["LOAM_CONFIG"] = str(conf)
     check("LOAM_OFFLINE=1 forces real_layer() to False",
           subprocess.check_output([sys.executable, "-c", probe_off], env=off_env, text=True).strip() == "False")
 

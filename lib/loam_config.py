@@ -29,16 +29,14 @@ def is_install_config() -> bool:
     return CONFIG_FILE.resolve() == INSTALL_CONFIG_FILE.resolve()
 
 
-def install_state_dir() -> Path:
-    """The host install's live state folder (from /etc/loam/loam.toml or the
-    current user's default), independent of LOAM_CONFIG."""
+def _install_live_paths() -> dict[str, Path]:
+    """The host install's live mutable paths (from /etc/loam/loam.toml or the
+    install user's defaults), independent of LOAM_CONFIG."""
     try:
         raw = tomllib.loads(INSTALL_CONFIG_FILE.read_text())
     except OSError:
         raw = {}
     paths = raw.get("paths") if isinstance(raw.get("paths"), dict) else {}
-    if paths.get("state"):
-        return Path(str(paths["state"])).expanduser().resolve()
     if paths.get("home"):
         home = Path(str(paths["home"])).expanduser()
     else:
@@ -46,29 +44,39 @@ def install_state_dir() -> Path:
         try:
             home = Path(pwd.getpwnam(user).pw_dir) if user else Path(pwd.getpwuid(os.getuid()).pw_dir)
         except KeyError:
-            home = HOME
-    return (home / ".local" / "state" / "loam").resolve()
+            home = Path.home()
+
+    def _p(key: str, default: Path) -> Path:
+        v = paths.get(key)
+        return (Path(str(v)).expanduser() if v else default).resolve()
+
+    state = _p("state", home / ".local" / "state" / "loam")
+    return {
+        "home": home.resolve(),
+        "vault": _p("vault", home / "vault"),
+        "workspaces": _p("workspaces", home / "ai-labs"),
+        "projects": _p("projects", home / "projects"),
+        "plugins": _p("plugins", home / "plugins"),
+        "state": state,
+        "logs": _p("logs", state / "logs"),
+        "jobs": _p("jobs", state / "jobs"),
+        "reviewer_state": _p("reviewer_state", state / "reviewer"),
+        "secrets_env": _p("secrets_env", home / ".config" / "loam" / "secrets.env"),
+        "wake_env": _p("wake_env", home / ".config" / "loam" / "wake.env"),
+        "user_unit_dir": _p("user_unit_dir", home / ".config" / "systemd" / "user"),
+    }
+
+
+def install_state_dir() -> Path:
+    """The host install's live state folder (from /etc/loam/loam.toml or the
+    current user's default), independent of LOAM_CONFIG."""
+    return _install_live_paths()["state"]
 
 
 def install_plugins_dir() -> Path:
     """The host install's live Yours plugins folder (from /etc/loam/loam.toml or
     the current user's default), independent of LOAM_CONFIG."""
-    try:
-        raw = tomllib.loads(INSTALL_CONFIG_FILE.read_text())
-    except OSError:
-        raw = {}
-    paths = raw.get("paths") if isinstance(raw.get("paths"), dict) else {}
-    if paths.get("plugins"):
-        return Path(str(paths["plugins"])).expanduser().resolve()
-    if paths.get("home"):
-        home = Path(str(paths["home"])).expanduser()
-    else:
-        user = raw.get("user")
-        try:
-            home = Path(pwd.getpwnam(user).pw_dir) if user else Path(pwd.getpwuid(os.getuid()).pw_dir)
-        except KeyError:
-            home = HOME
-    return (home / "plugins").resolve()
+    return _install_live_paths()["plugins"]
 
 
 def _load() -> dict:
@@ -146,7 +154,61 @@ CODEX_BIN = _path("bin.codex", LOCAL_BIN / "codex")
 AGY_BIN = _path("bin.agy", LOCAL_BIN / "agy")
 UV_BIN = _path("bin.uv", LOCAL_BIN / "uv")
 CLAUDE_HOME = HOME / ".claude"
-USER_UNIT_DIR = HOME / ".config" / "systemd" / "user"
+USER_UNIT_DIR = _path("paths.user_unit_dir", HOME / ".config" / "systemd" / "user")
+
+
+def _guard_test_config() -> None:
+    """Refuse any test process that loads the live install config or still points
+    any mutable path (vault, workspaces, plugins, state, logs, jobs, reviewer
+    state, secrets, or user systemd units) at the host install.
+
+    Production processes and `tests/live_*.py` have `loam_offline.offline() == False`.
+    Run tests via `python3 tests/run-all <test.py>` or supply a scratch `LOAM_CONFIG`
+    whose paths (or `paths.home`) are outside the live install.
+    """
+    if os.environ.get("LOAM_TEST_INSTALL_CONFIG"):
+        return
+    try:
+        import loam_offline  # noqa: PLC0415
+    except ImportError:
+        return
+    if not loam_offline.offline():
+        return
+    if is_install_config():
+        raise loam_offline.Offline(
+            f"refused in a test: loam_config would load the live install config "
+            f"({INSTALL_CONFIG_FILE}); run via `python3 tests/run-all <test.py>` "
+            f"or point LOAM_CONFIG at a scratch loam.toml (lib/loam_config.py)"
+        )
+    live = _install_live_paths()
+    configured = {
+        "vault": VAULT,
+        "workspaces": WORKSPACES,
+        "projects": PROJECTS,
+        "plugins": PLUGINS,
+        "state": STATE,
+        "logs": LOGS,
+        "jobs": JOBS,
+        "reviewer_state": REVIEWER_STATE,
+        "secrets_env": SECRETS_ENV,
+        "wake_env": WAKE_ENV,
+        "user_unit_dir": USER_UNIT_DIR,
+    }
+    leaked = []
+    for name, path in configured.items():
+        cur = path.expanduser().resolve()
+        host = live[name]
+        if cur == host or host in cur.parents:
+            leaked.append(f"paths.{name}={cur}")
+    if leaked:
+        raise loam_offline.Offline(
+            f"refused in a test: scratch LOAM_CONFIG ({CONFIG_FILE}) still reaches "
+            f"live install path(s): {', '.join(leaked)}; set paths.home or override "
+            f"those paths in the scratch config (lib/loam_config.py)"
+        )
+
+
+_guard_test_config()
 # The user manager's cgroup, where every lane's memory is counted.
 USER_SLICE = Path(f"/sys/fs/cgroup/user.slice/user-{UID}.slice/"
                   f"user@{UID}.service")

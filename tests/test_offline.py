@@ -82,6 +82,59 @@ def test_child_propagation() -> None:
             os.environ["LOAM_TEST"] = saved_test
 
 
+def test_config_guard() -> None:
+    """Any test (including standalone `python3 tests/test_*.py`) must refuse
+    the live install config and any partial scratch config that leaks live
+    install paths (vault, workspaces, logs, state, plugins, user_unit_dir)."""
+    base_env = {k: v for k, v in os.environ.items()
+                if not k.startswith("LOAM_") and k != "PYTEST_CURRENT_TEST"}
+    base_env["PYTHONDONTWRITEBYTECODE"] = "1"
+
+    # 1. Standalone test_check.py without LOAM_CONFIG refuses immediately.
+    r1 = subprocess.run([sys.executable, str(ROOT / "tests" / "test_check.py")],
+                        env=base_env, capture_output=True, text=True, timeout=30)
+    assert r1.returncode != 0, (r1.returncode, r1.stdout, r1.stderr)
+    assert "refused in a test: loam_config would load the live install config" in r1.stderr, r1.stderr
+
+    # 2. Explicit LOAM_CONFIG=/etc/loam/loam.toml in a test refuses immediately.
+    r2 = subprocess.run(
+        [sys.executable, "-c",
+         f"import sys; sys.path.insert(0, {str(ROOT / 'lib')!r}); import loam_config"],
+        env={**base_env, "LOAM_OFFLINE": "1", "LOAM_CONFIG": "/etc/loam/loam.toml"},
+        capture_output=True, text=True, timeout=30,
+    )
+    assert r2.returncode != 0, (r2.returncode, r2.stdout, r2.stderr)
+    assert "refused in a test: loam_config would load the live install config" in r2.stderr, r2.stderr
+
+    with tempfile.TemporaryDirectory(prefix="loam-cfg-guard-") as td:
+        t = Path(td)
+        # 3. Partial scratch LOAM_CONFIG omitting paths.home/logs/workspaces/user_unit_dir refuses.
+        partial = t / "partial.toml"
+        partial.write_text(f'[paths]\nplugins = "{t / "plugins"}"\n', encoding="utf-8")
+        r3 = subprocess.run(
+            [sys.executable, "-c",
+             f"import sys; sys.path.insert(0, {str(ROOT / 'lib')!r}); import loam_config"],
+            env={**base_env, "LOAM_OFFLINE": "1", "LOAM_CONFIG": str(partial)},
+            capture_output=True, text=True, timeout=30,
+        )
+        assert r3.returncode != 0, (r3.returncode, r3.stdout, r3.stderr)
+        assert "still reaches live install path(s):" in r3.stderr, r3.stderr
+        for leaked in ("paths.vault=", "paths.workspaces=", "paths.logs=", "paths.user_unit_dir="):
+            assert leaked in r3.stderr, (leaked, r3.stderr)
+
+        # 4. Complete scratch LOAM_CONFIG (setting paths.home under temp) succeeds cleanly.
+        clean = t / "clean.toml"
+        clean.write_text(f'[paths]\nhome = "{t / "home"}"\n', encoding="utf-8")
+        r4 = subprocess.run(
+            [sys.executable, "-c",
+             f"import sys; sys.path.insert(0, {str(ROOT / 'lib')!r}); import loam_config as lc; print(lc.USER_UNIT_DIR)"],
+            env={**base_env, "LOAM_OFFLINE": "1", "LOAM_CONFIG": str(clean)},
+            capture_output=True, text=True, timeout=30,
+        )
+        assert r4.returncode == 0, (r4.returncode, r4.stdout, r4.stderr)
+        assert str(t / "home") in r4.stdout, r4.stdout
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

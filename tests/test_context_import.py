@@ -497,7 +497,9 @@ def main() -> int:
           (False, False, True, True, False, "text", True))
 
     # -- the upload routes take a ZIP --------------------------------------------------------
-    os.environ["LOAM_CONFIG"] = str(TMP / "none.toml")
+    scratch_cfg = TMP / "loam.toml"
+    scratch_cfg.write_text(f'[paths]\nhome = "{TMP / "home"}"\n', encoding="utf-8")
+    os.environ["LOAM_CONFIG"] = str(scratch_cfg)
     sys.path.insert(0, str(ROOT / "lib"))
     import loam_broker as cfg  # noqa: E402
     import loam_files as files  # noqa: E402

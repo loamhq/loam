@@ -827,6 +827,7 @@ PAGE_RELAY: dict[str, list[str] | str] = {
     "rest === '/files/link'": "a read",
     "rest === '/files/live'": "a read",
     "rest === '/files/preview'": "a read",
+    "rest === '/files/pdf'": "a read: inline PDF stream for the Files viewer (magic-verified, CSP-locked)",
     "rest === '/files/download'": "a read",
     "rest === '/files/archive'": ("a read: a Vault or AI Spaces folder as one zip, "
                                   "the signed-in owner's only (loam-ui, 2026-11-18)"),

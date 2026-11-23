@@ -40,7 +40,8 @@ TMP = Path(tempfile.mkdtemp(prefix="loam-own-config-test-"))
 
 def child(config: str, code: str) -> str:
     cfg = TMP / f"loam-{abs(hash(config))}.toml"
-    cfg.write_text(config, encoding="utf-8")
+    base = f'[paths]\nhome = "{TMP / "home"}"\n'
+    cfg.write_text(base + config, encoding="utf-8")
     env = {**os.environ, "LOAM_CONFIG": str(cfg), "PYTHONDONTWRITEBYTECODE": "1"}
     out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True,
                          text=True, cwd=str(ROOT), check=False)

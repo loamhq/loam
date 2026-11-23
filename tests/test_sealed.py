@@ -34,7 +34,8 @@ for name, path in (("vault", lc.VAULT), ("workspaces", lc.WORKSPACES),
                    ("projects", lc.PROJECTS), ("plugins", lc.PLUGINS),
                    ("state", lc.STATE), ("logs", lc.LOGS), ("jobs", lc.JOBS),
                    ("secrets_env", lc.SECRETS_ENV), ("wake_env", lc.WAKE_ENV),
-                   ("reviewer_state", lc.REVIEWER_STATE)):
+                   ("reviewer_state", lc.REVIEWER_STATE),
+                   ("user_unit_dir", lc.USER_UNIT_DIR)):
     check(f"paths.{name} is inside the scratch folder", scratch in path.parents, True)
 for var in ("LOAM_LOCK_DIR", "LOAM_SCHEDULE_STATE", "LOAM_HOST_SETTINGS",
             "LOAM_THREADS_STATE", "LOAM_VAULT", "LOAM_WAITERS_DIR",

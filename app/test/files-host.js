@@ -93,7 +93,7 @@ export function filesHost({ texts = {} } = {}) {
     'GET /v1/files/download': (req, res, url) => {
       const p = url.searchParams.get('path')
       host.downloads.push(p)
-      const bytes = { 'Notes/plan.md': Buffer.from('# Plan\n\nThe next useful step.\n'), 'Notes/pic.png': PNG, 'Notes/fake.png': Buffer.from('<svg onload=alert(1)></svg>'), 'Notes/report.pdf': PDF }[p]
+      const bytes = { 'Notes/plan.md': Buffer.from('# Plan\n\nThe next useful step.\n'), 'Notes/pic.png': PNG, 'Notes/fake.png': Buffer.from('<svg onload=alert(1)></svg>'), 'Notes/report.pdf': PDF, 'Notes/fake.pdf': Buffer.from('<html><script>alert(1)</script></html>') }[p]
       if (!bytes) return json(res, 404, { error: `nothing at vault/${p}` })
       res.writeHead(200, {
         'content-type': p.endsWith('.md') ? 'text/markdown' : p.endsWith('.pdf') ? 'application/pdf' : 'image/png',
