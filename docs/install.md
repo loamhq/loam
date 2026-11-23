@@ -18,6 +18,8 @@ curl -fsSL https://<where the release is>/install.sh | sudo bash -s -- --domain 
 ```
 
 or `--name sam` in place of `--domain` (below, "Where your Loam lives").
+Add `--data-dir /mnt/loam-data` to place all of the owner's data on an
+existing, mounted disk (below, "Putting your data on its own disk").
 It asks for anything not given (where it lives, `--owner "Sam"`,
 `--timezone Europe/Berlin`), from the terminal even though the script came
 down a pipe.
@@ -61,6 +63,121 @@ installation token of the Loam HQ GitHub App (`lib/loam_github_app.py`
 mints those; one lives an hour, which is enough, because a re-run uses the
 release already fetched). A token is for one install and is never stored on
 the server. Once the repository is public, none of this is needed.
+
+## Putting your data on its own disk (`--data-dir`)
+
+Without `--data-dir`, an install puts everything on the server's own disk,
+byte-for-byte unchanged. With `--data-dir DIR` pointing at an existing,
+writable directory on a separate mounted filesystem (for example a cloud block
+volume mounted at `/mnt/loam-data`), all of the person's data lives under `DIR`
+while ordinary paths (`/home/loam/...`, `/etc/loam/...`) stay unchanged:
+
+```sh
+curl -fsSL https://<where the release is>/install.sh \
+  | sudo bash -s -- --domain loam.example.com --data-dir /mnt/loam-data
+```
+
+### What lives on the data disk vs the server disk
+
+Loam uses Linux bind mounts recorded in a managed `# >>> loam:data-disk` block
+in `/etc/fstab` (ordered with `x-systemd.requires-mounts-for=...`) rather than
+symlinks, so atomic renames (such as `~/.claude.json`), cross-folder moves and
+Loam's symlink-refusing guards all behave identically to a single-disk install:
+
+- **On the data disk (`DIR`)**:
+  - `DIR/loam-data.json` — format marker (`version: 1`, creation/adoption
+    timestamps, user/UID/GID, domain).
+  - `DIR/etc` bind-mounted at `/etc/loam` — `loam.toml` (with
+    `[storage] data_dir`), `claimed`, `public`, `share/*.token`,
+    `authelia/secrets.env` (which holds the key that decrypts the login
+    database), and `commands/`.
+  - `DIR/home` bind-mounted at `/home/<user>` — the vault (`vault/`), agent
+    workspaces and shared commons (`agents/`, including `_shared/reach.md`),
+    Yours plugins and plugin settings/data (`plugins/`), project checkouts
+    (`projects/`), secrets (`~/.config/loam/{secrets,wake}.env`), SSH deploy
+    keys (`~/.ssh/`), Syncthing config (`~/.config/syncthing/`), provider
+    sign-ins (`~/.claude/`, `~/.claude.json`, `~/.gemini/`,
+    `~/.local/state/loam/broker/{codex,antigravity}`), and Loam runtime state
+    (`~/.local/state/loam/`: threads, broker settings/sessions/token, plugin
+    switches/keys/private state including Git backup keys, GitHub connection,
+    agent sites, project registry, schedules, reviewer state, reports, jobs
+    metadata, logs, attention, autocommit and update records).
+  - `DIR/login/authelia-data` — mounted into the `authelia-data` Docker volume
+    using Docker's `local` bind driver (`type=none,o=bind,device=...`), keeping
+    `users_database.yml` and `db.sqlite3` (passwords, TOTP, passkeys) on the
+    data disk. `bin/gen-deploy` aligns its ownership to the server's remapped
+    Docker root (`dockremap`).
+- **On the server's local disk**:
+  - Seven overlays under `/var/lib/loam/local/` bind-mounted back on top inside
+    `/home/<user>` so heavy I/O, build scratch and reproducible files stay on
+    local NVMe: `loam` (`paths.root`), `.local/bin`, `.local/share` (pinned
+    provider CLIs and `mcp-venv`), `.cache` (Python bytecode and package
+    caches), `.config/systemd/user` and `.config/environment.d` (regenerated
+    per server), and `.local/state/loam/worktrees` (engineer job checkouts and
+    builds).
+  - System paths on `/`: `/var/lib/loam/{install,edge.json,browser,host-history}`,
+    `/var/lib/loam-releases/`, `/var/lib/loam-app/`, `/var/lib/docker/`
+    (images, containers, ephemeral `authelia-sessions`), `/var/lib/caddy/`
+    (TLS certificates, re-issued automatically), `/var/cache/loam/`,
+    `/opt/loam/chromium/`, `/tmp/loam-job-*`.
+
+### Moving the disk to a fresh server
+
+Detach the volume from the old server (after stopping Loam so SQLite and git
+writes are quiescent), attach and mount it on a fresh server (at the same path
+or a new path), and run:
+
+```sh
+curl -fsSL https://<where the release is>/install.sh \
+  | sudo bash -s -- --data-dir /mnt/loam-data
+```
+
+No `--domain`, `--name`, `--owner` or `--timezone` is needed:
+
+1. Step 1 validates that `DIR` is a separate mounted filesystem, recognizes
+   `loam-data.json`, refuses to touch any unrecognized non-empty directory,
+   mounts `DIR/etc` onto `/etc/loam`, and updates only `edge.address` (the new
+   server's IPv4), `storage.data_dir` (the new mount path) and any explicit
+   rehearsal overrides in `loam.toml`, preserving all other keys and comments.
+2. Step 2 does not treat DNS still pointing at the old server as "someone
+   else's name"; it prints the A records to move to the new server and carries
+   on.
+3. Step 4 creates the Unix user matching the disk's UID/GID when free (or
+   re-owns `DIR/home` if those IDs collide), mounts `DIR/home` and the seven
+   local overlays, and writes `/etc/fstab`.
+4. Steps 5–9 install Loam, `uv`, `mcp-venv` and pinned provider CLIs onto the
+   new server's local disk, refresh `System/Loam/` without recreating deleted
+   starter files, skip `seed-starter` and `preinstall-plugins`, re-provision
+   existing live agents, reconcile all schedules and enabled plugin servers and
+   timers, and take a fresh server host-history snapshot.
+5. Steps 10–11 align `DIR/login/authelia-data` ownership to the new server's
+   `dockremap` UID/GID, attach the `authelia-data` Docker volume, start
+   Authelia immediately against the preserved login (skipping `/claim` when
+   already claimed), deploy the app to local `/var/lib/loam-releases/`, and
+   issue fresh TLS certificates once DNS points to the new server.
+
+`loam update`, `bin/check-drift`, `loam status`, autocommit and Git backup all
+work without writing person data to the server's root disk. `bin/check-drift`
+and `loam status` also check that the data disk is mounted separately, all nine
+bind mounts and the `/etc/fstab` block match, and `authelia-data` points at
+`DIR/login/authelia-data`.
+
+### Limits to keep in mind
+
+- **Never run two servers against the same data disk at once**, and do not run
+  old and new servers concurrently with copied OAuth refresh tokens (providers
+  rotate refresh tokens on use).
+- **Custom stateful Docker app volumes** created outside Loam's core (other
+  than `authelia-data`) stay under `/var/lib/docker/` unless backed by a bind
+  path under `DIR`. Source repositories in `~/projects/` and agent static sites
+  in `state/sites/` move with the disk.
+- **Local commits directly inside `paths.root` (`/home/loam/loam`)** live on
+  the server disk (reinstalled from the release on a new server). Keep
+  customisations as plugins under `~/plugins/`, which live on the data disk.
+- **Provider sign-ins**: Claude Code, Codex and Antigravity store their
+  headless Linux sign-in tokens as files on the data disk, so they travel with
+  the disk. An upstream provider may still ask for re-authentication after a
+  long period offline or if a refresh token expires or is invalidated remotely.
 
 ## Where your Loam lives: your own domain, or a name we give you
 

@@ -184,6 +184,26 @@ def sqlite_copy(path: str, uid: int, gid: int) -> bytes:
     return done.stdout
 
 
+def _volume_host_path(raw: str) -> str:
+    """Parse `docker volume inspect --format '{{json .}}'` (preferring
+    `Options.device` for a bind-backed `--data-dir` volume, falling back to
+    `Mountpoint`), or accept a plain host path string."""
+    text = (raw or "").strip()
+    if text.startswith(("{", "[")):
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                parsed = parsed[0] if parsed else {}
+            if isinstance(parsed, dict):
+                opts = parsed.get("Options")
+                if isinstance(opts, dict) and opts.get("device"):
+                    return str(opts["device"]).strip()
+                return str(parsed.get("Mountpoint") or "").strip()
+        except ValueError:
+            return ""
+    return text
+
+
 def find_login(previous: dict | None = None) -> tuple[str | None, str]:
     """The host folder of the login's volume, and a sentence saying what was
     found. ``previous`` is the last state's ``about``: when Docker is there
@@ -193,10 +213,10 @@ def find_login(previous: dict | None = None) -> tuple[str | None, str]:
     if not docker:
         return None, "no Docker on this machine, so no login database to keep"
     try:
-        done = subprocess.run([docker, "volume", "inspect", "--format", "{{.Mountpoint}}",
+        done = subprocess.run([docker, "volume", "inspect", "--format", "{{json .}}",
                                LOGIN_VOLUME], capture_output=True, text=True, env=ENV,
                               check=False, timeout=30)
-        out, err, code = done.stdout.strip(), done.stderr.strip(), done.returncode
+        out, err, code = _volume_host_path(done.stdout), done.stderr.strip(), done.returncode
     except (OSError, subprocess.TimeoutExpired) as exc:
         out, err, code = "", str(exc), 1
     err = (err.splitlines() or [""])[-1]

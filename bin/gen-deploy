@@ -434,6 +434,48 @@ def wait_healthy(container: str, seconds: int = 90) -> str:
     return state
 
 
+def ensure_login_volume() -> None:
+    """Ensure the `authelia-data` Docker volume exists. On a `--data-dir`
+    install it is a `local` bind volume pointing at `<data_dir>/login/authelia-data`,
+    owned by this server's remapped container root (`dockremap`). Without
+    `storage.data_dir`, it is a plain Docker-managed volume as before."""
+    target = dep.login_data_dir()
+    if target is None:
+        res = run([*DOCKER, "volume", "create", "authelia-data"])
+        if res.returncode:
+            die(f"could not create the authelia-data volume: {res.stderr.strip()[:300]}")
+        print("  authelia-data volume present")
+        return
+    uid, gid = dep.docker_root_owner()
+    target.parent.mkdir(parents=True, mode=0o755, exist_ok=True)
+    os.chmod(target.parent, 0o755)
+    target.mkdir(mode=0o700, exist_ok=True)
+    os.chmod(target, 0o700)
+    os.chown(target, uid, gid)
+    for top, dirs, files in os.walk(target, followlinks=False):
+        for name in dirs + files:
+            p = os.path.join(top, name)
+            try:
+                os.lchown(p, uid, gid)
+            except OSError:
+                pass
+    import loam_data_disk as dd  # noqa: PLC0415
+    info = dd.docker_volume_info("authelia-data", docker=DOCKER[0], run=run)
+    if info is not None:
+        dev = ((info.get("Options") or {}).get("device") or "").strip()
+        if dev and Path(dev).resolve() == target.resolve():
+            print(f"  authelia-data volume present ({target})")
+            return
+        die(f"docker volume authelia-data already exists with device {dev or '(none)'!r}, "
+            f"expected {target}")
+    res = run([*DOCKER, "volume", "create", "--driver", "local",
+               "--opt", "type=none", "--opt", "o=bind",
+               "--opt", f"device={target}", "authelia-data"])
+    if res.returncode:
+        die(f"could not create the authelia-data volume at {target}: {res.stderr.strip()[:300]}")
+    print(f"  authelia-data volume present ({target})")
+
+
 def init_secrets() -> int:
     """An install's login, before anyone has claimed it (first release L12):
     Authelia's three secrets and its data volume, and no user. The claim
@@ -447,10 +489,7 @@ def init_secrets() -> int:
     else:
         write_root(dep.AUTHELIA_SECRETS, _secrets_env(), 0o600)
         print(f"  wrote {dep.AUTHELIA_SECRETS} (0600 root, three secrets)")
-    res = run([*DOCKER, "volume", "create", "authelia-data"])
-    if res.returncode:
-        die(f"could not create the authelia-data volume: {res.stderr.strip()[:300]}")
-    print("  authelia-data volume present")
+    ensure_login_volume()
     return 0
 
 
@@ -486,7 +525,7 @@ def init_login(user: str) -> int:
     write_root(dep.AUTHELIA_SECRETS, env, 0o600)
     print(f"  wrote {dep.AUTHELIA_SECRETS} (0600 root, three secrets)")
 
-    run([*DOCKER, "volume", "create", "authelia-data"])
+    ensure_login_volume()
 
     # 2. The user, with a generated first password hashed by Authelia's own
     #    CLI. The password is passed to the child's argv and never printed.

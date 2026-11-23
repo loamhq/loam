@@ -38,6 +38,18 @@ import loam_contributions as contributions  # noqa: E402
 import loam_skills  # noqa: E402
 
 
+def check_data_disk(findings: list) -> None:
+    """When installed with `--data-dir`, verify the data disk mount, marker,
+    bind mounts, `/etc/fstab` block, and bind-backed `authelia-data` volume.
+    No-op on ordinary installs where `storage.data_dir` is unset."""
+    if lc.DATA_DIR is None:
+        return
+    import loam_data_disk as dd  # noqa: PLC0415
+    import loam_deploy as dep  # noqa: PLC0415
+    findings.extend(dd.drift_findings(
+        lc.DATA_DIR, lc.HOME, etc=lc.CONFIG_FILE.parent, docker_run=dep._sudo))
+
+
 def check_skills(findings: list) -> None:
     """The shared skills library (first release L7). `<system>/Loam/` in the
     vault is generated from this repository's `docs/library/`, and the skill
@@ -1159,6 +1171,7 @@ def main() -> int:
     deploy_notes = check_deploy(findings)
     check_plugin_contributions(findings)
     check_skills(findings)
+    check_data_disk(findings)
 
     # A box-move plugin keeps its own checks (drift.check, run above).
 
