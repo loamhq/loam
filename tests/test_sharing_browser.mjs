@@ -458,6 +458,10 @@ try {
     ok('Unnamed view-only ZIP skips "What should we call you?" completely', (await page.getByText('What should we call you?').count()) === 0)
     ok('ZIP share page renders Download card', (await page.locator('.sh-dlprimary').count()) === 1)
     ok('View-only ZIP share page hides comment composer (zero dead controls)', (await page.locator('.dc-panel-in').count()) === 0)
+    await page.setViewportSize({ width: 390, height: 844 })
+    const jumpVisibleOnPhone = await page.locator('.sh-comments-jump').isVisible().catch(() => false)
+    ok('View-only ZIP with 0 comments hides phone Comments jump button', jumpVisibleOnPhone === false)
+    await page.setViewportSize({ width: 1440, height: 900 })
 
     // 2c2. Visitor name asked ONCE per browser across unnamed writable links; named link keeps its own name!
     const nameCtx = await browser.newContext({ viewport: { width: 1280, height: 800 } })

@@ -184,8 +184,9 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   .sh-bar-sub { display: none; }
   .sh-barbtn-lbl { display: none; }
   .sh-barbtn { padding: 0 10px; }
-  .sh-comments-jump { display: inline-flex; }
+  .sh-comments-jump:not([hidden]) { display: inline-flex; }
   .sh-comments-jump .sh-barbtn-lbl { display: inline; }
+  .sh-panel-col[hidden] { display: none; }
   .sh-stage.with-panel { display: flex; flex-direction: column; overflow-y: auto; }
   .sh-stage.with-panel .sh-viewer { flex: none; overflow: visible; }
   .sh-stage.with-panel .sh-frame-stage { height: 52dvh; min-height: 300px; }
