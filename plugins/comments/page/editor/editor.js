@@ -2132,15 +2132,24 @@ export function createDocEditor(opts) {
 
   function clampOpenMenu() {
     const m = head.querySelector('.dc-ddw.open > .dc-menu')
-    if (!m || !head.isConnected) return
+    if (!m || !head.isConnected || !m.parentElement) return
     m.style.right = ''
     m.style.left = ''
     const z = zoom()
-    const r = m.getBoundingClientRect()
+    const pr = m.parentElement.getBoundingClientRect()
+    const w = m.offsetWidth * z
     const vw = document.documentElement.clientWidth
     const pad = 8
-    if (r.left < pad) m.style.right = `${-((pad - r.left) / z)}px`
-    else if (r.right > vw - pad) m.style.right = `${(r.right - (vw - pad)) / z}px`
+    const naturalLeft = pr.right - w
+    if (naturalLeft < pad) {
+      const targetLeft = Math.min(pad, Math.max(pad, vw - pad - w))
+      m.style.right = 'auto'
+      m.style.left = `${(targetLeft - pr.left) / z}px`
+    } else if (pr.right > vw - pad) {
+      const targetLeft = Math.max(pad, vw - pad - w)
+      m.style.right = 'auto'
+      m.style.left = `${(targetLeft - pr.left) / z}px`
+    }
   }
 
   function toggleMenu(id) {
@@ -2164,7 +2173,7 @@ export function createDocEditor(opts) {
     // A host's own buttons may be made afresh on every call (Share is):
     // the same markup is the same button.
     const same = (n, o) => n === o || (n && o && n.outerHTML === o.outerHTML)
-    if (key === headKey && extras.length === headNodes.length && extras.every((n, i) => same(n, headNodes[i])) && head.firstChild) { fitHead(); return }
+    if (key === headKey && extras.length === headNodes.length && extras.every((n, i) => same(n, headNodes[i])) && head.firstChild) { fitHead(); if (st.menu) clampOpenMenu(); return }
     headKey = key
     headNodes = extras
     const m = MODES.find(x => x.id === st.mode)

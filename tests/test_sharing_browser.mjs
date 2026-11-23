@@ -496,8 +496,14 @@ try {
     ok('Comment-mode Markdown keeps More -> Resolved 1 when resolved comments exist',
       specMenuText.includes('Resolved') && specMenuText.includes('1'), specMenuText)
     ok('Comment-mode More menu is never clipped at 390px',
-      specMenuBox && specMenuBox.x >= 0 && (specMenuBox.x + specMenuBox.width) <= 390,
+      specMenuBox && specMenuBox.x >= 7 && (specMenuBox.x + specMenuBox.width) <= 383,
       JSON.stringify(specMenuBox))
+    await page.locator('.dc-head .dc-mpill').click()
+    await page.locator('.dc-menu').waitFor()
+    const modeMenuBox = await page.locator('.dc-menu').boundingBox()
+    ok('Comment-mode Mode menu is never clipped at 390px',
+      modeMenuBox && modeMenuBox.x >= 7 && (modeMenuBox.x + modeMenuBox.width) <= 383,
+      JSON.stringify(modeMenuBox))
     await page.keyboard.press('Escape')
     await page.setViewportSize({ width: 1440, height: 900 })
 

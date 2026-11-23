@@ -217,11 +217,18 @@ async function filePage() {
     meWrap.append(menu)
     meWrap.classList.add('open')
     menu.style.right = ''
-    const r = menu.getBoundingClientRect()
+    menu.style.left = ''
+    const pr = meWrap.getBoundingClientRect()
+    const w = menu.offsetWidth
     const vw = document.documentElement.clientWidth
     const pad = 8
-    if (r.left < pad) menu.style.right = `${-(pad - r.left)}px`
-    else if (r.right > vw - pad) menu.style.right = `${r.right - (vw - pad)}px`
+    if (pr.right - w < pad) {
+      menu.style.right = 'auto'
+      menu.style.left = `${pad - pr.left}px`
+    } else if (pr.right > vw - pad) {
+      menu.style.right = 'auto'
+      menu.style.left = `${Math.max(pad, vw - pad - w) - pr.left}px`
+    }
   }
   document.addEventListener('mousedown', (e) => { if (menu && !meWrap.contains(e.target)) toggleMe() })
 
