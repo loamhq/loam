@@ -211,7 +211,7 @@ export function applyThreadEvent(open, e) {
         open.messages.splice(anchor + 1, 0, message)
       }
     } else settle(open.messages, message)
-    if (!open.after || messageNumber(message.id) > messageNumber(open.after)) open.after = message.id
+    if (e.advanceCursor !== false && (!open.after || messageNumber(message.id) > messageNumber(open.after))) open.after = message.id
     // The accepted own message may reach SSE before its HTTP response.
     if (open.pending?.text === message.text && isOwner(message.author)) open.pending = null
   }

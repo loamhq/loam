@@ -172,6 +172,10 @@
 .tt-empty-icon .thread-tile { border-radius:24px; }
 .tt-composer { width:100%; position:relative; }
 .tt-composer > .banner { margin:0 auto 10px; max-width:760px; }
+.tt-composer > .noticerow { width:calc(100% - 24px); max-width:760px; margin:0 auto 2px; padding:4px 10px 0; flex-wrap:wrap; gap:4px 8px; }
+.pane .tt-composer > .noticerow { width:100%; }
+.tt-connection-text { min-width:0; }
+.tt-connection-retry { flex:none; cursor:pointer; }
 .tt-reply-chip { display:flex; align-items:center; gap:9px; width:calc(100% - 24px); max-width:760px; margin:0 auto 8px; padding:8px 8px 8px 12px; border-radius:16px; background:var(--paper-card); border-left:3px solid var(--paper-rule-strong); color:var(--paper-ink); }
 .tt-quote-copy { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; font-size:12px; line-height:1.4; }
 .tt-quote-copy strong { color:var(--paper-ink); font-size:11px; font-weight:600; }

@@ -224,3 +224,20 @@ have never met.
   column, and size single/stacked `.reply-image` frames directly so
   `.reply-caption` keeps a `62ch` reading measure. See `test/reply-images.test.js`,
   `test/portrait-images-browser.mjs`, and `docs/evidence/portrait-images/README.md`.
+- **Open-thread live stream recovery** (`public/threads.js`, `public/link.js`,
+  `public/thread-record.js`, `public/app.js`): an open thread's event stream
+  (`/api/threads/:id/events?after=…`) runs through `createLink` with
+  `stopOn404: false` (so transient 404s confirm removal rather than stopping)
+  and `watchdog: true` (detecting both missed `: ping` keepalives after
+  `pingMs + STALE_MARGIN_MS` and hung `connecting` fetches after
+  `CONNECT_TIMEOUT_MS`). Returning from `hidden` (`visibilitychange`), `resume`,
+  `online`, `pageshow` (`persisted !== false`), or a network-type switch calls
+  `tick(..., { resync: true, backoff: true })`, which reopens the stream cleanly
+  without flashing a disconnect notice unless the fresh attempt fails; the 5 s
+  `pageHeartbeat` passes `backoff: false` so it checks staleness without cutting
+  short retry backoff or flickering the notice. Out-of-band HTTP send responses
+  (`PUT`/`POST /messages`) pass `advanceCursor: false` to `applyThreadEvent` so
+  they never advance `open.after` over unseen messages, and `watchSendEcho`
+  resyncs after 3.5 s if the SSE stream fails to echo the accepted message. See
+  `test/thread-live-recovery.test.js`, `test/thread-live-recovery-browser.mjs`,
+  and `docs/evidence/thread-live-recovery/README.md`.
