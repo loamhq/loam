@@ -98,6 +98,25 @@ test('core rail and tab commands use the same place selection', () => {
     scope.dispose()
   }
 })
+test('chat.draft opens an unsent new thread with an optional agent', () => {
+  const registry = createCoreRegistry(), created = []
+  const scope = registry.scope({ id: '@core' })
+  registerPage({ ...scope, ui: { host: { registry, state: { wide: true }, threads: { create: (persona, opts) => created.push([persona, opts]) } } } })
+  scope.commands.run('chat.draft', { text: '> Card context\n\n' })
+  scope.commands.run('chat.draft', { agent: null, text: 'Another draft' })
+  scope.commands.run('chat.draft', { agent: '  ', text: 'Blank agent falls back to none' })
+  scope.commands.run('chat.draft', { agent: 'scout', text: 'Ask Scout' })
+  assert.deepEqual(created, [
+    [null, { draft: '> Card context\n\n' }],
+    [null, { draft: 'Another draft' }],
+    [null, { draft: 'Blank agent falls back to none' }],
+    ['scout', { draft: 'Ask Scout' }],
+  ])
+  assert.throws(() => scope.commands.run('chat.draft', { text: '   ' }), /4,000/)
+  assert.throws(() => scope.commands.run('chat.draft', { agent: 42, text: 'Hi' }), /4,000/)
+  assert.throws(() => scope.commands.run('chat.draft', { text: 'x'.repeat(4001) }), /4,000/)
+  scope.dispose()
+})
 test('a browser refusing device storage still opens a usable panel', () => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, get() { throw new Error('Storage is blocked') } })

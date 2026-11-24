@@ -28,9 +28,12 @@ export function registerPage(loam) {
   // The Market's install sheet, over the Market or over anything else (a
   // thread's listing card opens it by id), and the Market by id or kind.
   loam.places.app.overlay.add({ id: 'core.market-install', render: () => host.marketInstallNodes() })
-  loam.commands.register({ id: 'chat.draft', title: 'Open a chat draft', run: ({ agent, text }) => {
-    if (typeof agent !== 'string' || typeof text !== 'string' || !text.trim() || text.length > 4000) throw new Error('Choose an agent and a draft of up to 4,000 characters.')
-    return host.threads.create(agent, { draft: text })
+  loam.commands.register({ id: 'chat.draft', title: 'Open a chat draft', run: ({ agent = null, text } = {}) => {
+    const persona = agent == null ? null : typeof agent === 'string' ? (agent.trim() || null) : undefined
+    if (persona === undefined || typeof text !== 'string' || !text.trim() || text.length > 4000) {
+      throw new Error('Provide a draft of up to 4,000 characters, and an optional agent.')
+    }
+    return host.threads.create(persona, { draft: text })
   } })
   loam.commands.register({ id: 'market.open', title: 'Open the Market', run: ({ id = null, kind = 'all', q = '' } = {}) => host.openMarket({ id, kind, q }) })
   loam.commands.register({ id: 'market.install', title: 'Install from the Market', run: ({ id }) => host.openMarketInstall(id) })

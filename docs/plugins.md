@@ -1672,8 +1672,10 @@ archived lists alone.
 
 At `apps.icon`, a plugin can render the picture for its own enabled Apps
 row. Returning null uses the usual app picture. Both registrations go away
-when the plugin is disabled. Use `chat.draft` with `{agent,text}` to open
-a composer with an editable suggestion. Sending remains the person's action.
+when the plugin is disabled. Use `chat.draft` with `{text}` (or `{agent, text}`
+to pre-select an agent) to open a new thread with a pre-filled, editable
+composer (up to 4,000 characters). Any open sheet closes, the composer focuses
+at the end of the draft, and sending remains the person's action.
 
 The fresh installer consumes the release's `lib/loam_preinstall.py:PINS`
 during its starter step. Each entry identifies the plugin, GitHub repository,

@@ -683,8 +683,24 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       replyTo: options.source ?? null,
       promptTitle: options.promptTitle ?? null, promptBody: options.promptBody ?? null, promptPlaceholder: options.placeholder ?? null }
     // Pre-fill the composer and leave sending to the person.
-    if (typeof options.draft === 'string' && options.draft) draft.value = options.draft
-    redraw(); setTimeout(() => { draft.focus(); if (options.draft) draft.setSelectionRange(draft.value.length) }, 0)
+    if (typeof options.draft === 'string' && options.draft) {
+      draft.value = options.draft
+      o.focusDraftEnd = true
+    }
+    redraw()
+    setTimeout(() => {
+      if (st.open !== o) return
+      if (o.focusDraftEnd) {
+        o.focusDraftEnd = false
+        compose.changed?.()
+        draft.focus()
+        draft.setSelectionRange(draft.value.length)
+        const field = compose.field()
+        if (field && 'scrollTop' in field && 'scrollHeight' in field) field.scrollTop = field.scrollHeight
+      } else if (!options.draft) {
+        draft.focus()
+      }
+    }, 0)
     const source = options.source
     return transport('POST', source ? `${path(source.thread)}/branch` : '/threads',
       source ? { persona, message: source.id } : persona ? { persona } : {}).then((body) => {
@@ -1966,6 +1982,14 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     }
     selection.paint()
     gesture.paint()
+    if (st.open?.focusDraftEnd && compose.field()?.isConnected) {
+      st.open.focusDraftEnd = false
+      compose.changed?.()
+      draft.focus()
+      draft.setSelectionRange(draft.value.length)
+      const field = compose.field()
+      if (field && 'scrollTop' in field && 'scrollHeight' in field) field.scrollTop = field.scrollHeight
+    }
     if (st.open?.focusReplyDraft) { compose.field().focus({ preventScroll: true }); st.open.focusReplyDraft = false }
     leanFaces()
     if (st.open?.focusTasks) { dom.querySelector('.tt-tasks-panel h2')?.focus({ preventScroll: true }); st.open.focusTasks = false }

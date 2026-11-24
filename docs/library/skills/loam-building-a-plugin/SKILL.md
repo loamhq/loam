@@ -160,8 +160,10 @@ is a feature: report it to Loam's makers, and fix it here only if it cannot
 wait (`loam-filing-a-bug-or-feature`).
 
 A page plugin can add one compact update above the agents in Chats with
-`thread.list.line`, draw its own Apps picture with `apps.icon`, and open an
-unsent composer with the `chat.draft` command. A server can declare activity
+`thread.list.line`, draw its own Apps picture with `apps.icon`, and open a new
+thread with an unsent, pre-filled composer via `loam.commands.run('chat.draft',
+{ text })` (or `{ agent, text }` to pre-select an agent; up to 4,000 characters,
+leaving agent choice and sending to the owner). A server can declare activity
 groups under `touches.facts` and run `LOAM_PLUGIN_FACTS` to read their JSON.
 These four interfaces are new and may change in a later release.
 The full groups and the privacy declaration are in docs/plugins.md.
