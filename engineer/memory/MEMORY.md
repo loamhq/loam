@@ -3207,3 +3207,17 @@ listener for immediate notification in an open page.
   `loam update rollback` invokes `gen-deploy --restore-container-login` before
   re-execing into the older release. `bin/gen-deploy` checks `_claim_is_ancestor()`
   so a claim-time `gen-deploy` call never kills its own parent `loam-claim.service`.
+- **Front-door credential proof across container → service migration.** Verified
+  with zero code changes that WebAuthn passkeys and TOTP secrets enrolled on
+  the container login survive `sqlite3.backup()` migration into native
+  `/var/lib/loam-authelia/db.sqlite3` (passkey-alone, password+passkey,
+  password+TOTP, `/_loam/passkeys` listing and `/settings` removal, `/_loam/login-code`
+  relay from `loam-claim.service` reading `/var/lib/loam-authelia/notification.txt`,
+  unauthenticated `/s/<token>` share links, and private `<name>.<domain>` agent
+  sites all work with Docker asleep). Testing notes for future CDP proofs:
+  (1) `PUT /api/secondfactor/totp/register` requires an explicit JSON body
+  `{"algorithm":"SHA1","period":30,"length":6}` (empty body or `{}` returns 400);
+  (2) `WebAuthn.getCredentials` must be saved after every assertion — replaying a
+  stale `signCount` latches `clone_warning = 1` permanently in Authelia's
+  `webauthn_credentials` table, which `POST /api/firstfactor/passkey` rejects on
+  all subsequent attempts even with higher counters.
