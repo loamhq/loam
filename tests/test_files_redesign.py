@@ -862,6 +862,120 @@ check(
     finished,
 )
 
+# ---------------------------------------------------------------------------
+# 10. Stock README refresh, engineer/schedule migration, schedule & reviewer text
+# ---------------------------------------------------------------------------
+readme_vault = TMP / "readme-migration-vault"
+readme_vault.mkdir(parents=True)
+old_nov19_readme = cleanup._legacy_stock_readmes()[1]
+(readme_vault / "README.md").write_text(old_nov19_readme, encoding="utf-8")
+(readme_vault / "Projects" / "Loam" / "engineer" / "projects").mkdir(parents=True)
+(readme_vault / "Projects" / "Loam" / "engineer" / "role.md").write_text("# Role\n", encoding="utf-8")
+(readme_vault / "Projects" / "Loam" / "engineer" / "projects" / "loam.md").write_text("# Project\n", encoding="utf-8")
+(readme_vault / "Projects" / "Loam" / "infrastructure").mkdir(parents=True)
+(readme_vault / "Projects" / "Loam" / "infrastructure" / "schedule.md").write_text("# Schedule\n", encoding="utf-8")
+
+r_res = cleanup.refresh_vault_readme(readme_vault)
+e_res = cleanup.migrate_engineer_sources(readme_vault)
+s_res = cleanup.migrate_schedule_page(readme_vault)
+new_readme = (readme_vault / "README.md").read_text(encoding="utf-8")
+check(
+    "README refresh: untouched pre-redesign stock README is replaced with plain current README",
+    r_res["status"] == "refreshed"
+    and "Inbox/boards/general.md" not in new_readme
+    and "/etc/loam/loam.toml" not in new_readme
+    and "SKILL.md" not in new_readme,
+    r_res,
+)
+(readme_vault / "README.md").write_text("# My own notes\n", encoding="utf-8")
+kept_res = cleanup.refresh_vault_readme(readme_vault)
+check(
+    "README refresh: owner-edited README is never overwritten",
+    kept_res["status"] == "kept" and (readme_vault / "README.md").read_text(encoding="utf-8") == "# My own notes\n",
+    kept_res,
+)
+check(
+    "migration: stock Projects/Loam/engineer and infrastructure/schedule.md move to System/ and clean empty Loam/",
+    len(e_res) == 2 and len(s_res) == 1
+    and (readme_vault / "System" / "engineer" / "role.md").is_file()
+    and (readme_vault / "System" / "engineer" / "projects" / "loam.md").is_file()
+    and (readme_vault / "System" / "schedule.md").is_file()
+    and not (readme_vault / "Projects" / "Loam").exists()
+    and (readme_vault / "Projects").is_dir(),
+    (e_res, s_res),
+)
+
+# Vault with sibling project docs (like agent-runtime.md) is left alone.
+dev_vault = TMP / "dev-vault"
+(dev_vault / "Projects" / "Loam" / "infrastructure").mkdir(parents=True)
+(dev_vault / "Projects" / "Loam" / "infrastructure" / "schedule.md").write_text("# Schedule\n", encoding="utf-8")
+(dev_vault / "Projects" / "Loam" / "infrastructure" / "agent-runtime.md").write_text("# Runtime\n", encoding="utf-8")
+(dev_vault / "Projects" / "Loam" / "engineer").mkdir(parents=True)
+(dev_vault / "Projects" / "Loam" / "engineer" / "role.md").write_text("# Role\n", encoding="utf-8")
+(dev_vault / "Projects" / "Loam" / "engineer" / "box-memory.md").write_text("# Notes\n", encoding="utf-8")
+check(
+    "migration: non-empty custom infrastructure/ and engineer/ folders are left untouched",
+    cleanup.migrate_schedule_page(dev_vault) == []
+    and cleanup.migrate_engineer_sources(dev_vault) == []
+    and (dev_vault / "Projects" / "Loam" / "infrastructure" / "schedule.md").is_file()
+    and (dev_vault / "Projects" / "Loam" / "engineer" / "role.md").is_file(),
+)
+
+# Standard install: loam_profile.engineers() points to System/engineer/projects/loam.md,
+# loam_cron.schedule_page() uses configured paths/timezone without dead links,
+# and provision's claude_md + reviewer_instructions avoid hardcoded legacy paths.
+import importlib.machinery  # noqa: E402
+import importlib.util  # noqa: E402
+import loam_cron  # noqa: E402
+import loam_profile  # noqa: E402
+
+eng_info = loam_profile.engineers()
+platform_row = next(r for r in eng_info["engineers"] if r["platform"])
+check(
+    "profile: platform engineer instructions path uses configured engineer_vault_dir (not legacy numbered path)",
+    platform_row["instructions"]["path"] == "System/engineer/projects/loam.md",
+    platform_row["instructions"],
+)
+
+with patch.object(loam_cron, "AI_LABS", TMP / "agents"):
+    sched_text = loam_cron.schedule_page(VAULT, names=[])
+check(
+    "schedule_page: uses configured zone, workspaces name, STATE events path, and omits dead [[agent-runtime]]",
+    f"When ({lc.ZONE_WORD})" in sched_text
+    and "`agents/<agent>/crons/`" in sched_text
+    and str(lc.STATE / "schedules" / "events.jsonl") in sched_text
+    and "[[agent-runtime]]" not in sched_text
+    and "agents/state/" not in sched_text
+    and "ai-labs/" not in sched_text,
+    sched_text[:600],
+)
+
+_prov_loader = importlib.machinery.SourceFileLoader("prov_check", str(AGENTS / "bin" / "provision"))
+_prov_spec = importlib.util.spec_from_loader(_prov_loader.name, _prov_loader)
+prov_mod = importlib.util.module_from_spec(_prov_spec)
+_prov_spec.loader.exec_module(prov_mod)
+rendered_claude = prov_mod.claude_md("Ada", SPACES / "ada")
+check(
+    "provision claude_md: provider-neutral Surface and accurate wiki-link behavior",
+    "**Surface:** On the server that holds the vault." in rendered_claude
+    and "open the note in Files" in rendered_claude
+    and "stay as written" not in rendered_claude
+    and "**Surface:** Claude Code" not in rendered_claude,
+)
+with patch.object(prov_mod, "AI_LABS", TMP / "agents"):
+    rendered_reviewer = prov_mod.reviewer_instructions()
+import re as _re  # noqa: E402
+check(
+    "provision reviewer_instructions: expands @REVIEWER_STATE@/memory/ and @CONVERSATIONS@ with no legacy leaks",
+    f"Under `{lc.REVIEWER_STATE}/memory/`" in rendered_reviewer
+    and f"except `{lc.vault_folder('conversations')}/`" in rendered_reviewer
+    and not _re.search(r"\b\d\d_[A-Z]+\b", rendered_reviewer)
+    and "ai-labs" not in rendered_reviewer
+    and "@ROOT@" not in rendered_reviewer
+    and "@CONVERSATIONS@" not in rendered_reviewer
+    and "@REVIEWER_STATE@" not in rendered_reviewer,
+)
+
 passed = sum(results)
 total = len(results)
 print(f"\n{passed}/{total} passed")

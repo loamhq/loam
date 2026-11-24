@@ -13,8 +13,9 @@ folder itself. The **marketplace** is a list of such links that every Loam
 shows in Settings › Market; being on it is asking, not publishing.
 
 **Built in, or in the Market.** Loam has two kinds of plugin, as Obsidian
-does. *Built-in* ones ship inside Loam (Images, Files quick actions, Comments, the
-reviewer, Latte and Plain): they come with every release, most start off,
+does. *Built-in* ones ship inside Loam (Images, Files quick actions, Sharing,
+Comments & suggestions, Git backup, the reviewer, Latte and Plain): they come
+with every release, most start off,
 and the owner turns them on in Settings › Plugins. *Market* ones each live
 in their maker's own repository and are listed in their maker's name.
 Something new, whoever makes it, goes to the Market in its maker's name;
@@ -62,7 +63,9 @@ and pushes for them).
    public. Nobody has to build a link by hand: `https://github.com/<owner>/<repository>`
    installs the newest version, and a repository of several plugins asks
    which one. Whoever installs it is shown what it declares under `touches`
-   before anything is installed, and every later version is confirmed again.
+   before anything is installed, and any later version that asks for more
+   access waits for their yes (automatic nightly updates can be toggled on
+   the plugin's About page).
 
 A **skill** is shared the same way, as a plugin of `kind: skill` (a folder
 with its `SKILL.md` and a `PLUGIN.md`). Loam lists such a package but does

@@ -336,7 +336,7 @@ async def _hand_off(argv: list[str], value_stdin: bytes | None = None) -> str:
         f"private unless {lc.OWNER_NAME} has said yes to more.\n"
         "- action `up` with `name` (lowercase letters, digits, -) and `by` "
         "(your name): a static site served from `root` (default "
-        "`ai-labs/<you>/sites/<name>/`, created with a placeholder "
+        f"`{lc.WORKSPACES.name}/<you>/sites/<name>/`, created with a placeholder "
         "index.html; write your files there), or, with `port`, a proxy to "
         "your own container published on 127.0.0.1:<port>. `expires` "
         "(YYYY-MM-DD, the last day) or `duration` (`2d`, `36h`) makes it clean itself up. Live in "

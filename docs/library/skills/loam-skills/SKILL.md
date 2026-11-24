@@ -17,8 +17,8 @@ reads it.
 1. **Yours**: `skills/` in your workspace. Yours to make, change and
    retire; the reviewer reads it.
 2. **The shared shelf**: `skills/` in the vault's system folder. The
-   owner's own, ones an agent writes for every agent, and marketplace
-   installs. Updates never touch it.
+   owner's own, ones an agent writes for every agent, and shared skills
+   copied from the Market. Updates never touch it.
 3. **Loam's shelf**: `Loam/skills/` in the vault's system folder, beside
    it, where this page is. Replaced whole by every update.
 

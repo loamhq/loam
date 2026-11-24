@@ -62,7 +62,7 @@ What comes from this plugin, and goes when it is off:
 
 - **The timer** (`schedule.kind` `nightly`), at the time its `schedule`
   setting says. It starts the reviewer's lane, `loam-reviewer.service`,
-  which is Loam's: the credential, the memory ceiling and the failure
+  which is Loam's: the credential, the OOM order and the failure
   handler are the lane's.
 - **Its instructions**, `instructions.md`, which `bin/provision --reviewer`
   copies to the reviewer's project as its `CLAUDE.md`.

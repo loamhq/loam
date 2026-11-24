@@ -347,6 +347,41 @@ def vault_folder(name: str) -> str:
     return VAULT_FOLDERS[name]
 
 
+def engineer_vault_dir() -> str:
+    """Vault-relative folder for the platform engineer's role and project files.
+
+    Defaults to ``<system>/engineer`` (inside Loam files) so standard installs
+    keep engineer machinery out of the owner's Projects folder. Explicit
+    ``vault.engineer_dir`` overrides; an install with a non-default
+    ``vault.projects`` (e.g. a legacy ``40_PROJECTS`` vault) keeps
+    ``<projects>/Loam/engineer``.
+    """
+    explicit = get("vault.engineer_dir")
+    if explicit:
+        return str(explicit).strip("/")
+    projects = vault_folder("projects")
+    if projects != _VAULT_DEFAULTS["projects"]:
+        return f"{projects}/Loam/engineer"
+    return f"{vault_folder('system')}/engineer"
+
+
+def schedule_page() -> str:
+    """Vault-relative path of the generated schedule table.
+
+    Defaults to ``<system>/schedule.md`` (inside Loam files) so standard
+    installs keep generated timer tables out of the owner's Projects folder.
+    Explicit ``vault.schedule_page`` overrides; an install with a non-default
+    ``vault.projects`` keeps ``<projects>/Loam/infrastructure/schedule.md``.
+    """
+    explicit = get("vault.schedule_page")
+    if explicit:
+        return str(explicit).strip("/")
+    projects = vault_folder("projects")
+    if projects != _VAULT_DEFAULTS["projects"]:
+        return f"{projects}/Loam/infrastructure/schedule.md"
+    return f"{vault_folder('system')}/schedule.md"
+
+
 def expand(text: str) -> str:
     """A committed file's path tokens, filled for this install: ``@VAULT@``,
     ``@WORKSPACES@``, ``@PROJECTS@``, ``@ROOT@``, ``@STATE@``, ``@HOME@``.

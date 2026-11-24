@@ -66,8 +66,9 @@ happens to that change:
 - **Every install has the engineer** (since 0.2.2). Loam ships its role and
   project file in `engineer/install/`. `bin/provision --engineer` (the
   installer's starter step, every update's `agents` step, and any agent's
-  provision) seeds them into the vault at `<vault.projects>/Loam/engineer/`
-  (`role.md`, `projects/loam.md`) and renders the engineer beside the code
+  provision) seeds them into Loam files at `<vault.system>/engineer/`
+  (`role.md`, `projects/loam.md`) — or `<vault.projects>/Loam/engineer/` on
+  installs with an explicit `vault.projects` — and renders the engineer beside the code
   from the vault copies, verbatim. The vault copy is the owner's to change.
   A newer release replaces it only while it is still exactly what was last
   seeded (the hashes are in `<paths.state>/engineer/seeded.json`); a copy

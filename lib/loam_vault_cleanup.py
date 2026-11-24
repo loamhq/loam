@@ -453,19 +453,207 @@ def _running_broker_rejects_boards(vault: Path) -> bool:
     return src is not None and "def _allowed_roots(" not in src
 
 
+def _legacy_stock_readmes(folders: dict[str, str] | None = None) -> tuple[str, ...]:
+    """Earlier stock vault README templates, rendered for ``folders`` so an
+    unedited stock README can be refreshed while any owner-edited copy stays."""
+    import loam_skills as sk  # noqa: PLC0415
+
+    f = {**lc.VAULT_FOLDERS, **(folders or {})}
+    inbox = f["inbox"]
+    system = f["system"]
+    projects = f["projects"]
+    boards = f["boards"]
+    convs = f["conversations"]
+    att = f["attachments"]
+    loam_dir = sk.LOAM_DIR
+    own_dir = sk.OWN_DIR
+    about = sk.ABOUT_ME
+    start_here = sk.START_HERE
+
+    old_boards_line = (
+        f"| `{inbox}/` | What needs you. Each thread's board is a file in "
+        f"`{inbox}/boards/`; the General board is `{inbox}/boards/general.md`. |"
+    )
+    old_plain_inbox = f"| `{inbox}/` | What needs you. |"
+    old_v1_tail = (
+        f"| `{convs}/` | The record of every thread, written by Loam as you talk. Read it; do not edit it. |\n"
+        f"| `{projects}/` | Your projects and their notes. |\n"
+        f"| `{att}/` | Images and files you add to a thread. |\n"
+        f"| `{system}/` | How your agents work: shared skills, docs, conventions. |\n"
+        f"| `{system}/{loam_dir}/` | Loam's own skills and docs. **Each update replaces this folder**; put your changes somewhere else. |\n"
+        f"| `{system}/{own_dir}/` | Your shared shelf of skills, read by every agent. Updates never touch it. |\n\n"
+        "A skill is a folder with a `SKILL.md` in it. An agent's own skill, in its\n"
+        "workspace's `skills/`, wins over a shared one with the same name.\n"
+    )
+    old_v1_head = (
+        "# Your vault\n\n"
+        "Everything here is yours: plain Markdown files, readable by you, your agents\n"
+        "and any editor. Change any of it. Loam finds its own folders by the names in\n"
+        "its configuration (`/etc/loam/loam.toml`, `[vault]`), so a folder renamed\n"
+        "there keeps working.\n\n"
+        "| File or folder | What it is for |\n"
+        "|---|---|\n"
+    )
+    about_row = f"| `{about}` | What your agents know about you. They add to it as they learn; read it and edit it whenever you like. |\n"
+
+    def v2(quick_label: str) -> str:
+        return (
+            "# Your files\n\n"
+            "Everything here is yours: plain Markdown and files, readable by you, your agents\n"
+            "and any editor. Change any of it. Loam finds its own folders by the names in\n"
+            "its configuration (`/etc/loam/loam.toml`, `[vault]`), so a folder renamed\n"
+            "there keeps working.\n\n"
+            "In Files, this folder is **Your files**; each agent’s own workspace is in\n"
+            "**Agent files**; and Loam’s machinery folders sit together at the bottom of\n"
+            "Your files under **Loam files**.\n\n"
+            "| File or folder | What it is for |\n"
+            "|---|---|\n"
+            f"{about_row}"
+            f"| `{projects}/` | Your projects and their notes, starting with `{projects}/Loam/{start_here}`. |\n"
+            f"| `{convs}/` | **Loam files** — the record of every chat, written by Loam as you talk. Read it; do not edit it. |\n"
+            f"| `{att}/` | **Loam files** — images and files you add to a chat. |\n"
+            f"| `{boards}/` | **Loam files** — each chat’s board. |\n"
+            f"| `{system}/` | **Loam files** — how your agents work: shared skills, docs, conventions. |\n"
+            f"| `{system}/{loam_dir}/` | Loam’s own skills and docs. **Each update replaces this folder**; put your changes somewhere else. |\n"
+            f"| `{system}/{own_dir}/` | Your shared shelf of skills, read by every agent. Updates never touch it. |\n\n"
+            "Optional folders such as `Inbox/`, `Daily/` or `Images/` are created only when\n"
+            f"you turn on {quick_label} or generate an image, or when you make them yourself.\n\n"
+            "A skill is a folder with a `SKILL.md` in it. An agent’s own skill, in its\n"
+            "workspace’s `skills/`, wins over a shared one with the same name.\n"
+        )
+
+    return (
+        old_v1_head + old_boards_line + "\n" + old_v1_tail,
+        old_v1_head + about_row + old_boards_line + "\n" + old_v1_tail,
+        old_v1_head + about_row + old_plain_inbox + "\n" + old_v1_tail,
+        v2("Quick actions"),
+        v2("Files quick actions"),
+    )
+
+
+def refresh_vault_readme(vault: Path, *, folders: dict[str, str] | None = None,
+                         dry_run: bool = False) -> dict:
+    """Replace an untouched older stock vault README with the current one.
+    Never overwrites a README the owner edited."""
+    import loam_skills as sk  # noqa: PLC0415
+
+    readme = vault / "README.md"
+    if readme.is_symlink() or not readme.is_file():
+        return {"status": "absent"}
+    try:
+        current = readme.read_text(encoding="utf-8")
+    except OSError:
+        return {"status": "unreadable"}
+    wanted = sk.vault_readme(folders)
+    if current == wanted:
+        return {"status": "current"}
+    if current not in _legacy_stock_readmes(folders):
+        return {"status": "kept"}
+    if not dry_run:
+        tmp = readme.with_name(f".README.{os.getpid()}.tmp")
+        tmp.write_text(wanted, encoding="utf-8")
+        os.replace(tmp, readme)
+    return {"status": "would-refresh" if dry_run else "refreshed"}
+
+
+def migrate_engineer_sources(vault: Path, *, projects_folder: str | None = None,
+                             target_dir: str | None = None,
+                             dry_run: bool = False) -> list[dict]:
+    """Move stock engineer role/project files from ``<projects>/Loam/engineer/``
+    into ``<system>/engineer/`` when the install uses the Loam-files default.
+    Skips if ``<projects>/Loam/engineer/`` holds any extra files."""
+    projects = (projects_folder or lc.vault_folder("projects")).strip("/")
+    legacy_rel = f"{projects}/Loam/engineer"
+    dest_rel = (target_dir or lc.engineer_vault_dir()).strip("/")
+    if not dest_rel or dest_rel == legacy_rel:
+        return []
+    legacy_dir = vault / legacy_rel
+    if not legacy_dir.is_dir() or legacy_dir.is_symlink():
+        return []
+    known = {"role.md", "projects/loam.md"}
+    found = sorted(
+        str(p.relative_to(legacy_dir))
+        for p in legacy_dir.rglob("*")
+        if p.is_file() and not any(part.startswith(".") for part in p.relative_to(legacy_dir).parts)
+    )
+    if not found or any(rel not in known for rel in found):
+        return []
+    moved: list[dict] = []
+    for rel in found:
+        src = legacy_dir / rel
+        dst = vault / dest_rel / rel
+        if dst.exists():
+            continue
+        if dry_run:
+            how = "would-move"
+        else:
+            how = _move_preserving_history(vault, src, dst)
+        moved.append({"from": f"{legacy_rel}/{rel}", "to": f"{dest_rel}/{rel}", "how": how})
+    if moved and not dry_run:
+        _remove_empty_dir_chain(legacy_dir / "projects", vault / projects)
+        _remove_empty_dir_chain(legacy_dir, vault / projects)
+    return moved
+
+
+def migrate_schedule_page(vault: Path, *, projects_folder: str | None = None,
+                          target_rel: str | None = None,
+                          dry_run: bool = False) -> list[dict]:
+    """Move generated ``<projects>/Loam/infrastructure/schedule.md`` into
+    ``<system>/schedule.md`` when the install uses the Loam-files default and
+    no sibling project notes share ``infrastructure/``."""
+    projects = (projects_folder or lc.vault_folder("projects")).strip("/")
+    legacy_dir_rel = f"{projects}/Loam/infrastructure"
+    legacy_rel = f"{legacy_dir_rel}/schedule.md"
+    dest_rel = (target_rel or lc.schedule_page()).strip("/")
+    if not dest_rel or dest_rel == legacy_rel:
+        return []
+    legacy_dir = vault / legacy_dir_rel
+    src = vault / legacy_rel
+    if not src.is_file() or src.is_symlink():
+        return []
+    siblings = [
+        p.name for p in legacy_dir.iterdir()
+        if not p.name.startswith(".") and p.name != "schedule.md"
+    ]
+    if siblings:
+        return []
+    dst = vault / dest_rel
+    if dst.exists():
+        if not dry_run:
+            if _git_tracked(vault, src):
+                subprocess.run(["git", "-C", str(vault), "rm", "-f", "--", legacy_rel],
+                               capture_output=True, text=True, check=False)
+            src.unlink(missing_ok=True)
+            _remove_empty_dir_chain(legacy_dir, vault / projects)
+        return [{"from": legacy_rel, "to": dest_rel,
+                 "how": "would-remove-duplicate" if dry_run else "removed-duplicate"}]
+    if dry_run:
+        how = "would-move"
+    else:
+        how = _move_preserving_history(vault, src, dst)
+        _remove_empty_dir_chain(legacy_dir, vault / projects)
+    return [{"from": legacy_rel, "to": dest_rel, "how": how}]
+
+
 def run_update_migration(vault: Path | None = None, *, dry_run: bool = False,
                          allow_stale_broker: bool = False) -> dict:
     """Run all Files-redesign vault migrations in order and return a report.
 
     When the live session-broker is still running a pre-Boards revision (such
     as during ``bin/library install`` before the updater restarts the broker),
-    defer the migration and write a marker so the post-restart hook runs it
-    once the new broker is serving.
+    defer the Boards/folder migration and write a marker so the post-restart
+    hook runs it once the new broker is serving. README, engineer-source and
+    schedule-page migrations do not depend on the broker and run immediately so
+    ``provision --engineer`` finds the migrated files on the same update.
     """
     import loam_contributions as contrib  # noqa: PLC0415
 
     vroot = (vault or lc.VAULT).resolve()
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    readme = refresh_vault_readme(vroot, dry_run=dry_run)
+    engineer = migrate_engineer_sources(vroot, dry_run=dry_run)
+    schedule = migrate_schedule_page(vroot, dry_run=dry_run)
+
     if not dry_run and not allow_stale_broker and _running_broker_rejects_boards(vroot):
         marker = pending_marker()
         marker.parent.mkdir(parents=True, exist_ok=True)
@@ -482,6 +670,9 @@ def run_update_migration(vault: Path | None = None, *, dry_run: bool = False,
             "dry_run": False,
             "deferred": True,
             "reason": "running session-broker predates Boards/ thread-file support",
+            "readme": readme,
+            "engineer_moved": engineer,
+            "schedule_moved": schedule,
             "boards_moved": [],
             "failure_log_moved": [],
             "folders_removed": [],
@@ -505,6 +696,9 @@ def run_update_migration(vault: Path | None = None, *, dry_run: bool = False,
         "ts": now_iso,
         "vault": str(vroot),
         "dry_run": dry_run,
+        "readme": readme,
+        "engineer_moved": engineer,
+        "schedule_moved": schedule,
         "boards_moved": boards,
         "failure_log_moved": failure_log,
         "folders_removed": cleanup["removed"],
@@ -536,6 +730,13 @@ def format_report(report: dict) -> str:
     if report.get("deferred"):
         return "Deferred vault cleanup until session-broker restarts on the new release."
     lines = []
+    readme = report.get("readme") or {}
+    if readme.get("status") in ("refreshed", "would-refresh"):
+        lines.append(f"Refreshed vault README.md ({readme['status']})")
+    for row in report.get("engineer_moved") or []:
+        lines.append(f"Moved engineer file: {row['from']} -> {row['to']} ({row['how']})")
+    for row in report.get("schedule_moved") or []:
+        lines.append(f"Moved schedule page: {row['from']} -> {row['to']} ({row['how']})")
     if report["boards_moved"]:
         lines.append(f"Moved {len(report['boards_moved'])} board(s) out of Inbox into Boards:")
         for row in report["boards_moved"][:10]:

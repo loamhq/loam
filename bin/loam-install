@@ -1003,8 +1003,8 @@ def step_vault(a, ans: dict) -> None:
     if ans.get("adopted"):
         say(f"Kept your existing vault at {cfg['vault']} and refreshed Loam's library.", 2)
     else:
-        say(f"Made your vault at {cfg['vault']} (Inbox, Conversations, Projects, "
-            f"Attachments, System).", 2)
+        say(f"Made your vault at {cfg['vault']} (Conversations, Projects, "
+            f"Attachments, Boards, System).", 2)
 
 
 # ---------------------------------------------------------------------------

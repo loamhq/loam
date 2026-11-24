@@ -166,8 +166,8 @@ the owner can open and edit any of them in the app. A run starts when the
 box has memory for it; nothing caps how long it runs. Wakes, crons and background
 deliveries can use Claude Code or Codex. An automatic choice uses the first
 connected provider those runs support. An explicit unsupported provider
-pauses those runs. The nightly reviewer can use Claude Code or Antigravity
-and waits if neither is connected and automatic selection is on.
+pauses those runs. The nightly reviewer can use Claude Code, Codex or
+Antigravity.
 
 **When something needs attention.** The app shows a turn’s status in its thread when it is waiting for room,
 could not run or ended without a reply. An agent whose own
@@ -210,17 +210,19 @@ step where there is one, and clears it when agents can run again. A fresh instal
 **Files** brings together **Your files** (the vault: plain Markdown and files
 written by the owner or their agents, for the owner), **Agent files** (each
 agent's workspace and the shared Commons: theirs to write, the owner's to read),
-and **Shared Docs** when Comments & suggestions is on. The vault's `README.md`
+and **Shared** when Sharing is on. The vault's `README.md`
 says what each folder is for, and `About me.md` at its top is what the agents
 know about the owner (agents add to it, and the owner can read and edit it).
-New installs seed only `About me.md`, `Projects/Loam/Start here.html`, and the
-machinery folders.
+New installs seed `About me.md`, `README.md`, `Projects/Loam/Start here.html`,
+and the machinery folders.
 
 Loam's machinery folders — conversations, attachments, boards and system —
 sit behind one quiet **Loam files** row at the bottom of **Your files** (still
 reachable by search, wiki-links, deep links and from chats). Wake failure logs
-(`loam-wake-failures.md`) and thread boards live inside **Loam files** rather
-than the inbox.
+(`System/loam-wake-failures.md`), the generated schedule table
+(`System/schedule.md`), the platform engineer's role and project files
+(`System/engineer/`), and chat boards (`Boards/`, when the Boards plugin is on)
+live inside **Loam files** rather than the owner's main folders.
 
 On the **Files** home, optional **Files quick actions** (**New note**, **Today's
 note**) come from the built-in `quick-actions` plugin (off by default on new
@@ -291,9 +293,9 @@ server, so a change anyone regrets can be got back from it; nothing leaves the
 machine. First setup goes straight from connecting an AI provider to Chats or
 the open Hello. Settings › Plugins shows when off-box backup is off. Open Git
 backup there to turn it on and connect private repositories for Your files and
-Agent files. In Files and Settings › Files, **Download as zip** on Your files,
-Agent files or any folder gives the owner a copy of it as it is now, without
-git's history or anything secret-shaped.
+Agent files. In Settings › Files (**Download Your files**, **Download Agent
+files**) or from any folder's ⋯ menu in Files (**Download as zip**), the owner
+can download a copy as it is now, without git's history or anything secret-shaped.
 
 **The engineer** builds and changes Loam itself and the owner's projects.
 An agent hands it a job as a brief, which returns at once; the engineer
@@ -308,12 +310,12 @@ included, runs its next job on the provider, model and tiers set in
 Settings › Agents. An unset engineer uses the connected providers, with
 project engineers preferring Codex when it is connected. An existing
 project record can pin a runtime. A running job or a continuation keeps
-its provider. The engineer's role and scope are in
-the vault's projects folder, under `Loam/engineer/` (`role.md`,
-`projects/loam.md`): the owner's to read and change, and an update never
-overwrites a change of theirs. A job that changes how Loam works updates
-this library in the same job, so these pages stay the one description of
-Loam.
+its provider. The engineer's role and scope are in Loam files under
+`System/engineer/` (`role.md`, `projects/loam.md`) — or `<projects>/Loam/engineer/`
+on installs with a custom `vault.projects` layout: the owner's to read and
+change, and an update never overwrites a change of theirs. A job that changes
+how Loam works updates this library in the same job, so these pages stay the
+one description of Loam.
 
 When a shell command takes time, its engineer gets control back in the same
 job without the command being killed, and can check its output, keep waiting,
@@ -340,7 +342,7 @@ when the brief is read-only for the repository. The launcher files receipts
 under that project's vault folder.
 
 Engineer job commits and landing merges carry the person named in the
-project record, or the owner's identity from Settings ›
+project record, or the owner's identity from Settings › Connections ›
 GitHub › **Your name on agents' work**. The default uses the owner's connected
 GitHub account and its no-reply address when the account is unambiguous.
 The checkout's identity is the fallback when Loam has no effective owner

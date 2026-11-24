@@ -113,10 +113,10 @@ def claude_md(display: str, workspace: Path) -> str:
 
 ---
 
-**Surface:** Claude Code, on the server that holds the vault. {lc.OWNER_NAME}
+**Surface:** On the server that holds the vault. {lc.OWNER_NAME}
 reaches you in Loam's app; on a schedule you wake by yourself with no one
 watching. Markdown renders, and wiki-links like [[Note Name]]
-stay as written.
+open the note in Files.
 
 **Your workspace** is `{workspace}/`. `CLAUDE.md`, `agent.json`, `.mcp.json`,
 `.claude/`, `.codex/` and `.agents/` are the runtime's: how you are
@@ -138,7 +138,7 @@ edit; what the owner's plugins add is at the end of this file:
 A background subagent that launches background children ends before they
 do and returns a hollow report.
 
-Both trees auto-commit every 15 minutes, so a bad edit is recoverable.
+The vault, the agents' workspaces and the plugins folder auto-commit every 15 minutes, so a bad edit is recoverable.
 """ + _plugin_words(workspace)
 
 
@@ -719,10 +719,9 @@ ENGINEER = AGENTS / "engineer"
 # project file is this engineer's own. check-drift diffs both against these
 # paths, so an edit to the vault copy shows up as drift here rather than as a
 # divergence nobody notices.
-ENGINEER_ROLE_SRC = VAULT / lc.vault_folder("projects") / "Loam" / "engineer" / "role.md"
-ENGINEER_PROJECT_SRC = (
-    VAULT / lc.vault_folder("projects") / "Loam" / "engineer" / "projects" / "loam.md"
-)
+ENGINEER_VAULT_DIR = VAULT / lc.engineer_vault_dir()
+ENGINEER_ROLE_SRC = ENGINEER_VAULT_DIR / "role.md"
+ENGINEER_PROJECT_SRC = ENGINEER_VAULT_DIR / "projects" / "loam.md"
 
 # Installed systems use the shipped engineer files when development sources are
 # unavailable.
@@ -1166,6 +1165,7 @@ def reviewer_instructions() -> str:
     """Fill the reviewer plugin's path placeholders with the locations for this install."""
     text = REVIEWER_INSTRUCTIONS_SRC.read_text(encoding="utf-8")
     for key, value in (("@WORKSPACES@", AI_LABS), ("@VAULT@", VAULT),
+                       ("@CONVERSATIONS@", lc.vault_folder("conversations")),
                        ("@REVIEWER_STATE@", REVIEWER_STATE), ("@ROOT@", AGENTS)):
         text = text.replace(key, str(value))
     return text
@@ -1197,9 +1197,9 @@ def provision_reviewer(dry: bool = False) -> None:
     ensure_user_settings()
     # The schedule page lists the review lane once its timer is installed;
     # the row is derived from the installed timer, never typed here.
-    from loam_cron import write_schedule_page  # noqa: PLC0415
+    from loam_cron import SCHEDULE_PAGE, write_schedule_page  # noqa: PLC0415
     if write_schedule_page(VAULT):
-        print(f"  rewrote {VAULT}/{lc.vault_folder('projects')}/Loam/infrastructure/schedule.md")
+        print(f"  rewrote {VAULT}/{SCHEDULE_PAGE}")
     print(f"  provisioned the reviewer: config, settings, one MCP server; "
           f"state under {REVIEWER_STATE} (gitignored)")
     print(f"  its lane is the static unit loam-reviewer.service ({AGENTS}/systemd/, "
@@ -2259,9 +2259,9 @@ def main() -> None:
     # one generator of it; the schedule reconciler is the other and
     # rewrites the same page on every change; whichever runs last is right,
     # because both derive every row from disk rather than editing in place.
-    from loam_cron import write_schedule_page  # noqa: PLC0415
+    from loam_cron import SCHEDULE_PAGE, write_schedule_page  # noqa: PLC0415
     if write_schedule_page(VAULT):
-        print(f"  rewrote {VAULT}/{lc.vault_folder('projects')}/Loam/infrastructure/schedule.md")
+        print(f"  rewrote {VAULT}/{SCHEDULE_PAGE}")
 
     print(f"  provisioned {name}: project files; its daily wake is its record's")
 
