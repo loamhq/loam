@@ -24,7 +24,7 @@
   --foreground   run apply or rollback in this process (what the unit runs;
                  never from inside an agent's turn: the broker restart at
                  the end waits for that turn to finish)
-  --no-tell      check without leaving the person's agent a notice
+  --no-tell      check, apply or roll back without leaving the person's agent a notice
 
 Run as root (the shell a person installed from), it switches to the
 install's user first: the checkout and the update state are that user's,
@@ -126,8 +126,9 @@ def follow(run_id: str | None) -> dict:
         if rec.get("outcome") not in ("running", "starting", None):
             return rec
         st = up.status()
-        if (st.get("run") or {}).get("outcome") == "interrupted":
-            return st["run"]
+        st_run = st.get("run") or {}
+        if st_run.get("outcome") not in ("running", "starting", None):
+            return st_run
         if in_turn and rec.get("phase") == "broker":
             say("  The broker restarts once every session is idle, this one "
                 "included; the rest of the update finishes on its own. "
@@ -177,11 +178,11 @@ def update(a) -> int:
         say("Type `loam update apply` to update.")
         return 0
     if not a.yes:
-        answer = input(f"Update to {latest} now? [Y/n] ").strip().lower()
+        answer = input(f"Update to {a.to or latest} now? [Y/n] ").strip().lower()
         if answer not in ("", "y", "yes"):
             say("Nothing was changed.")
             return 0
-    a.action, a.to = "apply", None
+    a.action = "apply"
     return run(a)
 
 
@@ -198,6 +199,9 @@ def main() -> int:
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--run-id", default=None)
     ap.add_argument("--by", default=os.environ.get("LOAM_AGENT") or None)
+    ap.add_argument("--resume-apply", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--resume-rollback", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--lock-fd", type=int, default=None, help=argparse.SUPPRESS)
     a = ap.parse_args()
 
     drop = up.as_install_user(sys.argv[1:])
@@ -240,12 +244,20 @@ def main() -> int:
 def run(a) -> int:
     """`apply` or `rollback`: in this process (`--foreground`), or started
     as its own unit and followed here."""
+    tell = not a.no_tell
     if a.foreground:
-        fn = up.apply if a.action == "apply" else up.rollback
-        kwargs = {"run_id": a.run_id, "by": a.by}
-        if a.action == "apply":
-            kwargs.update(target=a.to, accept_library_edits=a.yes)
-        rec = fn(**kwargs)
+        reexec_extra = (["--quiet"] if a.quiet else []) + (["--json"] if a.json else [])
+        if a.resume_apply:
+            rec = up.resume_apply(run_id=a.run_id, tell=tell, lock_fd=a.lock_fd)
+        elif a.resume_rollback:
+            rec = up.resume_rollback(run_id=a.run_id, tell=tell, lock_fd=a.lock_fd)
+        else:
+            fn = up.apply if a.action == "apply" else up.rollback
+            kwargs = {"run_id": a.run_id, "by": a.by, "tell": tell,
+                      "reexec": True, "reexec_extra": reexec_extra}
+            if a.action == "apply":
+                kwargs.update(target=a.to, accept_library_edits=a.yes)
+            rec = fn(**kwargs)
         if a.json:
             say(json.dumps(rec, indent=2, ensure_ascii=False))
         elif not a.quiet:
@@ -255,7 +267,7 @@ def run(a) -> int:
             say(rec.get("message") or "")
     else:
         try:
-            first = up.start(a.action, a.to, a.yes, a.by)
+            first = up.start(a.action, a.to, a.yes, a.by, tell=tell)
         except up.Refusal as r:
             if r.code == "library-edits":
                 show_edits(r.detail.get("library"))
@@ -264,7 +276,7 @@ def run(a) -> int:
                                    "copy of yours? [y/N] ").strip().lower()
                     if answer in ("y", "yes"):
                         try:
-                            first = up.start(a.action, a.to, True, a.by)
+                            first = up.start(a.action, a.to, True, a.by, tell=tell)
                         except up.Refusal as r2:
                             say(r2.message)
                             return 3

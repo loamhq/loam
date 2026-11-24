@@ -473,6 +473,13 @@ def generate(dry: bool) -> int:
         slept = loam_browser_proxy.DockerController().sleep_docker_if_unused()
         if slept.get("stopped_docker"):
             print("  docker: asleep (no other container needs Docker)")
+    # Older updaters (<= 0.2.33) do not re-exec into the new release or know
+    # about the `swap` step; ensure tiered swap here when the host has none yet.
+    if os.geteuid() == 0:
+        import loam_swap  # noqa: PLC0415
+        if loam_swap.status()["mode"] == "none" and not loam_swap.in_container():
+            swap_res = loam_swap.install(dep.AGENTS)
+            print(f"  swap: {swap_res.get('message', swap_res.get('mode'))}")
     for app in dep.records():
         if app.exposure == "shared" and app.share_active(dt.date.today()) is None:
             print(f"  note: {app.name} is recorded as shared but has no live "

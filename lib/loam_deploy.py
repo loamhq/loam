@@ -96,7 +96,9 @@ BROWSER_PORT = 8931
 BROWSER_BACKEND_PORT = 8937
 BROWSER_URL = f"http://127.0.0.1:{BROWSER_PORT}/mcp"
 BROWSER_SERVER_NAME = "browser"   # the MCP server's name in every persona
-BROWSER_OUTPUT = lc.BROWSER_OUTPUT
+# Fallback keeps pre-re-exec updaters (<= 0.2.33) from crashing if they lazily
+# import this module into a process holding an older loam_config.
+BROWSER_OUTPUT = getattr(lc, "BROWSER_OUTPUT", Path("/var/lib/loam/browser"))
 # Evict oldest browser-tool outputs once the shared folder exceeds 256 MiB.
 BROWSER_OUTPUT_MAX_BYTES = 256 * 1024 * 1024
 # The Playwright MCP image runs as `node` (1000:1000) inside its user namespace.

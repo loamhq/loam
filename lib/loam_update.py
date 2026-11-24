@@ -70,9 +70,14 @@ The broker's routes (``/v1/update``) and the CLI (``bin/loam-update``)
 both call this module; the page contract is ``docs/update.md``.
 
 Apply and rollback run as their own process (a transient user unit), so
-the broker restart they end with cannot cut them off. Everything they
-import is imported at the top of this file: the checkout changes under a
-running apply, and a module imported after the move would be the new one.
+the broker restart they end with cannot cut them off. After moving the
+checkout, the CLI re-execs into the target release's ``bin/loam-update``
+(when that release supports ``--resume-apply`` / ``--resume-rollback``) so
+post-move steps run in a fresh interpreter with the new release's modules
+and regeneration steps. Everything an in-process apply or rollback can call
+is also imported before the move, so rollbacks to older releases and
+in-process callers never lazily import new-release modules into an
+old-release process.
 """
 
 from __future__ import annotations
@@ -98,14 +103,18 @@ from pathlib import Path
 import loam_agents
 import loam_attention
 import loam_broker as cfg
+import loam_claim_start
 import loam_config as lc
+import loam_deploy
 import loam_engineer
 import loam_lock
 import loam_release_notes
 import loam_signing
 import loam_skills as sk
 import loam_starter
+import loam_swap
 import loam_threads
+import loam_units
 
 STATE = Path(os.environ.get("LOAM_UPDATE_STATE") or lc.STATE / "update")
 LOG = lc.LOGS / "update.jsonl"
@@ -566,18 +575,24 @@ def log(entry: dict) -> None:
 
 
 @contextlib.contextmanager
-def run_lock():
-    """One apply or rollback at a time. Raises Refusal if one is running."""
+def run_lock(lock_fd: int | None = None):
+    """One apply or rollback at a time. Raises Refusal if one is running.
+    When ``lock_fd`` is given (inherited across an exec handoff), adopt that
+    already-locked descriptor instead of re-opening ``run.lock``."""
     STATE.mkdir(parents=True, exist_ok=True)
-    fh = open(_path("run.lock"), "a+")  # noqa: SIM115
+    if lock_fd is not None:
+        os.set_inheritable(lock_fd, False)
+        fh = os.fdopen(lock_fd, "a+")
+    else:
+        fh = open(_path("run.lock"), "a+")  # noqa: SIM115
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            fh.close()
+            raise Refusal("busy", "An update is already running; its progress is "
+                                  "in Settings › About Loam.") from None
     try:
-        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        fh.close()
-        raise Refusal("busy", "An update is already running; its progress is "
-                              "in Settings › About Loam.") from None
-    try:
-        yield
+        yield fh.fileno()
     finally:
         fcntl.flock(fh, fcntl.LOCK_UN)
         fh.close()
@@ -633,7 +648,6 @@ def notice(kind: str, line: str, note: str, key: str | None = None, *,
     ``note`` what it comes with, handed to the system persona
     (lib/loam_attention.py; nothing is posted in General since 2026-11-19).
     ``key`` makes it once only."""
-    import loam_claim_start
     if loam_claim_start.unclaimed():
         return None
     sent = read_json("told.json") or {}
@@ -727,7 +741,6 @@ def release_notice_detail(rec: dict) -> str:
 
 
 def owed_notices() -> list[dict]:
-    import loam_claim_start
     if loam_claim_start.unclaimed():
         return []
     since = loam_claim_start.claimed_at()
@@ -1038,6 +1051,86 @@ def check(tell: bool = True) -> dict:
     return status()
 
 
+def _pid_alive(pid: int | None) -> bool:
+    """True when ``pid`` names a live, non-zombie process on this host."""
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+        rparen = stat.rfind(")")
+        if rparen != -1 and stat[rparen + 2:rparen + 3] == "Z":
+            return False
+    except OSError:
+        pass
+    return True
+
+
+def _reconcile_run(run: dict | None, busy: bool, cur: dict,
+                   last: dict | None, pending: dict | None) -> tuple[dict | None, bool, bool]:
+    """Reconcile a run record against live lock and PID state.
+    Returns ``(run, busy, stale)``. A stale ``running``/``starting`` record
+    whose process is gone is resolved to ``applied`` when ``last.json`` proves
+    that exact run landed and ``pending.json`` is gone, or ``interrupted``
+    otherwise."""
+    if not run or run.get("outcome") not in ("starting", "running"):
+        return run, busy, False
+    pid = run.get("pid")
+    dead_pid = pid is not None and not _pid_alive(pid)
+    if dead_pid:
+        busy = False
+    if busy:
+        return run, True, False
+    if run["outcome"] == "starting":
+        age = _age_s(run.get("started_at"))
+        if age is not None and age <= STARTING_GRACE_S and not dead_pid:
+            return run, False, False
+    if (run.get("action") == "apply" and not pending and last
+            and last.get("run") == run.get("id")
+            and cur.get("commit") == last.get("to_commit")):
+        version = last.get("to_version") or run.get("to_version")
+        fixed = {**run, "outcome": "applied", "phase": None,
+                 "ended_at": run.get("ended_at") or last.get("at") or now_iso(),
+                 "message": f"Loam is at {version}."}
+        return fixed, False, True
+    tail = (f". `{runtime()}/bin/loam-update rollback` puts "
+            f"{run.get('from_version') or 'the previous release'} back."
+            if pending else ". Nothing was moved; you can try the update again.")
+    fixed = {**run, "outcome": "interrupted",
+             "ended_at": run.get("ended_at") or now_iso(),
+             "message": (
+                 f"The {run.get('action', 'update')} stopped without finishing"
+                 + (f", during “{STEP_WORDS.get(run.get('phase'), run.get('phase'))}”"
+                    if run.get("phase") else "")
+                 + tail)}
+    return fixed, False, True
+
+
+def _persist_reconciled(fixed: dict) -> None:
+    """Best-effort heal of a stale ``apply.json`` on disk under ``run.lock``,
+    so every caller (CLI, app, next update, direct file reads) sees the
+    settled state instead of a stale ``running`` record."""
+    try:
+        with run_lock():
+            on_disk = read_json("apply.json")
+            if (not on_disk or on_disk.get("id") != fixed.get("id")
+                    or on_disk.get("outcome") not in ("starting", "running")):
+                return
+            write_json("apply.json", fixed)
+            log({"kind": "reconciled", "id": fixed.get("id"),
+                 "outcome": fixed.get("outcome"), "pid": fixed.get("pid"),
+                 "message": fixed.get("message")})
+    except (Refusal, OSError):
+        pass
+
+
 def status() -> dict:
     """What the page reads: the running release, the last check, the last or
     current apply, and whether a rollback is possible."""
@@ -1046,8 +1139,12 @@ def status() -> dict:
     except (Refusal, RuntimeError) as exc:
         cur = {"version": None, "error": getattr(exc, "message", str(exc))}
     last, pending = read_json("last.json"), read_json("pending.json")
+    run, busy = read_json("apply.json"), running()
+    run, busy, stale = _reconcile_run(run, busy, cur, last, pending)
+    if stale and run:
+        _persist_reconciled(run)
     rollback = None
-    if pending and not running() and cur.get("commit") in (
+    if pending and not busy and cur.get("commit") in (
             pending.get("from_commit"), pending.get("to_commit")):
         rollback = {"to_version": pending.get("from_version"),
                     "from_version": pending.get("to_version"), "at": pending.get("at"),
@@ -1055,16 +1152,6 @@ def status() -> dict:
     elif last and cur.get("commit") == last.get("to_commit"):
         rollback = {"to_version": last.get("from_version"),
                     "from_version": last.get("to_version"), "at": last.get("at")}
-    run, busy = read_json("apply.json"), running()
-    if run and run.get("outcome") in ("starting", "running") and not busy:
-        age = _age_s(run.get("started_at"))
-        if run["outcome"] == "running" or age is None or age > STARTING_GRACE_S:
-            run = {**run, "outcome": "interrupted", "message": (
-                f"The {run.get('action', 'update')} stopped without finishing"
-                + (f", during “{STEP_WORDS.get(run.get('phase'), run.get('phase'))}”"
-                   if run.get("phase") else "")
-                + f". `{runtime()}/bin/loam-update rollback` puts "
-                + f"{run.get('from_version') or 'the previous release'} back.")}
     chk = read_json("check.json")
     if chk:
         latest = (chk.get("latest") or {}).get("version")
@@ -1221,7 +1308,6 @@ class Box:
             if done.returncode:
                 raise RuntimeError(done.stderr.strip() or f"exit {done.returncode}")
             return done.stdout.strip() or "restarted (seam)"
-        import loam_units
         if loam_units.split_marker().exists():
             proc = subprocess.run([sys.executable, self.bin("session-services"), "reconcile"],
                                   capture_output=True, text=True, env=self.env)
@@ -1305,6 +1391,15 @@ class Box:
             said.append(f"{name} on {commit[:7]}")
         return ", ".join(said) or "no app runs from this checkout"
 
+    def swap_needed(self) -> bool:
+        """True when this release ships ``bin/loam-swap`` and the host has no
+        swap active yet (neither operator swap nor Loam swap), outside a
+        container. Catches installs that upgraded through an older updater
+        that did not know about the ``swap`` step."""
+        if not (runtime() / "bin" / "loam-swap").is_file():
+            return False
+        return loam_swap.status()["mode"] == "none" and not loam_swap.in_container()
+
     def swap(self) -> str:
         """Ensure swap is set up (zram + local swapfile) when the operator has
         none. On rollback to a release predating `bin/loam-swap`, leave active
@@ -1369,6 +1464,14 @@ class Run:
         self.rec["id"] = rec.get("id") or (
             f"{datetime.now(timezone.utc):%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}")
         self.save()
+
+    @classmethod
+    def resume(cls, rec: dict) -> "Run":
+        inst = cls.__new__(cls)
+        inst.rec = dict(rec)
+        inst.rec["pid"] = os.getpid()
+        inst.save()
+        return inst
 
     def save(self) -> None:
         write_json("apply.json", self.rec)
@@ -1466,10 +1569,70 @@ def refresh_views() -> str:
     return f"{len(changed)} skill view(s) changed" if changed else "views current"
 
 
+def _preload_for_move() -> None:
+    """Import every ``loam_*`` module an in-process apply, undo, or rollback
+    could touch before the checkout moves, so no post-move call lazily imports
+    a module from a different release into this process."""
+    for name in ("loam_session_services", "loam_files", "loam_profile",
+                 "loam_provider_defaults"):
+        try:
+            __import__(name)
+        except ImportError:
+            pass
+
+
+def _safe_tell(kind: str, fn, run: Run | None = None) -> None:
+    """Leave an agent notice without ever letting a notice failure overturn
+    a recorded run outcome or leave ``apply.json`` marked ``running``."""
+    try:
+        fn()
+    except Exception as exc:  # noqa: BLE001
+        log({"kind": "notice-error", "notice": kind,
+             "run": run.rec.get("id") if run else None, "error": str(exc)})
+        print(f"loam_update: could not leave {kind} notice: {exc}",
+              file=sys.stderr, flush=True)
+        if run is not None:
+            warnings = list(run.rec.get("warnings") or [])
+            warnings.append(f"could not leave {kind} notice: {exc}")
+            run.rec["warnings"] = warnings
+            run.save()
+
+
+def _target_supports_resume(action: str) -> bool:
+    """True when the checkout now on disk understands ``--resume-<action>``."""
+    script = runtime() / "bin" / "loam-update"
+    try:
+        return f"--resume-{action}" in script.read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+
+def _exec_resume(action: str, run_id: str, lock_fd: int | None, *,
+                 tell: bool = True, extra: list[str] | None = None) -> None:
+    """Replace this process with the target release's ``bin/loam-update``
+    while keeping the same PID and holding ``run.lock`` continuously."""
+    script = str(runtime() / "bin" / "loam-update")
+    argv = [sys.executable, "-B", script, action, "--foreground",
+            f"--resume-{action}", "--run-id", run_id]
+    if lock_fd is not None:
+        argv += ["--lock-fd", str(lock_fd)]
+    if not tell:
+        argv.append("--no-tell")
+    if extra:
+        argv.extend(extra)
+    if lock_fd is not None:
+        os.set_inheritable(lock_fd, True)
+    try:
+        os.execv(sys.executable, argv)
+    except OSError:
+        if lock_fd is not None:
+            os.set_inheritable(lock_fd, False)
+        raise
+
+
 def combine_if_older(target):
     # Called under the live lock, before moving away from the code that can
     # safely drain a separate host. Older releases install the combined unit.
-    import loam_units
     if loam_units.split_marker().exists() and show(target, prefix() + "bin/session-services") is None:
         from loam_session_services import Deferred, replace
         try:
@@ -1527,36 +1690,69 @@ def _regenerate(run: Run, box: Box, old: str, new: str, changed: list[str],
         if needs(name, old, new, changed):
             run.step(name, getattr(box, name.replace("-", "_")))
             done.append(name)
+        elif name == "swap" and box.swap_needed():
+            run.step(name, box.swap)
+            done.append(name)
         else:
             run.skip(name, "nothing it reads changed")
 
 
 def apply(target: str | None = None, accept_library_edits: bool = False,
-          box: Box | None = None, run_id: str | None = None, by: str | None = None) -> dict:
+          box: Box | None = None, run_id: str | None = None, by: str | None = None,
+          tell: bool = True, reexec: bool = False,
+          reexec_extra: list[str] | None = None) -> dict:
     """Move this install to ``target`` (default: the newest release), in
     this process. Returns the run's record; never raises for a refusal or a
     failure, which are the record's ``outcome``."""
     box = box or Box()
     try:
-        with run_lock():
-            return _apply(target, accept_library_edits, box, run_id, by)
+        with run_lock() as lock_fd:
+            return _apply(target, accept_library_edits, box, run_id, by,
+                          tell=tell, reexec=reexec, reexec_extra=reexec_extra,
+                          lock_fd=lock_fd)
     except Refusal as r:
         # Only `busy` reaches here: a second run while one holds the lock.
         return {"outcome": "refused", "refusal": r.as_dict(), "message": r.message}
 
 
-def _apply(target, accept_library_edits, box, run_id, by) -> dict:
+def resume_apply(box: Box | None = None, run_id: str | None = None,
+                 tell: bool = True, lock_fd: int | None = None) -> dict:
+    """Finish an apply after the checkout has moved and the updater
+    re-execed into the new release's code."""
+    box = box or Box()
+    try:
+        with run_lock(lock_fd=lock_fd):
+            _preload_for_move()
+            rec = read_json("apply.json")
+            pending = read_json("pending.json")
+            if not rec or not pending:
+                raise RuntimeError("cannot resume apply: missing apply.json or pending.json")
+            if run_id and rec.get("id") != run_id:
+                raise RuntimeError(f"cannot resume apply: run id mismatch ({rec.get('id')} != {run_id})")
+            run = Run.resume(rec)
+            box.on_line = run.note
+            return _finish_apply(run, pending, box, tell=tell)
+    except Refusal as r:
+        return {"outcome": "refused", "refusal": r.as_dict(), "message": r.message}
+
+
+def _apply(target, accept_library_edits, box, run_id, by, *,
+           tell: bool = True, reexec: bool = False,
+           reexec_extra: list[str] | None = None,
+           lock_fd: int | None = None) -> dict:
+    _preload_for_move()
     run = Run("apply", {"id": run_id, "by": by, "to_version": target and bare(target)})
     box.on_line = run.note
     try:
         plan = run.step("preflight", preflight, target, accept_library_edits)
     except Refusal as r:
         run.rec["refusal"] = r.as_dict()
+        res = run.end("refused", r.message)
         # Edits waiting on a yes are the person's to look at, not a refusal
         # to hand on.
-        if r.code != "library-edits":
-            tell_refused(target and (tag_of(target) or target), r)
-        return run.end("refused", r.message)
+        if tell and r.code != "library-edits":
+            _safe_tell("refused", lambda: tell_refused(target and (tag_of(target) or target), r), run)
+        return res
     except StepFailed as f:
         return run.end("failed", f"The check before the update failed: {f.message}. "
                                  f"Nothing was changed.")
@@ -1587,25 +1783,14 @@ def _apply(target, accept_library_edits, box, run_id, by) -> dict:
         except Refusal as r:
             run.rec["refusal"] = r.as_dict()
             _path("pending.json").unlink(missing_ok=True)
-            tell_refused(tag, r)
-            return run.end("refused", r.message)
+            res = run.end("refused", r.message)
+            if tell:
+                _safe_tell("refused", lambda: tell_refused(tag, r), run)
+            return res
         new = head()
         run.rec["merged_commit"] = pending["to_commit"] = new
+        run.save()
         write_json("pending.json", pending)
-        run.step("verify", verify, plan["version"])
-        pending["library_replaced"] = True
-        write_json("pending.json", pending)
-        run.step("library", box.library)
-        done.append("library")
-        changed = changed_files(cur["commit"], new)
-        run.rec["changed_files"] = len(changed)
-        by_hand = [f for f in changed
-                   if f.startswith(prefix() + "systemd/system/")
-                   and not f.endswith("/loam-swap.service")]
-        if by_hand:
-            run.rec["warnings"] = [f"system units changed and are installed by hand "
-                                   f"(root): {', '.join(by_hand)}"]
-        _regenerate(run, box, cur["commit"], new, changed, done)
     except StepFailed as f:
         run.rec["failed_step"] = f.step
         # Undone whatever step failed: a reset to the old commit and the
@@ -1616,19 +1801,69 @@ def _apply(target, accept_library_edits, box, run_id, by) -> dict:
             _path("pending.json").unlink(missing_ok=True)
         else:
             write_json("pending.json", {**pending, "ran": done})
-        tell_failed(run.rec, f.message)
         state = "back at" if run.rec["rolled_back"] else "trying to put back"
-        return run.end("failed",
-                       f"The update failed at “{STEP_WORDS.get(f.step, f.step)}”: "
-                       f"{f.message.strip().splitlines()[-1] if f.message.strip() else ''}. "
-                       f"Loam is {state} {cur['version']}.")
-    write_json("last.json", {"from_version": cur["version"], "from_commit": cur["commit"],
-                             "to_version": plan["version"], "to_commit": head(),
-                             "kind": cur["kind"], "backup": backup, "ran": done,
+        res = run.end("failed",
+                      f"The update failed at “{STEP_WORDS.get(f.step, f.step)}”: "
+                      f"{f.message.strip().splitlines()[-1] if f.message.strip() else ''}. "
+                      f"Loam is {state} {cur['version']}.")
+        if tell:
+            _safe_tell("failed", lambda: tell_failed(run.rec, f.message), run)
+        return res
+    if reexec and _target_supports_resume("apply"):
+        try:
+            _exec_resume("apply", run.rec["id"], lock_fd, tell=tell, extra=reexec_extra)
+        except OSError:
+            pass
+    return _finish_apply(run, pending, box, tell=tell)
+
+
+def _finish_apply(run: Run, pending: dict, box: Box, *, tell: bool = True) -> dict:
+    from_commit = pending["from_commit"]
+    from_version = pending["from_version"]
+    to_version = pending["to_version"]
+    kind = pending["kind"]
+    backup = pending.get("backup")
+    done: list[str] = list(pending.get("ran") or [])
+    new = head()
+    try:
+        run.step("verify", verify, to_version)
+        pending["library_replaced"] = True
+        write_json("pending.json", pending)
+        run.step("library", box.library)
+        done.append("library")
+        changed = changed_files(from_commit, new)
+        run.rec["changed_files"] = len(changed)
+        by_hand = [f for f in changed
+                   if f.startswith(prefix() + "systemd/system/")
+                   and not f.endswith("/loam-swap.service")]
+        if by_hand:
+            run.rec["warnings"] = [f"system units changed and are installed by hand "
+                                   f"(root): {', '.join(by_hand)}"]
+        _regenerate(run, box, from_commit, new, changed, done)
+    except StepFailed as f:
+        run.rec["failed_step"] = f.step
+        run.rec["rolled_back"] = _undo(run, box, from_commit, backup, done)
+        if run.rec["rolled_back"]:
+            _path("pending.json").unlink(missing_ok=True)
+        else:
+            write_json("pending.json", {**pending, "ran": done})
+        state = "back at" if run.rec["rolled_back"] else "trying to put back"
+        res = run.end("failed",
+                      f"The update failed at “{STEP_WORDS.get(f.step, f.step)}”: "
+                      f"{f.message.strip().splitlines()[-1] if f.message.strip() else ''}. "
+                      f"Loam is {state} {from_version}.")
+        if tell:
+            _safe_tell("failed", lambda: tell_failed(run.rec, f.message), run)
+        return res
+    write_json("last.json", {"from_version": from_version, "from_commit": from_commit,
+                             "to_version": to_version, "to_commit": head(),
+                             "kind": kind, "backup": backup, "ran": done,
                              "at": now_iso(), "run": run.rec["id"]})
     _path("pending.json").unlink(missing_ok=True)
-    tell_applied(run.rec)
-    return run.end("applied", f"Loam is at {plan['version']}.")
+    res = run.end("applied", f"Loam is at {to_version}.")
+    if tell:
+        _safe_tell("applied", lambda: tell_applied(run.rec), run)
+    return res
 
 
 def _undo(run: Run, box: Box, old_commit: str, backup: str | None,
@@ -1662,12 +1897,35 @@ def _undo(run: Run, box: Box, old_commit: str, backup: str | None,
 
 
 def rollback(box: Box | None = None, run_id: str | None = None,
-             by: str | None = None) -> dict:
+             by: str | None = None, tell: bool = True, reexec: bool = False,
+             reexec_extra: list[str] | None = None) -> dict:
     """Put back the release the last successful apply replaced."""
     box = box or Box()
     try:
-        with run_lock():
-            return _rollback(box, run_id, by)
+        with run_lock() as lock_fd:
+            return _rollback(box, run_id, by, tell=tell, reexec=reexec,
+                             reexec_extra=reexec_extra, lock_fd=lock_fd)
+    except Refusal as r:
+        return {"outcome": "refused", "refusal": r.as_dict(), "message": r.message}
+
+
+def resume_rollback(box: Box | None = None, run_id: str | None = None,
+                    tell: bool = True, lock_fd: int | None = None) -> dict:
+    """Finish a rollback after the checkout was reset and the updater
+    re-execed into the target release's code."""
+    box = box or Box()
+    try:
+        with run_lock(lock_fd=lock_fd):
+            _preload_for_move()
+            rec = read_json("apply.json")
+            last = read_json("rollback.json")
+            if not rec or not last:
+                raise RuntimeError("cannot resume rollback: missing apply.json or rollback.json")
+            if run_id and rec.get("id") != run_id:
+                raise RuntimeError(f"cannot resume rollback: run id mismatch ({rec.get('id')} != {run_id})")
+            run = Run.resume(rec)
+            box.on_line = run.note
+            return _finish_rollback(run, last, box, by=run.rec.get("by"), tell=tell)
     except Refusal as r:
         return {"outcome": "refused", "refusal": r.as_dict(), "message": r.message}
 
@@ -1701,7 +1959,10 @@ def rollback_preflight() -> dict:
     return {**last, "_file": "last.json"}
 
 
-def _rollback(box, run_id, by) -> dict:
+def _rollback(box, run_id, by, *, tell: bool = True, reexec: bool = False,
+              reexec_extra: list[str] | None = None,
+              lock_fd: int | None = None) -> dict:
+    _preload_for_move()
     run = Run("rollback", {"id": run_id, "by": by})
     box.on_line = run.note
     try:
@@ -1715,7 +1976,34 @@ def _rollback(box, run_id, by) -> dict:
     try:
         here = run.step("backup", backup_library, run.rec["id"], last.get("backup"))
         run.rec["backup"] = here
+        run.save()
+        write_json("rollback.json", last)
         run.step("back", reset_to, last["from_commit"])
+    except StepFailed as f:
+        _path("rollback.json").unlink(missing_ok=True)
+        run.rec["failed_step"] = f.step
+        res = run.end("failed", f"The rollback failed at “{STEP_WORDS.get(f.step, f.step)}”: "
+                      f"{f.message.strip().splitlines()[-1] if f.message.strip() else ''}.")
+        if tell:
+            _safe_tell("failed", lambda: notice(
+                "failed", f"Rolling Loam back to {last['from_version']} failed at "
+                f"“{STEP_WORDS.get(f.step, f.step)}”.",
+                f"A rollback of Loam from {last['to_version']} to "
+                f"{last['from_version']} failed at `{f.step}`: {f.message}\n\nThe "
+                f"record is {_path('apply.json')}. Tell {_owner()} plainly; the "
+                f"checkout is at {head()[:12]}."), run)
+        return res
+    if reexec and _target_supports_resume("rollback"):
+        try:
+            _exec_resume("rollback", run.rec["id"], lock_fd, tell=tell, extra=reexec_extra)
+        except OSError:
+            pass
+    return _finish_rollback(run, last, box, by=by, tell=tell)
+
+
+def _finish_rollback(run: Run, last: dict, box: Box, *, by: str | None = None,
+                     tell: bool = True) -> dict:
+    try:
         run.step("verify", verify, last["from_version"])
         if last.get("interrupted") and not last.get("library_replaced"):
             run.skip("library-back", "the stopped update had not replaced it")
@@ -1726,29 +2014,37 @@ def _rollback(box, run_id, by) -> dict:
         done: list[str] = []
         _regenerate(run, box, last["to_commit"], last["from_commit"], changed, done)
     except StepFailed as f:
+        _path("rollback.json").unlink(missing_ok=True)
         run.rec["failed_step"] = f.step
-        notice("failed", f"Rolling Loam back to {last['from_version']} failed at "
-               f"“{STEP_WORDS.get(f.step, f.step)}”.",
-               f"A rollback of Loam from {last['to_version']} to "
-               f"{last['from_version']} failed at `{f.step}`: {f.message}\n\nThe "
-               f"record is {_path('apply.json')}. Tell {_owner()} plainly; the "
-               f"checkout is at {head()[:12]}.")
-        return run.end("failed", f"The rollback failed at “{STEP_WORDS.get(f.step, f.step)}”: "
-                       f"{f.message.strip().splitlines()[-1] if f.message.strip() else ''}.")
+        res = run.end("failed", f"The rollback failed at “{STEP_WORDS.get(f.step, f.step)}”: "
+                      f"{f.message.strip().splitlines()[-1] if f.message.strip() else ''}.")
+        if tell:
+            _safe_tell("failed", lambda: notice(
+                "failed", f"Rolling Loam back to {last['from_version']} failed at "
+                f"“{STEP_WORDS.get(f.step, f.step)}”.",
+                f"A rollback of Loam from {last['to_version']} to "
+                f"{last['from_version']} failed at `{f.step}`: {f.message}\n\nThe "
+                f"record is {_path('apply.json')}. Tell {_owner()} plainly; the "
+                f"checkout is at {head()[:12]}."), run)
+        return res
+    _path("rollback.json").unlink(missing_ok=True)
     _path(last["_file"]).unlink(missing_ok=True)
-    notice("rolled-back", f"Loam was rolled back from {last['to_version']} to "
-           f"{last['from_version']}.",
-           f"Loam was rolled back from {last['to_version']} to "
-           f"{last['from_version']}{f' by {by}' if by else ''}. Tell {_owner()} "
-           f"briefly, in your own words, that the earlier release is running "
-           f"again.")
-    return run.end("rolled-back", f"Loam is back at {last['from_version']}.")
+    res = run.end("rolled-back", f"Loam is back at {last['from_version']}.")
+    if tell:
+        _safe_tell("rolled-back", lambda: notice(
+            "rolled-back", f"Loam was rolled back from {last['to_version']} to "
+            f"{last['from_version']}.",
+            f"Loam was rolled back from {last['to_version']} to "
+            f"{last['from_version']}{f' by {by}' if by else ''}. Tell {_owner()} "
+            f"briefly, in your own words, that the earlier release is running "
+            f"again."), run)
+    return res
 
 
 # -- starting a run as its own process ------------------------------------------------------
 
 def start(action: str, target: str | None = None, accept_library_edits: bool = False,
-          by: str | None = None) -> dict:
+          by: str | None = None, tell: bool = True) -> dict:
     """Check what must hold, then run ``action`` (``apply`` or ``rollback``)
     as its own process, so a broker restart cannot cut it. Raises Refusal
     for what the page can show at once; answers the run's first record."""
@@ -1758,8 +2054,8 @@ def start(action: str, target: str | None = None, accept_library_edits: bool = F
         try:
             preflight(target, accept_library_edits)
         except Refusal as r:
-            if r.code != "library-edits":
-                tell_refused(target and (tag_of(target) or target), r)
+            if tell and r.code != "library-edits":
+                _safe_tell("refused", lambda: tell_refused(target and (tag_of(target) or target), r))
             raise
     elif action == "rollback":
         rollback_preflight()
@@ -1775,6 +2071,8 @@ def start(action: str, target: str | None = None, accept_library_edits: bool = F
             argv.append("--yes")
     if by:
         argv += ["--by", by]
+    if not tell:
+        argv.append("--no-tell")
     write_json("apply.json", {"id": run_id, "action": action, "outcome": "starting",
                               "started_at": now_iso(), "steps": [], "by": by,
                               "message": None, "phase": "starting"})

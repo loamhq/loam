@@ -843,6 +843,249 @@ check("bare `loam update` is not a usage error: it checks and says what to type"
       (0, True, True, True))
 check("...and leaves no notice for the agent (the person is right there)", notices(), [])
 
+# -- post-apply notice failure, stale dead-pid records, --no-tell, swap catch-up --------
+
+from unittest.mock import patch as _patch  # noqa: E402
+
+# (2) A post-apply notice failure must never leave apply.json marked "running".
+clear_notices()
+install(INSTALL)
+seed_library()
+with _patch.object(up, "tell_applied", side_effect=AttributeError("simulated notice boom")):
+    rec = up.apply(target="1.2.0", accept_library_edits=True, box=FakeBox())
+on_disk = up.read_json("apply.json") or {}
+check("post-apply notice failure still records applied outcome on disk",
+      (rec["outcome"], on_disk.get("outcome"), on_disk.get("phase"),
+       bool(on_disk.get("ended_at")),
+       any("could not leave applied notice" in w for w in on_disk.get("warnings") or [])),
+      ("applied", "applied", None, True, True))
+check("...and status reports applied, not running or interrupted",
+      (up.status()["running"], up.status()["run"]["outcome"]), (False, "applied"))
+
+# (3) A stale "running" record with a dead pid is reconciled by status, the broker routes,
+# and never blocks the next update.
+DEAD_PID = 2_147_483_640
+# 3a: post-apply crash (last.json matches this run and pending.json is gone) -> healed to applied.
+v120 = git(INSTALL, "rev-parse", "HEAD")
+stale_applied = {
+    "id": "20261124-060335-dead01", "action": "apply", "outcome": "running",
+    "phase": "host", "started_at": "2026-11-24T06:03:35Z", "ended_at": None,
+    "pid": DEAD_PID, "from_version": "1.0.0", "to_version": "1.2.0",
+    "steps": [{"name": "host", "words": "Installing the host history's timer", "status": "done"}],
+    "message": None,
+}
+up.write_json("apply.json", stale_applied)
+up.write_json("last.json", {
+    "from_version": "1.0.0", "from_commit": v100, "to_version": "1.2.0",
+    "to_commit": v120, "kind": "stock", "backup": None, "ran": ["library", "host"],
+    "at": "2026-11-24T06:03:55Z", "run": "20261124-060335-dead01",
+})
+(up.STATE / "pending.json").unlink(missing_ok=True)
+st = up.status()
+check("stale running record with dead pid and matching last.json heals to applied",
+      (st["running"], st["run"]["outcome"], st["run"]["phase"], st["run"]["message"],
+       (up.read_json("apply.json") or {}).get("outcome")),
+      (False, "applied", None, "Loam is at 1.2.0.", "applied"))
+
+
+async def _stale_route_checks():
+    server = broker_mod.Server.__new__(broker_mod.Server)
+    server.broker = FakeBroker()
+    server.threads = engine_mod.ThreadEngine(server.broker)
+    up.write_json("apply.json", stale_applied)
+    code1, body1 = await route(server, "GET", "/v1/update")
+    up.write_json("apply.json", stale_applied)
+    code2, body2 = await route(server, "GET", "/v1/update/progress")
+    check("...and GET /v1/update and /v1/update/progress both see applied",
+          (code1, body1["running"], body1["run"]["outcome"], code2, body2["outcome"]),
+          (200, False, "applied", 200, "applied"))
+
+
+asyncio.run(_stale_route_checks())
+
+# 3b: mid-apply crash (dead pid, pending.json present) -> healed to interrupted + rollback offered.
+stale_mid = {**stale_applied, "id": "20261124-060335-dead02", "phase": "units"}
+up.write_json("apply.json", stale_mid)
+up.write_json("pending.json", {
+    "from_version": "1.0.0", "from_commit": v100, "to_version": "1.2.0",
+    "to_commit": v120, "kind": "stock", "backup": None, "library_replaced": False,
+    "ran": [], "run": "20261124-060335-dead02", "at": "2026-11-24T06:03:40Z",
+})
+st = up.status()
+check("stale running record with dead pid and pending.json heals to interrupted",
+      (st["running"], st["run"]["outcome"], (st["rollback"] or {}).get("interrupted"),
+       (up.read_json("apply.json") or {}).get("outcome")),
+      (False, "interrupted", True, "interrupted"))
+(up.STATE / "pending.json").unlink(missing_ok=True)
+
+# 3c: stale running record with dead pid does not block the next apply or start().
+install(INSTALL)
+seed_library()
+up.write_json("apply.json", {**stale_applied, "id": "20261124-060335-dead03"})
+(up.STATE / "run.lock").touch()
+rec = up.apply(target="1.1.0", accept_library_edits=True, box=FakeBox(), tell=False)
+check("stale running record with dead pid does not block the next update",
+      (rec["outcome"], up.running_version(), (up.read_json("apply.json") or {}).get("outcome")),
+      ("applied", "1.1.0", "applied"))
+
+# (4) --no-tell honored on apply, rollback, and start (success, refusal, failure).
+clear_notices()
+install(INSTALL)
+seed_library()
+rec = up.apply(target="1.1.0", accept_library_edits=True, box=FakeBox(), tell=False)
+check("apply(tell=False) leaves no applied notice", (rec["outcome"], notices()), ("applied", []))
+rec = up.rollback(box=FakeBox(), tell=False)
+check("rollback(tell=False) leaves no rolled-back notice", (rec["outcome"], notices()), ("rolled-back", []))
+rec = up.apply(target="1.2.0", accept_library_edits=True, box=FakeBox(fail={"broker": 1}), tell=False)
+check("apply(tell=False) leaves no failed notice", (rec["outcome"], notices()), ("failed", []))
+(INSTALL / "stray-notell.txt").write_text("x")
+rec = up.apply(target="1.1.0", box=FakeBox(), tell=False)
+check("apply(tell=False) leaves no refusal notice", (rec["outcome"], notices()), ("refused", []))
+try:
+    up.start("apply", target="1.1.0", tell=False)
+    got_refusal = None
+except up.Refusal as r:
+    got_refusal = r.code
+check("start(tell=False) leaves no refusal notice", (got_refusal, notices()), ("dirty", []))
+(INSTALL / "stray-notell.txt").unlink()
+spawned_argv: list[list[str]] = []
+with _patch.object(up, "spawn", side_effect=lambda argv, run_id: spawned_argv.append(argv)):
+    up.start("apply", target="1.1.0", accept_library_edits=True, tell=False)
+check("start(tell=False) passes --no-tell to the spawned updater",
+      "--no-tell" in (spawned_argv[0] if spawned_argv else []), True)
+
+# (5) Box.swap_needed() triggers swap on update when bin/loam-swap exists and no swap is active,
+# even if swap files did not change between the two releases.
+class SwapCatchupBox(FakeBox):
+    def swap_needed(self) -> bool:
+        return True
+
+
+install(INSTALL)
+seed_library()
+sbox = SwapCatchupBox()
+rec = up.apply(target="1.1.0", accept_library_edits=True, box=sbox, tell=False)
+check("swap runs automatically on update when host has no swap yet",
+      ("swap" in sbox.calls, any(s["name"] == "swap" and s["status"] == "done" for s in rec["steps"])),
+      (True, True))
+
+# (1) Real-subprocess re-exec test: upgrading to a release whose loam_config gained a new
+# attribute referenced by loam_deploy (the exact 0.2.31 -> 0.2.34 BROWSER_OUTPUT skew) AND
+# whose updater added a new post-move step succeeds cleanly by re-execing into the new release.
+SKEW = TMP / "skew"
+SKEW.mkdir(parents=True, exist_ok=True)
+SKEW_ORIGIN, SKEW_HQ, SKEW_INSTALL = SKEW / "origin.git", SKEW / "hq", SKEW / "install"
+SKEW_CFG = SKEW / "loam.toml"
+SKEW_CFG.write_text(f'''
+[owner]
+id = "sam"
+name = "Sam"
+[edge]
+app = "loam-ui"
+[paths]
+home = "{SKEW}/home"
+root = "{SKEW_INSTALL}"
+vault = "{SKEW}/vault"
+workspaces = "{SKEW}/agents"
+state = "{SKEW}/state"
+''')
+(SKEW / "agents" / "iris").mkdir(parents=True)
+(SKEW / "agents" / "iris" / "agent.json").write_text(json.dumps({"name": "Iris"}))
+subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(SKEW_ORIGIN)], check=True)
+subprocess.run(["git", "init", "-q", "-b", "main", str(SKEW_HQ)], check=True)
+git(SKEW_HQ, "remote", "add", "origin", str(SKEW_ORIGIN))
+
+# Copy the real updater + lib modules into SKEW_HQ so the subprocess executes the real code.
+shutil.copytree(ROOT / "lib", SKEW_HQ / "lib",
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+write(SKEW_HQ / "bin" / "loam-update", (ROOT / "bin" / "loam-update").read_text(encoding="utf-8"))
+os.chmod(SKEW_HQ / "bin" / "loam-update", 0o755)
+write(SKEW_HQ / "bin" / "library", "#!/usr/bin/env python3\nprint('library ok')\n")
+os.chmod(SKEW_HQ / "bin" / "library", 0o755)
+write(SKEW_HQ / "manifest.json", '{"version": "2.0.0"}\n')
+write(SKEW_HQ / "docs/library/README.md", "# Library 2.0.0\n")
+write(SKEW_HQ / "docs/releases/2.0.0.md", "Release 2.0.0.\n")
+# Ensure loam_deploy.CLAIMED_FILE points into SKEW so unclaimed() returns False (claimed install).
+claimed_marker = SKEW / "claimed"
+claimed_marker.write_text(json.dumps({"at": "2026-01-01T00:00:00Z"}))
+deploy_src = (SKEW_HQ / "lib" / "loam_deploy.py").read_text(encoding="utf-8")
+deploy_src = deploy_src.replace('CLAIMED_FILE = ETC / "claimed"',
+                                f'CLAIMED_FILE = Path({str(claimed_marker)!r})')
+write(SKEW_HQ / "lib" / "loam_deploy.py", deploy_src)
+git(SKEW_HQ, "add", "-A")
+git(SKEW_HQ, "commit", "-qm", "Release 2.0.0")
+git(SKEW_HQ, "tag", "-a", "2.0.0", "-m", "Loam 2.0.0")
+git(SKEW_HQ, "push", "-q", "origin", "main", "2.0.0")
+
+# Release 2.1.0 gains a brand-new attribute in loam_config referenced at module top-level in
+# loam_deploy (reproducing BROWSER_OUTPUT), plus a marker proving 2.1.0's updater ran post-move.
+cfg_v21 = (SKEW_HQ / "lib" / "loam_config.py").read_text(encoding="utf-8") + \
+    '\nNEW_IN_2_1_0 = "v2.1.0-only-attr"\n'
+write(SKEW_HQ / "lib" / "loam_config.py", cfg_v21)
+deploy_v21 = deploy_src + '\nSYNTHETIC_SKEW_CHECK = lc.NEW_IN_2_1_0\n'
+write(SKEW_HQ / "lib" / "loam_deploy.py", deploy_v21)
+marker_file = SKEW / "reexec-ran.txt"
+up_v21 = (SKEW_HQ / "lib" / "loam_update.py").read_text(encoding="utf-8")
+up_v21 = up_v21.replace(
+    '    res = run.end("applied", f"Loam is at {to_version}.")',
+    f'    Path({str(marker_file)!r}).write_text(loam_deploy.SYNTHETIC_SKEW_CHECK, encoding="utf-8")\n'
+    '    res = run.end("applied", f"Loam is at {to_version}.")',
+)
+write(SKEW_HQ / "lib" / "loam_update.py", up_v21)
+write(SKEW_HQ / "manifest.json", '{"version": "2.1.0"}\n')
+write(SKEW_HQ / "docs/library/README.md", "# Library 2.1.0\n")
+write(SKEW_HQ / "docs/releases/2.1.0.md", "## For your agent\n\nRelease 2.1.0.\n")
+git(SKEW_HQ, "add", "-A")
+git(SKEW_HQ, "commit", "-qm", "Release 2.1.0")
+git(SKEW_HQ, "tag", "-a", "2.1.0", "-m", "Loam 2.1.0")
+git(SKEW_HQ, "push", "-q", "origin", "main", "2.1.0")
+
+subprocess.run(["git", "clone", "-q", "--branch", "2.0.0", str(SKEW_ORIGIN), str(SKEW_INSTALL)],
+               check=True, capture_output=True)
+skew_env = {**os.environ, "LOAM_CONFIG": str(SKEW_CFG), "LOAM_UPDATE_NO_UNIT": "1",
+            "PYTHONDONTWRITEBYTECODE": "1"}
+# 1a: apply with notices enabled -> re-execs into 2.1.0, uses 2.1.0's loam_config + loam_deploy.
+done = subprocess.run(
+    [sys.executable, str(SKEW_INSTALL / "bin" / "loam-update"),
+     "apply", "--foreground", "--to", "2.1.0", "--yes", "--json"],
+    capture_output=True, text=True, env=skew_env,
+)
+skew_rec = json.loads(done.stdout) if done.returncode == 0 and done.stdout.strip() else {}
+skew_notices = list((SKEW / "state" / "update" / "notices").glob("*.json"))
+check("re-exec apply succeeds when new release adds a loam_config attr used by loam_deploy",
+      (done.returncode, skew_rec.get("outcome"),
+       marker_file.read_text(encoding="utf-8") if marker_file.exists() else None,
+       len(skew_notices)),
+      (0, "applied", "v2.1.0-only-attr", 1))
+for p in skew_notices:
+    p.unlink()
+
+# 1b: rollback with --no-tell re-execs back to 2.0.0 and leaves no notice.
+done_rb = subprocess.run(
+    [sys.executable, str(SKEW_INSTALL / "bin" / "loam-update"),
+     "rollback", "--foreground", "--no-tell", "--json"],
+    capture_output=True, text=True, env=skew_env,
+)
+rb_rec = json.loads(done_rb.stdout) if done_rb.returncode == 0 and done_rb.stdout.strip() else {}
+check("re-exec rollback with --no-tell puts 2.0.0 back and leaves no notice",
+      (done_rb.returncode, rb_rec.get("outcome"),
+       git(SKEW_INSTALL, "rev-parse", "HEAD") == git(SKEW_ORIGIN, "rev-parse", "2.0.0^{commit}"),
+       list((SKEW / "state" / "update" / "notices").glob("*.json"))),
+      (0, "rolled-back", True, []))
+
+# 1c: `loam update update --to 2.1.0 --yes --foreground --no-tell` honors --to and --no-tell.
+marker_file.unlink(missing_ok=True)
+done_u = subprocess.run(
+    [sys.executable, str(SKEW_INSTALL / "bin" / "loam-update"),
+     "update", "--to", "2.1.0", "--yes", "--foreground", "--no-tell"],
+    capture_output=True, text=True, env=skew_env,
+)
+check("`loam-update update --to 2.1.0 --yes --foreground --no-tell` applies without notice",
+      (done_u.returncode,
+       marker_file.read_text(encoding="utf-8") if marker_file.exists() else None,
+       list((SKEW / "state" / "update" / "notices").glob("*.json"))),
+      (0, "v2.1.0-only-attr", []))
+
 shutil.rmtree(TMP, ignore_errors=True)
 print(f"\n{'FAILED' if FAILURES else 'OK'}: {FAILURES} failure(s)")
 sys.exit(1 if FAILURES else 0)

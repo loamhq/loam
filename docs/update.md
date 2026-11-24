@@ -191,6 +191,14 @@ four.
 
 ## After the move
 
+Right after the checkout moves, `bin/loam-update` re-execs into the target
+release's own `bin/loam-update` (`--resume-apply` / `--resume-rollback`,
+passing the held `run.lock` descriptor) whenever the target release supports
+it. That keeps every post-move step in a fresh Python interpreter with the
+target release's modules and regeneration rules — never importing new-release
+modules into an old-release process. Everything an in-process caller or a
+rollback to an older release can touch is also preloaded before the move.
+
 Each step runs from the new code, and only when something it reads has
 changed between the two commits. "What it reads" means the script, plus
 every `lib/loam_*.py` it imports (followed transitively, read from both
@@ -204,9 +212,11 @@ commits), plus the folders listed:
 | `providers` | `bin/provider-pin apply --no-restart` | |
 | `provider-memory` | `bin/provider-memory pin` | `lib/loam_pins.py` |
 | `broker` | `bin/session-broker`, `bin/session-host` | `broker/`, `plugins/`, `lib/loam_pins.py` |
-| `gateway` | `bin/plugin-gateway` | |
-| `deploy` | `sudo bin/gen-deploy` (the web front, the login, the walls: the inbound wall reaches an install that lacks it this way) | `deploy/` |
+| `gateway` | `bin/plugin-gateway`, `bin/plugin-servers` | `systemd/loam-plugins-gateway.service`, `plugins/` |
+| `deploy` | `sudo bin/gen-deploy` (the web front, the login, the walls: the inbound wall reaches an install that lacks it this way) | `deploy/`, `broker/firewall.sh`, `systemd/system/loam-claim.service`, `systemd/system/loam-broker-firewall.service` |
 | `app` | `sudo bin/deploy <app> up <commit>` | `app/`, `deploy/` |
+| `swap` | `sudo bin/loam-swap install` (also runs when the host has no swap yet, outside a container; leaves operator swap alone) | `systemd/system/loam-swap.service` |
+| `host` | `sudo bin/loam-host install` | `systemd/system/loam-host-history.` |
 
 - **The split session services** compare the running revision of each process
   with the target, including the imports in both trees and its unit template.
@@ -262,12 +272,20 @@ anything moves. Three things update it as the run goes: the backup's path,
 the merged commit, and whether System/Loam has been replaced yet. It is
 removed when the run applies, or when a failure's undo finishes.
 
-While the file stands and no run holds the lock:
+While the file stands and no run holds the lock (or the PID recorded in
+`apply.json` is dead):
 
-- `status` reports the run as `interrupted`;
-- it offers a rollback marked `"interrupted": true`;
+- `status` reports the run as `interrupted` and heals `apply.json` on disk;
+- if `last.json` already recorded that exact run and `pending.json` is gone
+  (for example, an older updater crashed while leaving the post-apply notice),
+  `status` heals `apply.json` to `applied` instead of `interrupted`;
+- it offers a rollback marked `"interrupted": true` while `pending.json` exists;
 - `rollback` puts the previous release back from that point. It skips
   restoring System/Loam if the run had not replaced it yet.
+
+The run outcome is written to `apply.json` before any post-run notice is
+left; a notice failure is logged and recorded in `warnings` and never leaves
+`apply.json` marked `running`.
 
 ### Rollback
 
@@ -331,9 +349,9 @@ loam update                     check; if a newer release can be applied, offer 
 loam update status              the running release, the last check and run, rollback
 loam update check [--no-tell]   the newest release; can it be applied now; System/Loam's edits
 loam update diff                System/Loam's edits against the running release's library
-loam update apply [--to V] [--yes]
-loam update rollback
-        --json for the record; --foreground runs in this process
+loam update apply [--to V] [--yes] [--no-tell]
+loam update rollback [--no-tell]
+        --json for the record; --foreground runs in this process; --no-tell leaves no agent notice
 ```
 
 `apply` and `rollback` start the run as its own transient user unit

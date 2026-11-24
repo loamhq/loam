@@ -7,12 +7,12 @@ import json
 import subprocess
 
 import loam_config as lc
+import loam_deploy
 
 
 def unclaimed() -> bool:
     if not lc.get("edge.app"):
         return False
-    import loam_deploy
     return loam_deploy.unclaimed()
 
 
@@ -20,7 +20,6 @@ def claimed_at() -> str:
     """UTC timestamp, normalized to the precision of runtime event records."""
     if not lc.get("edge.app"):
         return ""
-    import loam_deploy
     try:
         return json.loads(loam_deploy.CLAIMED_FILE.read_text())["at"][:19]
     except (OSError, ValueError, KeyError, TypeError):
