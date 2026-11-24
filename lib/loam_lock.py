@@ -194,6 +194,36 @@ def short_text(r: dict) -> str:
             f"free ({r.get('running', 0)} run(s) going)")
 
 
+# Advisory demand signal: a wake, cron, reviewer or engineer job blocked on
+# memory touches this marker on each retry (every 5 s). The session host's
+# pressure pass reads it so idle chats release RAM promptly when real work is
+# waiting, without changing admission or the memory reserve.
+ROOM_WANTED_FILE = "room-wanted"
+ROOM_WANTED_TTL_S = 30
+
+
+def note_room_wanted() -> None:
+    """Record that a non-chat run is waiting for memory right now. Fail-soft."""
+    try:
+        LOCK_DIR.mkdir(parents=True, exist_ok=True)
+        path = LOCK_DIR / ROOM_WANTED_FILE
+        path.touch(exist_ok=True)
+        os.utime(path, None)
+    except OSError:
+        pass
+
+
+def room_wanted(now: float | None = None) -> bool:
+    """True when a wake, cron, reviewer or engineer job was refused for memory
+    within ``ROOM_WANTED_TTL_S`` seconds."""
+    now = time.time() if now is None else now
+    try:
+        mtime = (LOCK_DIR / ROOM_WANTED_FILE).stat().st_mtime
+    except OSError:
+        return False
+    return (now - mtime) <= ROOM_WANTED_TTL_S
+
+
 _COUNTER = [0]
 
 
@@ -206,6 +236,7 @@ def _try_admit(me: dict):
             _sweep()
             r = room()
             if not r["fits"]:
+                note_room_wanted()
                 return None, r
             _COUNTER[0] += 1
             path = LOCK_DIR / f"run-{os.getpid()}-{_COUNTER[0]}.lock"

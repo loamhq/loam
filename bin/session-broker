@@ -1943,6 +1943,9 @@ class Server:
         waiting on background work: each is asked again just before its stop."""
         ended, kept = [], []
         bindings = self._thread_of()
+        remote = getattr(self.broker, "remote", False)
+        has_hold = not remote and hasattr(self.broker, "hold_reason")
+        protected = self.broker.protected_sessions() if has_hold else None
         for session in list(self.broker.live()):
             state = loam_live.state_of(session.busy())
             why = None
@@ -1950,6 +1953,8 @@ class Server:
                 why = state
             elif self.threads.turn_of(session.id):
                 why = "working"            # a thread's turn is about to send
+            elif has_hold and self.broker.hold_reason(session, protected):
+                why = self.broker.hold_reason(session, protected)
             elif time.time() - session.last_activity < cfg.EVICT_GRACE_S:
                 # As admission's eviction: a session started or answered in
                 # the last seconds may be a thread turn on its way to sending.
@@ -1958,7 +1963,7 @@ class Server:
                 kept.append({"id": session.id, "agent": session.agent, "why": why})
                 continue
             self.threads.handoffs.expedite(bindings.get(session.id))
-            if getattr(self.broker, "remote", False):
+            if remote:
                 try:
                     await session.stop(idle=True)
                 except BrokerError as exc:

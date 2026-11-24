@@ -2443,9 +2443,14 @@ class ThreadEngine:
         due = now + threads.PAUSE_S
         # Persistent providers have an earlier, known idle reap. Antigravity
         # releases its process on every turn and keeps a resumable conversation.
+        # Floor the private handoff debounce at DEFAULT_THREAD_IDLE_S (600 s) so
+        # shorter small-box idle unloads do not spawn a forked summary CLI on
+        # every brief pause; ordinary unload/resume reads the CLI's durable
+        # history directly without needing a handoff note.
         last = getattr(session, "last_activity", None)
+        handoff_floor = max(cfg.THREAD_IDLE_S, cfg.DEFAULT_THREAD_IDLE_S)
         if session.provider != "antigravity" and isinstance(last, (int, float)):
-            due = min(due, last + cfg.THREAD_IDLE_S)
+            due = min(due, last + handoff_floor)
         if over_threshold(session_context(session)):
             due = now
         self.handoffs.arm(turn.key, due)
