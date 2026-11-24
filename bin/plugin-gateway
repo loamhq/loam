@@ -1,53 +1,93 @@
 #!/usr/bin/env python3
-"""The address of every server plugin: /x/<id>/ (2026-11-13).
+"""The address of every server plugin: /x/<id>/ (2026-11-13), the share door
+/s/<token> (2026-11-16), and on-demand wake/sleep supervision (2026-11-23).
 
 Caddy sends `/x/*` on the app's host (loam-ui, and its staging copy) here,
 behind the same login as the page (lib/loam_deploy.py, PLUGIN_GATEWAY).
-This passes each request to the plugin's own port on 127.0.0.1, read from
-the port table lib/loam_plugin_servers.py keeps (state/plugins/ports.json),
-with `/x/<id>` taken off the path and given as `X-Forwarded-Prefix`, so a
-plugin serves `/` and its relative links work under the prefix. Nothing
-here runs a plugin's code; the broker never carries a plugin's traffic.
+For on-demand plugins (the default unless `server.always_on: true` or
+`box.listener` is declared), this gateway also holds each plugin's stable
+front loopback port (`ports.json["ports"]`, exposed to agent tools as
+`LOAM_PLUGIN_URL` and cross-plugin services as `/v1/plugin-services`) and
+wakes the plugin's transient unit (`loam-plugin-<id>.service`) on its backend
+port on the first request from `/x/<id>/`, `/s/<token>`, or direct loopback.
 
-**The share door** (2026-11-16, docs/plugins.md, "The share door"): a
-second port, `DOOR_PORT`, to which Caddy sends `/s/*` on the app's hosts
-WITHOUT the login. It answers only `/s/<token>…` (a token is 32 to 64 of
-`A-Z a-z 0-9 _ -`), only for the one plugin in force that contributes
-`web.door`, and passes it as `/door/<token>…` with `X-Loam-Door: 1`. Of the
-browser's headers it passes an allowlist and no more: never the login's
-cookie (only `loam_share`), never a header naming a user, a `Bearer`
-authorization only when it is an agent key (`lak_…`). No upgrade, no
-chunked body, at most 2 MiB. On the login's port (`/x/…`) the marker header
-is taken off, so only this port can say a request came through the door.
+Concurrent first calls coalesce onto a single start; calls arriving during
+idle shutdown wait for the stop to complete and wake the server cleanly;
+in-flight requests, streaming responses, and WebSockets hold the plugin awake
+until all active connections finish and a full quiet period (`PLUGIN_IDLE_S`,
+default 10 minutes) elapses.
 
-One request per connection to the plugin (`Connection: close` on the way
-up), so a connection never carries two plugins' requests; a WebSocket's
-upgrade goes through and is piped as it is. Its own unit
-(systemd/loam-plugins-gateway.service): a plugin crashing or restarting
-touches neither this nor the broker.
-
-**Other pages' requests** (2026-11-18): on the login's port, a request that
-could change something -- any method but GET, HEAD and OPTIONS, or any
-upgrade -- is refused with a 403 when the browser says it came from another
-origin: a `Sec-Fetch-Site` other than `same-origin` or `none`, or an `Origin`
-that is not this host's. It is the app's own rule for `/api/*`
-(app/src/server.js), here so every plugin server has it without writing it.
-A request with neither header (a tool, not a page) is not a page's and
-passes as before. The share door is a separate port and is not this rule's:
-its visitors come from wherever the link was opened.
+One request per connection to the plugin on `/x/<id>/` (`Connection: close`
+on the way up), so a connection never carries two plugins' requests; a
+WebSocket's upgrade goes through and is piped as it is. Direct loopback
+connections on a plugin's front port are piped transparently without adding
+or altering any HTTP header.
 """
 
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
+import os
 import re
+import signal
+import subprocess
 import sys
+import time
 from pathlib import Path
+from typing import Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import loam_plugin_servers as servers  # noqa: E402
+
+_PLUGIN_SERVERS_BIN = Path(__file__).resolve().parent / "plugin-servers"
+_state_cache: dict = {"mtime": None, "doc": None}
+
+
+def _load_gateway_state(*, force_refresh: bool = False) -> dict:
+    """Read gateway.json; only invoke bin/plugin-servers in a short-lived
+    subprocess when missing or stale so PyYAML never enters this daemon's heap."""
+    path = servers.gateway_state_path()
+    stale = force_refresh or servers.gateway_state_stale()
+    if not stale:
+        try:
+            mt = path.stat().st_mtime
+            if _state_cache["mtime"] == mt and isinstance(_state_cache["doc"], dict):
+                return _state_cache["doc"]
+        except OSError:
+            stale = True
+    if stale:
+        try:
+            done = subprocess.run(
+                [sys.executable, str(_PLUGIN_SERVERS_BIN), "gateway-state"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if done.returncode == 0 and done.stdout.strip():
+                doc = json.loads(done.stdout)
+                if isinstance(doc, dict):
+                    try:
+                        _state_cache["mtime"] = path.stat().st_mtime
+                    except OSError:
+                        _state_cache["mtime"] = None
+                    _state_cache["doc"] = doc
+                    return doc
+        except Exception as exc:  # noqa: BLE001
+            print(f"plugin-gateway refresh state: {exc!r}", file=sys.stderr, flush=True)
+    doc = servers.read_gateway_state() or {"wanted": {}, "door_owner": None}
+    try:
+        _state_cache["mtime"] = path.stat().st_mtime
+    except OSError:
+        _state_cache["mtime"] = None
+    _state_cache["doc"] = doc
+    return doc
+
+
+def _wanted_from_state() -> dict[str, dict]:
+    doc = _load_gateway_state()
+    wanted = doc.get("wanted")
+    return dict(wanted) if isinstance(wanted, dict) else {}
 
 DOOR_PATH = re.compile(r"^/s/([A-Za-z0-9_-]{32,64})(/[^?#]*)?(\?[^#]*)?$")
 DOOR_METHODS = {"GET", "HEAD", "POST", "PATCH", "DELETE"}
@@ -62,6 +102,9 @@ PATH = re.compile(r"^/x/([a-z][a-z0-9-]*)(/[^?#]*)?(\?.*)?$")
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 HOP = {"connection", "keep-alive", "proxy-connection", "te", "trailer",
        "x-forwarded-prefix", "x-loam-door"}
+
+PLUGIN_IDLE_S = float(os.environ.get("LOAM_PLUGIN_IDLE_S") or 600)
+WAKE_TIMEOUT_S = float(os.environ.get("LOAM_PLUGIN_WAKE_TIMEOUT_S") or 30)
 
 
 def cross_origin(method: str, lines: list[str]) -> bool:
@@ -87,15 +130,21 @@ def answer(status: int, reason: str, text: str, extra: str = "") -> bytes:
             f"Connection: close\r\n\r\n").encode() + body
 
 
-async def pipe(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+async def pipe(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    on_activity: Callable[[], None] | None = None,
+) -> None:
     try:
         while True:
             chunk = await reader.read(65536)
             if not chunk:
                 break
+            if on_activity is not None:
+                on_activity()
             writer.write(chunk)
             await writer.drain()
-    except (ConnectionError, asyncio.IncompleteReadError):
+    except (ConnectionError, asyncio.IncompleteReadError, asyncio.CancelledError):
         pass
     finally:
         try:
@@ -105,7 +154,374 @@ async def pipe(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> No
             pass
 
 
-async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+class _Slot:
+    def __init__(
+        self,
+        *,
+        pid: str,
+        front_port: int,
+        backend_port: int | None,
+        spec: dict | None,
+        on_demand: bool,
+        awake: bool = False,
+    ) -> None:
+        self.pid = pid
+        self.front_port = front_port
+        self.backend_port = backend_port
+        self.spec = spec
+        self.on_demand = on_demand
+        self.lock = asyncio.Lock()
+        self.active = 0
+        self.awake = awake
+        self.last_active = time.monotonic()
+        self.direct_server: asyncio.Server | None = None
+
+
+class GatewaySupervisor:
+    """Coordinates on-demand wake, direct loopback listeners, and idle sleep."""
+
+    def __init__(
+        self,
+        *,
+        idle_s: float = PLUGIN_IDLE_S,
+        wake_timeout_s: float = WAKE_TIMEOUT_S,
+        managed_fn: Callable[[], bool] | None = None,
+        wanted_fn: Callable[[], dict[str, dict]] | None = None,
+        start_fn: Callable[..., dict] | None = None,
+        stop_fn: Callable[[str], dict] | None = None,
+        status_fn: Callable[[str], dict] | None = None,
+    ) -> None:
+        self.idle_s = idle_s
+        self.wake_timeout_s = wake_timeout_s
+        self._managed_fn = managed_fn or servers.managed
+        self._wanted_fn = wanted_fn or _wanted_from_state
+        self._start_fn = start_fn or servers.start
+        self._stop_fn = stop_fn or servers.stop
+        self._status_fn = status_fn or servers.status
+        self.slots: dict[str, _Slot] = {}
+        self._sync_lock = asyncio.Lock()
+        self._last_sync = 0.0
+
+    def _is_managed(self) -> bool:
+        try:
+            return bool(self._managed_fn())
+        except Exception:
+            return False
+
+    async def sync(self, *, bind_direct: bool = True) -> None:
+        """Align slot metadata and direct front-port listeners with wanted_servers()."""
+        async with self._sync_lock:
+            self._last_sync = time.monotonic()
+            ports = servers.read_ports()
+            if not self._is_managed():
+                # Standalone / unmanaged mode (tests): keep port table only, no lifecycle.
+                for pid in list(self.slots):
+                    if pid not in ports:
+                        await self._close_direct(self.slots.pop(pid))
+                for pid, fport in ports.items():
+                    if pid not in self.slots:
+                        self.slots[pid] = _Slot(
+                            pid=pid, front_port=fport, backend_port=None,
+                            spec=None, on_demand=False, awake=True,
+                        )
+                    else:
+                        self.slots[pid].front_port = fport
+                        self.slots[pid].on_demand = False
+                return
+
+            try:
+                want = await asyncio.to_thread(self._wanted_fn)
+            except Exception as exc:
+                print(f"plugin-gateway sync wanted: {exc!r}", file=sys.stderr, flush=True)
+                return
+
+            ports = servers.read_ports()
+            backends = servers.read_backend_ports()
+            wanted_ids = set(want)
+
+            # Remove listeners for plugins turned off or removed.
+            for pid in list(self.slots):
+                if pid not in wanted_ids:
+                    slot = self.slots.pop(pid)
+                    await self._close_direct(slot)
+
+            for pid, spec in sorted(want.items()):
+                always_on = bool(spec.get("always_on"))
+                fport = ports.get(pid)
+                if fport is None:
+                    try:
+                        fport = await asyncio.to_thread(servers.port_for, pid)
+                    except Exception as exc:
+                        print(f"plugin-gateway port_for {pid}: {exc!r}", file=sys.stderr, flush=True)
+                        continue
+                bport = None
+                if not always_on:
+                    bport = backends.get(pid)
+                    if bport is None:
+                        try:
+                            bport = await asyncio.to_thread(servers.backend_port_for, pid)
+                        except Exception as exc:
+                            print(f"plugin-gateway backend_port_for {pid}: {exc!r}", file=sys.stderr, flush=True)
+                            continue
+
+                slot = self.slots.get(pid)
+                if slot is None:
+                    # On startup / newly observed on-demand plugin: check if its backend unit is already running.
+                    already_up = False
+                    if not always_on:
+                        try:
+                            st = await asyncio.to_thread(self._status_fn, pid)
+                            already_up = st.get("state") in ("running", "starting")
+                        except Exception:
+                            already_up = False
+                    slot = _Slot(
+                        pid=pid, front_port=fport, backend_port=bport,
+                        spec=spec, on_demand=not always_on,
+                        awake=always_on or already_up,
+                    )
+                    self.slots[pid] = slot
+                else:
+                    if slot.front_port != fport or slot.on_demand != (not always_on):
+                        await self._close_direct(slot)
+                    slot.front_port = fport
+                    slot.backend_port = bport
+                    slot.spec = spec
+                    slot.on_demand = not always_on
+                    if always_on:
+                        slot.awake = True
+
+                if bind_direct and slot.on_demand and slot.direct_server is None:
+                    await self._bind_direct(slot)
+                elif (not slot.on_demand) and slot.direct_server is not None:
+                    await self._close_direct(slot)
+
+    async def _close_direct(self, slot: _Slot) -> None:
+        srv = slot.direct_server
+        slot.direct_server = None
+        if srv is not None:
+            srv.close()
+            try:
+                await asyncio.wait_for(srv.wait_closed(), timeout=2.0)
+            except Exception:
+                pass
+
+    async def _bind_direct(self, slot: _Slot) -> None:
+        pid = slot.pid
+        async def _on_conn(r: asyncio.StreamReader, w: asyncio.StreamWriter) -> None:
+            await direct_handle(pid, r, w, supervisor=self)
+
+        try:
+            slot.direct_server = await asyncio.start_server(_on_conn, "127.0.0.1", slot.front_port)
+            return
+        except OSError as exc:
+            if exc.errno != errno.EADDRINUSE:
+                print(f"plugin-gateway direct bind {pid}:{slot.front_port}: {exc!r}",
+                      file=sys.stderr, flush=True)
+                return
+        # Upgrade path: an older pre-sleep unit may still hold the front port.
+        try:
+            uport = await asyncio.to_thread(servers.unit_port, pid)
+            if uport == slot.front_port and slot.backend_port != slot.front_port:
+                await asyncio.to_thread(self._stop_fn, pid)
+                slot.awake = False
+                for _ in range(20):
+                    try:
+                        slot.direct_server = await asyncio.start_server(_on_conn, "127.0.0.1", slot.front_port)
+                        return
+                    except OSError:
+                        await asyncio.sleep(0.1)
+        except Exception as exc:
+            print(f"plugin-gateway upgrade takeover {pid}:{slot.front_port}: {exc!r}",
+                  file=sys.stderr, flush=True)
+
+    async def resolve_slot(self, pid: str) -> _Slot | None:
+        if not self._is_managed():
+            fport = servers.read_ports().get(pid)
+            if fport is None:
+                return None
+            return _Slot(pid=pid, front_port=fport, backend_port=None,
+                         spec=None, on_demand=False, awake=True)
+        slot = self.slots.get(pid)
+        if slot is None:
+            await self.sync(bind_direct=True)
+            slot = self.slots.get(pid)
+        return slot
+
+    async def connect(
+        self,
+        pid: str,
+        *,
+        timeout: float = 5.0,
+    ) -> tuple[_Slot | None, asyncio.StreamReader, asyncio.StreamWriter]:
+        """Connect to plugin `pid`, waking it transparently if it is an asleep on-demand plugin."""
+        slot = await self.resolve_slot(pid)
+        if slot is None:
+            raise LookupError(f"no plugin {pid!r} has a server here")
+
+        if not slot.on_demand or slot.backend_port is None or slot.spec is None:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection("127.0.0.1", slot.front_port), timeout,
+            )
+            return None, reader, writer
+
+        # Claim active count BEFORE acquiring slot.lock so a concurrent reaper
+        # cannot put the server to sleep between check and connect; if a stop is
+        # already in progress under slot.lock, we wait for it and re-wake cleanly.
+        slot.active += 1
+        slot.last_active = time.monotonic()
+        try:
+            if slot.awake:
+                try:
+                    reader, writer = await asyncio.wait_for(
+                        asyncio.open_connection("127.0.0.1", slot.backend_port), 2.0,
+                    )
+                    slot.last_active = time.monotonic()
+                    return slot, reader, writer
+                except (OSError, asyncio.TimeoutError):
+                    pass  # fell asleep or crashed externally; wake under lock
+
+            reader, writer = await self._wake_and_connect(slot)
+            slot.last_active = time.monotonic()
+            return slot, reader, writer
+        except Exception:
+            slot.active -= 1
+            slot.last_active = time.monotonic()
+            raise
+
+    async def _wake_and_connect(
+        self,
+        slot: _Slot,
+    ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        async with slot.lock:
+            assert slot.backend_port is not None and slot.spec is not None
+            if slot.awake:
+                try:
+                    return await asyncio.wait_for(
+                        asyncio.open_connection("127.0.0.1", slot.backend_port), 2.0,
+                    )
+                except (OSError, asyncio.TimeoutError):
+                    slot.awake = False
+
+            await asyncio.to_thread(self._start_fn, slot.pid, slot.spec, port=slot.backend_port)
+            deadline = time.monotonic() + self.wake_timeout_s
+            last_state_check = time.monotonic()
+            last_err: Exception | None = None
+            while time.monotonic() < deadline:
+                try:
+                    pair = await asyncio.wait_for(
+                        asyncio.open_connection("127.0.0.1", slot.backend_port), 1.0,
+                    )
+                    slot.awake = True
+                    slot.last_active = time.monotonic()
+                    return pair
+                except (OSError, asyncio.TimeoutError) as exc:
+                    last_err = exc
+                now = time.monotonic()
+                if now - last_state_check >= 0.5:
+                    last_state_check = now
+                    try:
+                        st = await asyncio.to_thread(self._status_fn, slot.pid)
+                        if st.get("state") == "failing":
+                            raise ConnectionError(f"{slot.pid}'s server failed during start")
+                    except ConnectionError:
+                        raise
+                    except Exception:
+                        pass
+                await asyncio.sleep(0.025)
+            raise TimeoutError(
+                f"{slot.pid}'s server did not listen on 127.0.0.1:{slot.backend_port} "
+                f"within {self.wake_timeout_s:.0f}s ({last_err})"
+            )
+
+    def touch(self, slot: _Slot | None) -> None:
+        if slot is not None:
+            slot.last_active = time.monotonic()
+
+    def release(self, slot: _Slot | None) -> None:
+        if slot is not None:
+            slot.active = max(0, slot.active - 1)
+            slot.last_active = time.monotonic()
+
+    async def reap_once(self) -> list[str]:
+        """Stop on-demand plugins that have had zero active connections for `idle_s`."""
+        slept: list[str] = []
+        now = time.monotonic()
+        for slot in list(self.slots.values()):
+            if not (slot.on_demand and slot.awake and slot.active == 0):
+                continue
+            if now - slot.last_active < self.idle_s:
+                continue
+            async with slot.lock:
+                if not (slot.on_demand and slot.awake and slot.active == 0):
+                    continue
+                if time.monotonic() - slot.last_active < self.idle_s:
+                    continue
+                slot.awake = False
+                try:
+                    await asyncio.to_thread(self._stop_fn, slot.pid)
+                    slept.append(slot.pid)
+                except Exception as exc:
+                    print(f"plugin-gateway sleep {slot.pid}: {exc!r}", file=sys.stderr, flush=True)
+        return slept
+
+    async def close_all(self) -> None:
+        for slot in list(self.slots.values()):
+            await self._close_direct(slot)
+
+
+_SUPERVISOR = GatewaySupervisor()
+
+
+async def direct_handle(
+    pid: str,
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    *,
+    supervisor: GatewaySupervisor | None = None,
+) -> None:
+    """Transparent TCP wake-and-proxy on a sleeping plugin's front loopback port."""
+    sup = supervisor or _SUPERVISOR
+    slot: _Slot | None = None
+    up_writer: asyncio.StreamWriter | None = None
+    try:
+        try:
+            slot, up_reader, up_writer = await sup.connect(pid)
+        except Exception as exc:
+            print(f"plugin-gateway direct {pid}: {exc!r}", file=sys.stderr, flush=True)
+            return
+        touch = lambda: sup.touch(slot)  # noqa: E731
+        upward = asyncio.create_task(pipe(reader, up_writer, on_activity=touch))
+        await pipe(up_reader, writer, on_activity=touch)
+        upward.cancel()
+        try:
+            await upward
+        except asyncio.CancelledError:
+            pass
+    except Exception as exc:  # noqa: BLE001
+        print(f"plugin-gateway direct {pid}: {exc!r}", file=sys.stderr, flush=True)
+    finally:
+        if up_writer is not None:
+            try:
+                up_writer.close()
+            except Exception:
+                pass
+        sup.release(slot)
+        try:
+            await writer.drain()
+            writer.close()
+        except Exception:
+            pass
+
+
+async def handle(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    *,
+    supervisor: GatewaySupervisor | None = None,
+) -> None:
+    sup = supervisor or _SUPERVISOR
+    slot: _Slot | None = None
+    up_writer: asyncio.StreamWriter | None = None
     try:
         try:
             head = await reader.readuntil(b"\r\n\r\n")
@@ -137,10 +553,6 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> 
                                 "a plugin's server takes changes from its own origin's pages only",
                                 "Vary: Sec-Fetch-Site, Origin\r\n"))
             return
-        port = servers.read_ports().get(pid)
-        if port is None:
-            writer.write(answer(404, "Not Found", f"no plugin {pid!r} has a server here"))
-            return
         headers = []
         upgrade = False
         for line in lines[1:]:
@@ -156,9 +568,11 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> 
         headers.append(f"X-Forwarded-Prefix: /x/{pid}")
         up_head = f"{method} {rest}{query} {version}\r\n" + "\r\n".join(headers) + "\r\n\r\n"
         try:
-            up_reader, up_writer = await asyncio.wait_for(
-                asyncio.open_connection("127.0.0.1", port), 5)
-        except (OSError, asyncio.TimeoutError):
+            slot, up_reader, up_writer = await sup.connect(pid)
+        except LookupError:
+            writer.write(answer(404, "Not Found", f"no plugin {pid!r} has a server here"))
+            return
+        except (OSError, asyncio.TimeoutError, TimeoutError, ConnectionError):
             writer.write(answer(502, "Bad Gateway",
                                 f"{pid}'s server is not answering: it is off, starting "
                                 f"or failing (Settings > Plugins shows which)"))
@@ -169,13 +583,23 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> 
         # up with `Connection: close`, so the plugin closes after answering
         # (and a WebSocket's end closes it too). The client's side is left
         # open by Caddy's keep-alive and would never end on its own.
-        upward = asyncio.create_task(pipe(reader, up_writer))
-        await pipe(up_reader, writer)
+        touch = lambda: sup.touch(slot)  # noqa: E731
+        upward = asyncio.create_task(pipe(reader, up_writer, on_activity=touch))
+        await pipe(up_reader, writer, on_activity=touch)
         upward.cancel()
-        up_writer.close()
+        try:
+            await upward
+        except asyncio.CancelledError:
+            pass
     except Exception as exc:  # noqa: BLE001 -- one request never takes the gateway
         print(f"plugin-gateway: {exc!r}", file=sys.stderr, flush=True)
     finally:
+        if up_writer is not None:
+            try:
+                up_writer.close()
+            except Exception:
+                pass
+        sup.release(slot)
         try:
             await writer.drain()
             writer.close()
@@ -184,13 +608,12 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> 
 
 
 def door_owner() -> str | None:
-    """The plugin holding the door, looked up at most every 5 seconds."""
-    import time
+    """The plugin holding the door, read from gateway.json at most every 5 seconds."""
     now = time.monotonic()
     if now - _owner_cache["at"] > 5:
         try:
-            import loam_contributions  # noqa: PLC0415
-            _owner_cache["pid"] = loam_contributions.door_owner()
+            owner = _load_gateway_state().get("door_owner")
+            _owner_cache["pid"] = owner if isinstance(owner, str) else None
         except Exception as exc:  # noqa: BLE001 -- no owner is a closed door
             print(f"plugin-gateway: door owner: {exc!r}", file=sys.stderr, flush=True)
             _owner_cache["pid"] = None
@@ -222,8 +645,16 @@ def door_headers(lines: list[str]) -> list[str] | None:
     return out
 
 
-async def door(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+async def door(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    *,
+    supervisor: GatewaySupervisor | None = None,
+) -> None:
     """The share door's port: `/s/<token>…` to the door's plugin, nothing else."""
+    sup = supervisor or _SUPERVISOR
+    slot: _Slot | None = None
+    up_writer: asyncio.StreamWriter | None = None
     try:
         try:
             head = await reader.readuntil(b"\r\n\r\n")
@@ -243,8 +674,7 @@ async def door(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> No
             writer.write(answer(404, "Not Found", "not found", "X-Robots-Tag: noindex\r\n"))
             return
         pid = door_owner()
-        port = servers.read_ports().get(pid) if pid else None
-        if port is None:
+        if not pid:
             writer.write(answer(404, "Not Found", "not found", "X-Robots-Tag: noindex\r\n"))
             return
         headers = door_headers(lines[1:])
@@ -258,18 +688,27 @@ async def door(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> No
         up_head = f"{method} /door/{token}{rest}{query} {version}\r\n" + "\r\n".join(headers) + "\r\n\r\n"
         body = await reader.readexactly(length) if length else b""
         try:
-            up_reader, up_writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), 5)
-        except (OSError, asyncio.TimeoutError):
+            slot, up_reader, up_writer = await sup.connect(pid)
+        except LookupError:
+            writer.write(answer(404, "Not Found", "not found", "X-Robots-Tag: noindex\r\n"))
+            return
+        except (OSError, asyncio.TimeoutError, TimeoutError, ConnectionError):
             writer.write(answer(502, "Bad Gateway", "this page is not answering just now",
                                 "X-Robots-Tag: noindex\r\n"))
             return
         up_writer.write(up_head.encode("latin-1") + body)
         await up_writer.drain()
-        await pipe(up_reader, writer)
-        up_writer.close()
+        touch = lambda: sup.touch(slot)  # noqa: E731
+        await pipe(up_reader, writer, on_activity=touch)
     except Exception as exc:  # noqa: BLE001 -- one request never takes the gateway
         print(f"plugin-gateway door: {exc!r}", file=sys.stderr, flush=True)
     finally:
+        if up_writer is not None:
+            try:
+                up_writer.close()
+            except Exception:
+                pass
+        sup.release(slot)
         try:
             await writer.drain()
             writer.close()
@@ -277,14 +716,76 @@ async def door(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> No
             pass
 
 
+async def _housekeep(sup: GatewaySupervisor, wake_sync: asyncio.Event, stop: asyncio.Event) -> None:
+    interval = max(0.25, min(5.0, sup.idle_s / 4.0))
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(wake_sync.wait(), timeout=interval)
+            wake_sync.clear()
+            _owner_cache["at"] = 0.0
+        except asyncio.TimeoutError:
+            pass
+        if stop.is_set():
+            break
+        try:
+            await sup.sync(bind_direct=True)
+            await sup.reap_once()
+        except Exception as exc:
+            print(f"plugin-gateway housekeep: {exc!r}", file=sys.stderr, flush=True)
+
+
 async def main() -> None:
     port = int(sys.argv[1]) if len(sys.argv) > 1 else servers.GATEWAY_PORT
     door_port = int(sys.argv[2]) if len(sys.argv) > 2 else servers.DOOR_PORT
+    pid_path = servers.gateway_pid_path()
+    try:
+        pid_path.parent.mkdir(parents=True, exist_ok=True)
+        pid_path.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    except OSError:
+        pass
+
+    wake_sync = asyncio.Event()
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    try:
+        loop.add_signal_handler(signal.SIGHUP, wake_sync.set)
+    except (NotImplementedError, OSError):
+        pass
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, stop.set)
+        except (NotImplementedError, OSError):
+            pass
+
+    await _SUPERVISOR.sync(bind_direct=True)
     server = await asyncio.start_server(handle, "127.0.0.1", port, limit=HEAD_MAX)
     door_server = await asyncio.start_server(door, "127.0.0.1", door_port, limit=HEAD_MAX)
-    print(json.dumps({"listening": f"127.0.0.1:{port}", "door": f"127.0.0.1:{door_port}"}), flush=True)
-    async with server, door_server:
-        await asyncio.gather(server.serve_forever(), door_server.serve_forever())
+    task = asyncio.create_task(_housekeep(_SUPERVISOR, wake_sync, stop))
+    print(json.dumps({
+        "listening": f"127.0.0.1:{port}",
+        "door": f"127.0.0.1:{door_port}",
+        "direct": sorted(s.pid for s in _SUPERVISOR.slots.values() if s.direct_server is not None),
+    }), flush=True)
+    try:
+        await stop.wait()
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        await _SUPERVISOR.close_all()
+        server.close()
+        door_server.close()
+        try:
+            await asyncio.gather(server.wait_closed(), door_server.wait_closed())
+        except Exception:
+            pass
+        try:
+            if pid_path.read_text(encoding="utf-8").strip() == str(os.getpid()):
+                pid_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":

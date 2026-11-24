@@ -1973,6 +1973,7 @@ def cancel(job_id: str, by: str, wait: float | None = None) -> tuple[int, str]:
         # is no session to stop, and the unit holds nothing worth keeping.
         subprocess.run(["systemctl", "--user", "stop", unit],
                        capture_output=True, check=False)
+        eng.reap_job_processes(job_id)
         if not p["result"].is_file():
             p["queued"].unlink(missing_ok=True)
             write_cancelled(p, job_id, project)
@@ -1988,6 +1989,7 @@ def cancel(job_id: str, by: str, wait: float | None = None) -> tuple[int, str]:
     if settled is None and read_landing(p) is None:
         subprocess.run(["systemctl", "--user", "stop", unit],
                        capture_output=True, check=False)
+        eng.reap_job_processes(job_id)
         settled = await_result(p, 2)
         if settled is None:
             write_cancelled(p, job_id, project)
@@ -2249,6 +2251,22 @@ def sweep() -> dict:
                              if o != "running"}
     except Exception as exc:  # noqa: BLE001
         report["results"] = {"error": repr(exc)}
+    # Reap any helper processes that escaped a finished/killed job's cgroup
+    # (for example via `systemd-run --user --scope`). Guarded to real installs
+    # so unit tests with mocked unit_state never scan live concurrent jobs.
+    if lc.is_install_config() and not os.environ.get("LOAM_OFFLINE"):
+        def _real_unit_active(jid: str) -> bool:
+            res = subprocess.run(
+                ["systemctl", "--user", "is-active", f"{unit_name(jid)}.service"],
+                capture_output=True, text=True, check=False, timeout=10,
+            )
+            return res.stdout.strip() in ("active", "activating", "deactivating", "reloading")
+        try:
+            orphans = eng.reap_orphaned_job_processes(_real_unit_active)
+            if orphans:
+                report["orphans"] = orphans
+        except Exception as exc:  # noqa: BLE001
+            report["orphans_error"] = repr(exc)
     return report
 
 
@@ -2274,7 +2292,7 @@ def run_recover() -> int:
                    encoding="utf-8")
     os.replace(tmp, RECOVERY_STATE)
     if any(report.get(k) for k in ("recovered", "cancelled", "pushes", "requeued",
-                                   "died", "results")):
+                                   "died", "results", "orphans")):
         RECOVERY_LOG.parent.mkdir(parents=True, exist_ok=True)
         with RECOVERY_LOG.open("a", encoding="utf-8") as log:
             log.write(json.dumps(report) + "\n")
@@ -2725,6 +2743,13 @@ def run_inner(project: eng.Project, job_id: str) -> int:
             except Exception:  # noqa: BLE001
                 pass
         stop.set()
+        try:
+            reaped = eng.reap_job_processes(job_id)
+            if reaped:
+                landing_say(p)(f"reaped {len(reaped)} leftover job process(es): "
+                               + ", ".join(f"pid {r['pid']}" for r in reaped))
+        except Exception:  # noqa: BLE001
+            pass
         eng.remove_scratch(job_id)
         os.environ.pop("TMPDIR", None)
 

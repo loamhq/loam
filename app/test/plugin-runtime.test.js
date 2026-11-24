@@ -22,14 +22,21 @@ test('server states, collapsed failure logs, listed packages and restart refusal
       loader.st.rows = [row('starting')]
       return { plugin: row('starting') }
     } } })
-  for (const state of ['running', 'starting', 'failing', 'stopping', 'stopped']) {
+  for (const state of ['running', 'asleep', 'starting', 'failing', 'stopping', 'stopped']) {
     loader.st.rows = [row(state)]
     const view = tree(ui.view())
-    // The list speaks of a server only when it is not running (2026-11-19).
-    if (state === 'running') assert.doesNotMatch(text(view), /Server ·/)
+    // The list speaks of a server only when it is neither running nor asleep.
+    if (state === 'running' || state === 'asleep') assert.doesNotMatch(text(view), /Server ·/)
     else assert.match(text(view), new RegExp(`Server · ${state[0].toUpperCase() + state.slice(1)}`))
     assert.equal(all(view, 'plugin-icon')[0].getAttribute('src'), '/api/plugins/demo/files/icon.svg')
     assert.equal(all(view, 'plugin-service-failure').length, state === 'failing' ? 1 : 0)
+    if (state === 'asleep') {
+      await ui.open(loader.st.rows[0])
+      const detail = text(tree(ui.view()))
+      assert.doesNotMatch(detail, /Server ·/)
+      assert.match(detail, /Its server.*Asleep/)
+      ui.st.selected = null
+    }
     if (state === 'failing') {
       const failure = find(view, 'plugin-service-failure'), details = failure.childNodes[0]
       assert.equal(details.hasAttribute('open'), false)
@@ -67,6 +74,8 @@ test('plugin apps use local paths, all three source groups and icons; unavailabl
   assert.equal(appURL(plugin.url), '/x/demo/')
   for (const bad of ['/relative', '//evil.example/x/demo/', '/x/../other/', '/x/%2e%2e/', '/x/demo/\\evil']) assert.equal(appURL(bad), null)
   apps.open(plugin, null, { routed: true })
+  assert.equal(all(apps.view(), 'apps-embed')[0].getAttribute('src'), '/x/demo/')
+  apps.open({ ...plugin, state: 'asleep' }, null, { routed: true })
   assert.equal(all(apps.view(), 'apps-embed')[0].getAttribute('src'), '/x/demo/')
   for (const patch of [{ on: false }, { state: 'failing' }, { state: 'starting' }, { state: 'stopped' }]) {
     apps.open({ ...plugin, ...patch }, null, { routed: true })

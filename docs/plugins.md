@@ -955,16 +955,30 @@ between.
 
 | When | What happens to its unit |
 |---|---|
-| it is on and has `server/` (a switch, an install, `bin/settings plugin.on`) | started, if it is not running |
+| it is on and has `server/` (default: on-demand) | ports allocated (`ports.json`); stays `asleep` until the first request on `/x/<id>/`, `/s/<token>`, or `LOAM_PLUGIN_URL`, then wakes transparently and sleeps after 10 quiet minutes with no active connection or stream |
+| it is on and declares `server.always_on: true` (or `contributes.box.listener`) | started immediately and kept running |
 | turned off | stopped |
 | removed | stopped before its folder goes |
-| updated (install over it) | stopped and started fresh |
+| updated (install over it) | always-on: stopped and started fresh; on-demand: stopped so the next request wakes the new code |
 | `POST /v1/plugins/<id>/restart` (`plugin.restart`, `bin/plugin-servers restart <id>`) | stopped and started fresh |
-| a reboot, a user-manager restart | `loam-plugins-reconcile.timer` (20 s after start, then every 5 min) starts every wanted unit that is not loaded and stops loaded ones no longer wanted |
+| a reboot, a user-manager restart | `loam-plugins-reconcile.timer` (20 s after start, then every 5 min) starts every always-on unit that is not loaded, allocates ports for on-demand plugins without waking them, and stops loaded ones no longer wanted |
 | it crashes | systemd restarts it after 2 s; **five starts within 60 s and it gives up**: `failing`, until someone restarts it or turns it off and on. The reconcile never restarts a failed unit, so a crash loop stays visible |
 
-**What it gets.** Its command in its folder, a loopback port of its own kept
-across restarts (9100–9299, `state/plugins/ports.json`), and:
+**Sleeping by default, `server.always_on` to stay on (2026-11-23).** Server
+plugins wake on first request and sleep after 10 quiet minutes (`LOAM_PLUGIN_IDLE_S`)
+with no request, stream or WebSocket in flight. `bin/plugin-gateway` holds
+each on-demand plugin's stable front port (9100–9299, `LOAM_PLUGIN_URL`) and
+starts `loam-plugin-<id>.service` on its backend port (9300–9499,
+`ports.json["backend_ports"]`, handed in `PORT` / `LOAM_PLUGIN_PORT`).
+Concurrent first calls coalesce on a single start; calls arriving during idle
+shutdown wait and re-wake cleanly. A plugin that needs to stay up continuously
+declares `server: { always_on: true }` (or `{ run: ..., always_on: true }`) in
+`PLUGIN.md`; plugins declaring `contributes.box.listener` default to
+`always_on: true`.
+
+**What it gets.** Its command in its folder, a stable front loopback port
+(9100–9299, `state/plugins/ports.json`) — and a paired backend port (9300–9499)
+passed in `PORT` / `LOAM_PLUGIN_PORT` when sleeping on demand — and:
 
 | variable | value |
 |---|---|

@@ -55,6 +55,12 @@ BROWSER_DIR = ETC / "browser"
 BROWSER_COMPOSE = BROWSER_DIR / "compose.yaml"
 SIGHT_FIREWALL_SCRIPT = BROWSER_DIR / "firewall.sh"
 SIGHT_FIREWALL_UNIT = Path("/etc/systemd/system/loam-sight-firewall.service")
+BROWSER_PROXY_SOCKET_NAME = "loam-browser-proxy.socket"
+BROWSER_PROXY_SERVICE_NAME = "loam-browser-proxy.service"
+DOCKER_IDLE_SERVICE_NAME = "loam-docker-idle.service"
+BROWSER_PROXY_SOCKET = Path("/etc/systemd/system") / BROWSER_PROXY_SOCKET_NAME
+BROWSER_PROXY_UNIT = Path("/etc/systemd/system") / BROWSER_PROXY_SERVICE_NAME
+DOCKER_IDLE_UNIT = Path("/etc/systemd/system") / DOCKER_IDLE_SERVICE_NAME
 SUDOERS = Path("/etc/sudoers.d/loam-deploy")
 DEPLOY_BIN = AGENTS / "bin" / "deploy"
 # Render the login assets beside the portal configuration.
@@ -85,6 +91,9 @@ PLUGIN_GATEWAY_PORT = 8933
 # Only the gateway handles token-scoped share requests on an app-shell host.
 PLUGIN_DOOR_PORT = 8936
 BROWSER_PORT = 8931
+# Internal loopback port the loam-browser container listens on behind the
+# lazy-wake proxy (loam-browser-proxy.socket owns BROWSER_PORT).
+BROWSER_BACKEND_PORT = 8937
 BROWSER_URL = f"http://127.0.0.1:{BROWSER_PORT}/mcp"
 BROWSER_SERVER_NAME = "browser"   # the MCP server's name in every persona
 BROWSER_OUTPUT = lc.BROWSER_OUTPUT
@@ -95,7 +104,7 @@ BROWSER_UID = 1000
 BROWSER_GID = 1000
 
 # Use a host header the browser server accepts for its loopback MCP endpoint.
-BROWSER_ALLOWED_HOSTS = f"127.0.0.1:{BROWSER_PORT},localhost:{BROWSER_PORT}"
+BROWSER_ALLOWED_HOSTS = f"127.0.0.1:{BROWSER_BACKEND_PORT},localhost:{BROWSER_BACKEND_PORT}"
 
 # The browser's own Docker network. Caddy lets a request from this subnet
 # through a private host's gate: the browser is the personas' sight, and a
@@ -809,16 +818,18 @@ def service_findings(apps: list[App] | None = None) -> list[tuple[str, str]]:
     the app name.
     """
     out = []
+    docker_up = docker_active()
     for app in service_apps(apps):
         res = _sudo(["systemctl", "is-active", app.unit])
         state = res.stdout.strip() or "unknown"
         if state != "active":
             out.append((app.name, f"{app.unit} is {state}; "
                                   f"`sudo bin/deploy {app.name} up <commit>` starts it"))
-        res = _sudo(["docker", "ps", "-q", "--filter", f"name=^{app.name}$"])
-        if res.returncode == 0 and res.stdout.strip():
-            out.append((app.name, f"a container named {app.name} is running beside "
-                                  f"{app.unit}; the app runs from its unit now"))
+        if docker_up:
+            res = _sudo(["docker", "ps", "-q", "--filter", f"name=^{app.name}$"])
+            if res.returncode == 0 and res.stdout.strip():
+                out.append((app.name, f"a container named {app.name} is running beside "
+                                      f"{app.unit}; the app runs from its unit now"))
     return out
 
 
@@ -827,7 +838,11 @@ def records() -> list[App]:
     anything it could not render safely."""
     apps: list[App] = []
     seen_hosts: dict[str, str] = {}
-    seen_ports: dict[int, str] = {AUTHELIA_PORT: "authelia", BROWSER_PORT: "browser"}
+    seen_ports: dict[int, str] = {
+        AUTHELIA_PORT: "authelia",
+        BROWSER_PORT: "browser",
+        BROWSER_BACKEND_PORT: "browser-backend",
+    }
     if not DEPLOY.is_dir():
         return apps
     served = EDGE.get("apps")
@@ -1012,6 +1027,7 @@ def sites(apps: list[App] | None = None) -> list[App]:
               SECOND_FACTOR_HOST: "the two_factor rule"}
     ports = {a.port: a.name for a in apps if a.port is not None}
     ports |= {AUTHELIA_PORT: "authelia", BROWSER_PORT: "browser",
+              BROWSER_BACKEND_PORT: "browser-backend",
               loam_broker.PORT: "the session broker", CLAIM_PORT: "the claim service"}
     for path in sorted(SITES_DIR.glob("*.toml")):
         name = path.stem
@@ -2115,7 +2131,7 @@ def sight_firewall_unit() -> str:
         f"ExecStart={SIGHT_FIREWALL_SCRIPT}\n"
         "\n"
         "[Install]\n"
-        "WantedBy=multi-user.target\n"
+        "WantedBy=multi-user.target docker.service\n"
     )
 
 
@@ -2353,7 +2369,7 @@ def browser_compose() -> str:
             "browser": {
                 "image": BROWSER_IMAGE,
                 "container_name": BROWSER_PROJECT,
-                "restart": "unless-stopped",
+                "restart": "no",
                 "working_dir": output,
                 "entrypoint": ["node", "/app/cli.js"],
                 "command": [
@@ -2367,13 +2383,13 @@ def browser_compose() -> str:
                     "--output-dir", output,
                     "--file-paths", "absolute",
                     "--output-max-size", str(BROWSER_OUTPUT_MAX_BYTES),
-                    "--host", "0.0.0.0", "--port", str(BROWSER_PORT),
+                    "--host", "0.0.0.0", "--port", str(BROWSER_BACKEND_PORT),
                     "--allowed-hosts", BROWSER_ALLOWED_HOSTS,
                     # Use the browser's origin restrictions alongside the kernel network boundary. The
                     # browser policy also covers its own loopback.
                     "--blocked-origins", browser_blocked_origins(),
                 ],
-                "ports": [f"127.0.0.1:{BROWSER_PORT}:{BROWSER_PORT}"],
+                "ports": [f"127.0.0.1:{BROWSER_BACKEND_PORT}:{BROWSER_BACKEND_PORT}"],
                 "volumes": [f"{output}:{output}"],
                 "networks": ["sight"],
                 "cap_drop": ["ALL"],
@@ -2395,8 +2411,75 @@ def browser_compose() -> str:
     header = ("# GENERATED by agents/bin/gen-deploy (lib/loam_deploy.browser_compose).\n"
               "# Do not edit. One headless Chromium for every persona, on its own\n"
               "# network (`networks`), open to the web and walled off from this box\n"
-              "# by firewall.sh beside this file; --blocked-origins is the second layer.\n")
+              "# by firewall.sh beside this file; --blocked-origins is the second layer.\n"
+              "# Starts on first browser tool call via loam-browser-proxy.socket and\n"
+              "# sleeps after a quiet period with no open browser sessions.\n")
     return header + yaml.safe_dump(doc, sort_keys=False, default_flow_style=False)
+
+
+def browser_proxy_socket() -> str:
+    return (
+        "# GENERATED by agents/bin/gen-deploy (lib/loam_deploy.browser_proxy_socket).\n"
+        "# Do not edit. Holds 127.0.0.1:8931 at zero standing RAM when no agent\n"
+        "# session is connected, waking loam-browser-proxy.service on connect.\n"
+        "[Unit]\n"
+        "Description=Loam: agents' browser socket (127.0.0.1:8931, wakes on first use)\n"
+        "\n"
+        "[Socket]\n"
+        f"ListenStream=127.0.0.1:{BROWSER_PORT}\n"
+        "Backlog=128\n"
+        "ReusePort=false\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=sockets.target\n"
+    )
+
+
+def browser_proxy_unit() -> str:
+    return (
+        "# GENERATED by agents/bin/gen-deploy (lib/loam_deploy.browser_proxy_unit).\n"
+        "# Do not edit. MCP-aware lazy-wake proxy for loam-browser: answers\n"
+        "# initialize/tools/list/SSE locally without waking Docker or Chromium,\n"
+        "# starts loam-browser on the first tools/call, and puts it (and Docker\n"
+        "# when no other container needs it) back to sleep after a quiet period.\n"
+        "[Unit]\n"
+        "Description=Loam: agents' browser wake proxy\n"
+        "After=network.target\n"
+        "\n"
+        "[Service]\n"
+        "Type=simple\n"
+        "Environment=PYTHONPYCACHEPREFIX=/var/cache/loam/pycache\n"
+        f"ExecStart=/usr/bin/python3 {lc.ROOT}/bin/browser-proxy\n"
+        "Restart=on-failure\n"
+        "RestartSec=1s\n"
+        "TimeoutStopSec=30\n"
+        "MemoryMax=128M\n"
+        f"OOMScoreAdjust={lc.CORE_OOM_SCORE_ADJ}\n"
+        "StandardOutput=journal\n"
+        "StandardError=journal\n"
+    )
+
+
+def docker_idle_unit() -> str:
+    return (
+        "# GENERATED by agents/bin/gen-deploy (lib/loam_deploy.docker_idle_unit).\n"
+        "# Do not edit. At boot, after Docker has created the broker bridge and\n"
+        "# raised the firewalls, stops Docker and containerd if no container\n"
+        "# needs them (loam-browser starts on demand via loam-browser-proxy.socket).\n"
+        "[Unit]\n"
+        "Description=Loam: sleep Docker at boot when no container needs it\n"
+        f"After=docker.service {SIGHT_WALL_SERVICE} {loam_broker.WALL_SERVICE}\n"
+        "\n"
+        "[Service]\n"
+        "Type=oneshot\n"
+        "Environment=PYTHONPYCACHEPREFIX=/var/cache/loam/pycache\n"
+        f"ExecStart=/usr/bin/python3 {lc.ROOT}/bin/browser-proxy --sleep-if-idle\n"
+        "StandardOutput=journal\n"
+        "StandardError=journal\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=multi-user.target\n"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2447,6 +2530,9 @@ def generated(today: dt.date | None = None) -> dict[Path, str]:
         AUTHELIA_CONFIG: authelia_config(),
         AUTHELIA_COMPOSE: authelia_compose(),
         BROWSER_COMPOSE: browser_compose(),
+        BROWSER_PROXY_SOCKET: browser_proxy_socket(),
+        BROWSER_PROXY_UNIT: browser_proxy_unit(),
+        DOCKER_IDLE_UNIT: docker_idle_unit(),
         SIGHT_FIREWALL_SCRIPT: sight_firewall_script(),
         SIGHT_FIREWALL_UNIT: sight_firewall_unit(),
         INBOUND_FIREWALL_SCRIPT: inbound_firewall_script(),
@@ -2473,9 +2559,20 @@ def _sudo(argv: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(argv, capture_output=True, text=True, check=False)
 
 
+def docker_active() -> bool:
+    """Whether docker.service is currently active (never wakes docker.socket)."""
+    res = subprocess.run(
+        ["systemctl", "is-active", "--quiet", "docker.service"],
+        capture_output=True, text=True, check=False,
+    )
+    return res.returncode == 0
+
+
 def live_publishes() -> list[tuple[str, str]]:
     """(container, publish) for every port every running container publishes,
     as Docker reports it, e.g. ('probe-clock', '127.0.0.1:8000->8000/tcp')."""
+    if not docker_active():
+        return []
     run = _sudo(["docker", "ps", "--format", "{{.Names}}\t{{.Ports}}"])
     if run.returncode != 0:
         raise DeployError(f"docker ps: {run.stderr.strip()}")
@@ -2490,6 +2587,8 @@ def live_publishes() -> list[tuple[str, str]]:
 def live_container_networks() -> dict[str, tuple[str, ...]]:
     """{container: the networks it is on} for every running container, as
     Docker reports it: `loam-ui` -> ('loam-broker', 'loam-ui_default')."""
+    if not docker_active():
+        return {}
     run = _sudo(["docker", "ps", "--format", "{{.Names}}\t{{.Networks}}"])
     if run.returncode != 0:
         raise DeployError(f"docker ps: {run.stderr.strip()}")
@@ -2507,6 +2606,8 @@ def log_findings(apps: list[App] | None = None) -> list[tuple[str, str]]:
     not APP_LOGGING. The compose file is checked by records(); this asks the
     container, because a log config is fixed when the container is created
     and a compose edit reaches it only on the next `bin/deploy <app> up`."""
+    if not docker_active():
+        return []
     apps = records() if apps is None else apps
     out: list[tuple[str, str]] = []
     for app in apps:

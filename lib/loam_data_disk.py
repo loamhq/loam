@@ -534,7 +534,17 @@ def drift_findings(data_dir: Path, home: Path, *, etc: Path = Path("/etc/loam"),
             ))
 
     if check_docker:
-        info = docker_volume_info("authelia-data", use_sudo=True, run=docker_run)
+        docker_asleep = False
+        if docker_run is None or getattr(docker_run, "__module__", "") == "loam_deploy":
+            try:
+                res = subprocess.run(
+                    ["systemctl", "is-active", "docker.service"],
+                    capture_output=True, text=True, check=False, timeout=10,
+                )
+                docker_asleep = res.returncode != 0 and res.stdout.strip() == "inactive"
+            except (OSError, subprocess.SubprocessError):
+                docker_asleep = False
+        info = None if docker_asleep else docker_volume_info("authelia-data", use_sudo=True, run=docker_run)
         if info is not None:
             want_login = login_data_dir(data_dir).resolve()
             dev = ((info.get("Options") or {}).get("device") or "").strip()

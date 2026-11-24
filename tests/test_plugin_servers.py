@@ -106,8 +106,13 @@ path, ctype = P.file_for("notes", ["assets", "icon.svg"])
 check("the files route serves the icon", ctype == "image/svg+xml", ctype)
 check("server/ is still never served",
       *refuses(lambda: P.file_for("notes", ["server", "main.py"]), "nothing else"))
-check("server_spec defaults to python3 server/main.py",
-      P.server_spec(r) == {"run": "python3 server/main.py", "default": True}, P.server_spec(r))
+check("server_spec defaults to python3 server/main.py (on-demand)",
+      P.server_spec(r) == {"run": "python3 server/main.py", "default": True, "always_on": False},
+      P.server_spec(r))
+m, w = manifest(base + "kind: [extension]\nserver: {always_on: true}\n")
+check("server.always_on alone is allowed without warning", m["server"] == {"always_on": True} and w == [], (m, w))
+check("server.always_on non-bool is refused",
+      *refuses(lambda: manifest(base + "kind: [extension]\nserver: {always_on: yes}\n"), "server.always_on"))
 plugin("bad-icon", "extension", "icon: ../x.png\n", {"page/main.js": ""})
 check("an icon out of the folder is a warning and left out",
       "icon" not in row("bad-icon") and any("icon" in x for x in row("bad-icon")["warnings"]))
@@ -222,8 +227,18 @@ os.environ["LOAM_PLUGIN_UNITS"] = "1"
 P.set_on("notes", False)
 fake.calls.clear()
 P.set_on("notes", True)
+check("on-demand plugin on: stays asleep until woken (no eager systemd-run)",
+      fake.started() == [] and row("notes")["service"]["state"] == "asleep",
+      (fake.calls, row("notes").get("service")))
+port = S.read_ports().get("notes", 0)
+bport = S.read_backend_ports().get("notes", 0)
+check("...allocates a front port (9100-9299) and paired backend port (9300-9499)",
+      9100 <= port < 9300 and 9300 <= bport < 9500, (port, bport))
+
+fake.calls.clear()
+S.start("notes", P.wanted_servers()["notes"])
 runs = fake.started()
-check("on: one transient unit is started", len(runs) == 1, fake.calls)
+check("wake/start: one transient unit is started", len(runs) == 1, fake.calls)
 argv = runs[0] if runs else []
 env = {a.split("=", 1)[1].split("=", 1)[0]: a.split("=", 2)[2] for a in argv
        if a.startswith("--setenv=")}
@@ -233,15 +248,15 @@ check("...named loam-plugin-notes.service", "--unit=loam-plugin-notes.service" i
 check("...capped at 512M, no swap, 256 tasks",
       (props.get("MemoryMax"), props.get("MemorySwapMax"), props.get("TasksMax"))
       == ("512M", "0", "256"), props)
-check("...NoNewPrivileges, Restart=always, 5 starts in 60 s",
-      (props.get("NoNewPrivileges"), props.get("Restart"), props.get("StartLimitBurst"),
-       props.get("StartLimitIntervalSec")) == ("yes", "always", "5", "60"), props)
+check("...NoNewPrivileges, Restart=on-failure, SuccessExitStatus, 5 starts in 60 s",
+      (props.get("NoNewPrivileges"), props.get("Restart"), props.get("SuccessExitStatus"),
+       props.get("StartLimitBurst"), props.get("StartLimitIntervalSec"))
+      == ("yes", "on-failure", "SIGTERM 143", "5", "60"), props)
 check("...in its own folder", props.get("WorkingDirectory") == str(YOURS / "notes"))
 check("...run by sh -c, exec'd", argv[-4:] == ["--", "/bin/sh", "-c",
                                                "exec python3 server/main.py"], argv[-4:])
-port = int(env.get("PORT", 0))
-check("...a port in 9100-9299, the same in LOAM_PLUGIN_PORT",
-      9100 <= port < 9300 and env.get("LOAM_PLUGIN_PORT") == str(port), env.get("PORT"))
+check("...listens on its backend port (9300-9499), same in LOAM_PLUGIN_PORT",
+      int(env.get("PORT", 0)) == bport and env.get("LOAM_PLUGIN_PORT") == str(bport), env.get("PORT"))
 check("...its id, folder, base, data and settings",
       (env.get("LOAM_PLUGIN_ID"), env.get("LOAM_PLUGIN_DIR"), env.get("LOAM_PLUGIN_BASE"),
        env.get("LOAM_PLUGIN_DATA"), env.get("LOAM_PLUGIN_SETTINGS"))
@@ -254,7 +269,7 @@ check("...the broker's URL and its token's file, never the token",
       and env.get("LOAM_BROKER_TOKEN_FILE", "").endswith("/token")
       and not any("TOKEN=" in a and "FILE" not in a for a in argv), env)
 svc = row("notes")["service"]
-check("the row's service: running, wanted, its port, address and pid",
+check("the row's service: running, wanted, front port, address and pid",
       (svc["state"], svc["wanted"], svc["port"], svc["url"], svc["pid"])
       == ("running", True, port, "/x/notes/", 4242), svc)
 check("a running row carries no log unless asked", "log" not in svc)
@@ -268,7 +283,7 @@ P.restart_server("notes")
 check("restart: stopped, then started fresh",
       [a[2] for a in fake.calls if a[0] == "systemctl" and a[2] in ("stop", "reset-failed")]
       == ["stop", "reset-failed"] and len(fake.started()) == 1, fake.calls)
-check("...on the same port", S.read_ports()["notes"] == port)
+check("...on the same front port", S.read_ports()["notes"] == port)
 
 for props_, want in ((dict(ActiveState="failed", SubState="failed"), "failing"),
                      (dict(ActiveState="activating", SubState="auto-restart"), "failing"),
@@ -292,7 +307,7 @@ check("off: the unit is gone, the row says stopped and not wanted",
       and (row("notes")["service"]["state"], row("notes")["service"]["wanted"])
       == ("stopped", False), row("notes").get("service"))
 P.set_on("notes", True)
-check("on again: running", row("notes")["service"]["state"] == "running")
+check("on again: asleep (on-demand)", row("notes")["service"]["state"] == "asleep")
 
 # remove stops the unit before the folder goes
 order = []
@@ -305,10 +320,12 @@ finally:
 check("remove: its server stops while its folder is still there",
       order[:1] == [("stop", True)] and "loam-plugin-notes.service" not in fake.units, order)
 
-# reconcile
-plugin("echo", "app", "", {"server/main.py": "#\n"})
-plugin("other", "extension", "", {"server/main.py": "#\n"})
+# reconcile: always_on starts eagerly, on-demand stays asleep
+plugin("echo", "app", "server: {always_on: true}\n", {"server/main.py": "#\n"})
+plugin("sleeper", "extension", "", {"server/main.py": "#\n"})
+plugin("other", "extension", "server: {always_on: true}\n", {"server/main.py": "#\n"})
 P.set_on("echo", True)
+P.set_on("sleeper", True)
 P.set_on("other", True)
 fake.units.clear()                                  # as after a reboot
 fake.units["loam-plugin-other.service"] = {"LoadState": "loaded", "ActiveState": "failed",
@@ -319,7 +336,16 @@ fake.units["loam-plugin-gone.service"] = dict(fake.units["loam-plugin-other.serv
                                               ActiveState="active", SubState="running")
 fake.calls.clear()
 out = S.reconcile()
-check("reconcile starts the wanted unit that is not loaded", out["started"] == ["echo"], out)
+check("reconcile starts always_on unit that is not loaded and leaves on-demand asleep",
+      out["started"] == ["echo"] and out["asleep"] == ["sleeper"], out)
+echo_argv = fake.started()[0]
+echo_props = {a.split("=", 1)[1].split("=", 1)[0]: a.split("=", 2)[2] for a in echo_argv
+              if a.startswith("--property=")}
+echo_env = {a.split("=", 1)[1].split("=", 1)[0]: a.split("=", 2)[2] for a in echo_argv
+            if a.startswith("--setenv=")}
+check("...always_on unit uses Restart=always and front port (9100-9299)",
+      echo_props.get("Restart") == "always" and int(echo_env.get("PORT", 0)) == S.read_ports()["echo"],
+      (echo_props.get("Restart"), echo_env.get("PORT"), S.read_ports().get("echo")))
 check("...leaves a failed one alone", "other" not in out["started"]
       and fake.units["loam-plugin-other.service"]["ActiveState"] == "failed")
 check("...and stops one no longer wanted", out["stopped"] == ["gone"]
@@ -329,20 +355,24 @@ check("...and stops one no longer wanted", out["stopped"] == ["gone"]
 fake.units["loam-plugin-echo.service"]["WorkingDirectory"] = "/tmp/a-test/plugins/echo"
 fake.calls.clear()
 out = S.reconcile()
-check("reconcile restarts a unit running from another folder than its plugin's",
+check("reconcile restarts an always_on unit running from another folder than its plugin's",
       (out["moved"], fake.units["loam-plugin-echo.service"]["WorkingDirectory"])
       == (["echo"], str(YOURS / "echo")), (out, fake.units.get("loam-plugin-echo.service")))
 fake.calls.clear()
 check("...and leaves one in its own folder alone", S.reconcile()["moved"] == [] and not fake.started())
 
-# an update restarts only that unit
+# an update restarts an always_on unit fresh, and resets a running on-demand unit to asleep
 fake.calls.clear()
-before = dict(fake.units)
 P._servers_follow("echo", restart=True)
-check("an update restarts its unit fresh, and no other",
+check("an update restarts an always_on unit fresh, and no other",
       [a for a in fake.started()] and all("--unit=loam-plugin-echo.service" in a
                                           for a in fake.started())
       and "loam-plugin-other.service" in fake.units, fake.calls)
+S.start("sleeper", P.wanted_servers()["sleeper"])
+fake.calls.clear()
+P._servers_follow("sleeper", restart=True)
+check("an update stops a running on-demand unit so next request wakes fresh",
+      "loam-plugin-sleeper.service" not in fake.units and not fake.started(), fake.calls)
 os.environ.pop("LOAM_PLUGIN_UNITS")
 
 
