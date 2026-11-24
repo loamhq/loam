@@ -24,6 +24,7 @@ AGENTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENTS / "lib"))
 
 import loam_broker as cfg  # noqa: E402
+import loam_limits as limits  # noqa: E402
 import loam_lock  # noqa: E402
 import loam_thread_engine as te  # noqa: E402
 import loam_thread_inputs as inputs  # noqa: E402
@@ -314,6 +315,21 @@ async def main() -> None:
               (len(msgs_e), msgs_e[-1]["author"], "turns=2" in msgs_e[-1]["text"],
                mark_of(engine, t_exit, "probe1")),
               (4, "probe1", True, None))
+        ev_exit = [e for e in limits.read_events()
+                   if e["kind"] == "turn_retried"
+                   and (e.get("subject") or {}).get("thread") == t_exit]
+        check("retry succeeding on attempt 2 writes 1 turn_retried limit event",
+              (len(ev_exit),
+               ev_exit[0]["outcome"] if ev_exit else None,
+               (ev_exit[0].get("detail") or {}).get("reason") if ev_exit else None,
+               (ev_exit[0].get("detail") or {}).get("retries") if ev_exit else None,
+               (ev_exit[0].get("detail") or {}).get("attempts") if ev_exit else None,
+               (ev_exit[0].get("detail") or {}).get("provider") if ev_exit else None,
+               isinstance(ev_exit[0].get("duration_s"), (int, float)) if ev_exit else False,
+               bool((ev_exit[0].get("subject") or {}).get("session")) if ev_exit else False,
+               isinstance((ev_exit[0].get("memory") or {}).get("total_mb"), int) if ev_exit else False,
+               "second message" not in json.dumps(ev_exit)),
+              (1, "replied", "pressure", 1, 2, "claude-code", True, True, True, True))
         await engine.handoffs.close()
         engine.stop_all_tails()
         await stop_all(broker)
@@ -342,9 +358,61 @@ async def main() -> None:
         engine.schedule(te.Turn(t_crash, "probe1", 0, m_c["id"]))
         await wait_settled(engine)
         _, msgs_c, _ = threads.read(t_crash)
+        ev_crash = [e for e in limits.read_events()
+                    if e["kind"] == "turn_retried"
+                    and (e.get("subject") or {}).get("thread") == t_crash]
         check("unexpected crash (no reclaim reason) still marks and does not retry",
-              (len(msgs_c), "exited" in (mark_of(engine, t_crash, "probe1") or "")),
-              (1, True))
+              (len(msgs_c), "exited" in (mark_of(engine, t_crash, "probe1") or ""),
+               len(ev_crash)),
+              (1, True, 0))
+        await engine.handoffs.close()
+        engine.stop_all_tails()
+        await stop_all(broker)
+
+        # -- 6. Exhausting all 3 retries writes 1 turn_retried(exhausted) -----
+        broker = broker_mod.Broker()
+        engine = te.ThreadEngine(broker)
+        t_exhaust = threads.create("probe1", title="Exhaust Retries")["id"]
+        threads.update(t_exhaust, engines={"probe1": "claude-code"})
+        orig_prepare4 = engine._prepare_turn
+        exhaust_attempts = 0
+
+        async def prepare_always_reclaim(turn, meta, eng, model, effort):
+            nonlocal exhaust_attempts
+            exhaust_attempts += 1
+            sess, kept, prompt, through = await orig_prepare4(turn, meta, eng, model, effort)
+
+            async def send_then_room_stop(text, attachments=None, *, dispatch_id=None):
+                sess._stop_reason = "room"
+                sess._stop_requested = True
+                await sess.emit({"type": "broker.exit", "session_id": sess.id,
+                                 "exit_code": 0, "ts": cfg.now_iso(), "reason": "room"})
+                sess.state = "exited"
+                return sess.seq
+
+            sess.send_message = send_then_room_stop
+            return sess, kept, prompt, through
+
+        engine._prepare_turn = prepare_always_reclaim
+        m_ex = threads.append(t_exhaust, threads.OWNER, "secret exhaust message")
+        engine.schedule(te.Turn(t_exhaust, "probe1", 0, m_ex["id"]))
+        await wait_settled(engine)
+        ev_exhaust = [e for e in limits.read_events()
+                      if e["kind"] == "turn_retried"
+                      and (e.get("subject") or {}).get("thread") == t_exhaust]
+        q_all = limits.query(days=7)
+        check("exhausting 3 retries writes 1 turn_retried(exhausted) & counts in query",
+              (exhaust_attempts,
+               len(ev_exhaust),
+               ev_exhaust[0]["outcome"] if ev_exhaust else None,
+               (ev_exhaust[0].get("detail") or {}).get("reason") if ev_exhaust else None,
+               (ev_exhaust[0].get("detail") or {}).get("retries") if ev_exhaust else None,
+               (ev_exhaust[0].get("detail") or {}).get("attempts") if ev_exhaust else None,
+               isinstance(ev_exhaust[0].get("duration_s"), (int, float)) if ev_exhaust else False,
+               isinstance((ev_exhaust[0].get("memory") or {}).get("total_mb"), int) if ev_exhaust else False,
+               "secret exhaust message" not in json.dumps(ev_exhaust),
+               q_all["counts"]["turn_retried"] >= 2),
+              (4, 1, "exhausted", "room", 3, 4, True, True, True, True))
         await engine.handoffs.close()
         engine.stop_all_tails()
         await stop_all(broker)
@@ -364,6 +432,7 @@ def run() -> None:
         stub.write_text(SLOW_EXIT_STUB, encoding="utf-8")
         stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
         os.environ["LOAM_TEST_RACE_STORE"] = str(root / "cli-store")
+        os.environ["LOAM_LIMIT_EVENTS"] = str(root / "limits" / "events.jsonl")
 
         labs = root / "ai-labs"
         ws = labs / "probe1"

@@ -813,7 +813,8 @@ Every time memory admission or pressure actually bites, Loam appends one
 privacy-safe JSON line to `<state>/limits/events.jsonl` (rotated at 2 MiB to
 `.1`, 4 MiB max; never carries message text or private prose): `chat_wait`,
 `chat_timeout`, `chat_evicted` (pressure/`make_room`/`relieve` evictions only,
-distinct from ordinary idle timeouts), `run_wait`, `run_skipped`, `job_queued`,
+distinct from ordinary idle timeouts), `turn_retried` (arriving turn retried
+after an intentional session unload before words), `run_wait`, `run_skipped`, `job_queued`,
 `oom_kill`, `pressure_episode`, `sustained_swap`, and `summary_deferred`.
 `GET /v1/limit-events?days=7&kind=&limit=200` returns `{days, since, until,
 total, counts, active, box, events, truncated}` through `lib/loam_limits.py`.

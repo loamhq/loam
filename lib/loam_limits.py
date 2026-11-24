@@ -169,6 +169,7 @@ KINDS = (
     "chat_wait",         # thread chat waited for room and started (or was cancelled)
     "chat_timeout",      # thread chat waited 5 min for room and gave up (NoSeat)
     "chat_evicted",      # idle chat unloaded to make room (not ordinary idle timeout)
+    "turn_retried",      # arriving turn retried after intentional session unload before words
     "run_wait",          # wake, cron, reviewer or delivery waited for memory and started
     "run_skipped",       # wake, cron, reviewer or delivery waited 20 min for memory and skipped
     "job_queued",        # engineer job queued for memory (started or cancelled)
@@ -181,7 +182,7 @@ KINDS = (
 # Explicit privacy allowlists: only IDs, enums and numbers ever enter the log.
 SUBJECT_KEYS = ("agent", "thread", "session", "job", "project", "lane", "unit")
 DETAIL_KEYS = (
-    "reason", "trigger", "for_agent", "retries", "idle_s", "position",
+    "reason", "trigger", "for_agent", "retries", "attempts", "idle_s", "position",
     "oom_kills", "returncode", "source", "systemd_result", "heaviest",
     "ram_pct", "swap_free_pct", "resolved_available_mb",
     "had_memory_wait", "waited_for_queue", "provider",

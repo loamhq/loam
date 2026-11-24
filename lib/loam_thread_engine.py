@@ -206,6 +206,11 @@ class Turn:
         self.posted = False
         self.completed = False
         self.reclaims = 0
+        self.reclaim_started_mono: float | None = None
+        self.reclaim_started_at: str | None = None
+        self.reclaim_reason: str | None = None
+        self.reclaim_memory: dict | None = None
+        self.reclaim_recorded = False
         # Words for this persona alone, after the thread in its prompt
         # (2026-11-12): a job's receipt the persona is to read
         # (`ThreadEngine.deliver_job`). Never posted in the thread.
@@ -1310,6 +1315,35 @@ class ThreadEngine:
             if not admitted:
                 await asyncio.sleep(.25)
 
+    def _record_turn_retried(self, turn: Turn, outcome: str, *,
+                             session=None, provider: str | None = None,
+                             reason: str | None = None) -> None:
+        if turn.reclaims <= 0 or turn.reclaim_recorded:
+            return
+        turn.reclaim_recorded = True
+        dur = (round(max(0.0, time.monotonic() - turn.reclaim_started_mono), 1)
+               if turn.reclaim_started_mono is not None else None)
+        subj = {"agent": turn.persona, "thread": turn.thread_id}
+        sid = getattr(session, "id", None)
+        if sid:
+            subj["session"] = sid
+        detail: dict = {
+            "reason": reason or turn.reclaim_reason,
+            "retries": turn.reclaims,
+            "attempts": turn.reclaims + 1,
+        }
+        if provider:
+            detail["provider"] = provider
+        limits.record_safe(
+            "turn_retried",
+            outcome=outcome,
+            subject=subj,
+            duration_s=dur,
+            started_at=turn.reclaim_started_at,
+            memory=turn.reclaim_memory,
+            detail=detail,
+        )
+
     async def _work_one(self, key, turn):
         thread_id = key[0]
         try:
@@ -1319,6 +1353,7 @@ class ThreadEngine:
                 # after SIGTERM. The input stays on disk and is given
                 # when the broker starts again (2026-11-19); nothing is
                 # posted.
+                self._record_turn_retried(turn, "cancelled")
                 return
             if loam_agents.is_archived(turn.persona, threads.AI_LABS):
                 # Asleep (2026-11-14): a thread's default or member that
@@ -1333,6 +1368,9 @@ class ThreadEngine:
             if not turn.dispatch and self.already_heard(turn):
                 return
             await self.run_turn(turn)
+            if turn.reclaims > 0 and not turn.reclaim_recorded:
+                self._record_turn_retried(
+                    turn, "replied" if turn.posted else "completed")
         except _Reclaimed as exc:
             # Loam unloaded this session for room/idle/pressure before the turn
             # produced any reply or tool step. Keep the durable input and start
@@ -1341,17 +1379,28 @@ class ThreadEngine:
             turn.settle = False
             steps.log(f"{thread_id} {turn.persona}: session was unloaded "
                       f"({exc.reason}) before reply; retrying turn")
+            started_mono = (turn.reclaim_started_mono
+                            if turn.reclaim_started_mono is not None
+                            else time.monotonic())
+            started_at = turn.reclaim_started_at or limits.now_iso()
+            reclaim_reason = turn.reclaim_reason or exc.reason
+            reclaim_memory = turn.reclaim_memory or limits.snapshot_memory()
             retry_turns: list[Turn] = []
             if turn.input_id:
                 ids = [turn.input_id, *turn.carried]
                 inputs.keep(thread_id, turn.persona, ids)
                 by_id = {e["id"]: e for e in inputs.items(*key)}
-                for iid in ids:
+                for idx, iid in enumerate(ids):
                     item = by_id.get(iid)
                     if item is not None:
                         t = Turn.of_entry(*key, item)
                         t.held = turn.held
                         t.reclaims = turn.reclaims + 1
+                        if idx == 0:
+                            t.reclaim_started_mono = started_mono
+                            t.reclaim_started_at = started_at
+                            t.reclaim_reason = reclaim_reason
+                            t.reclaim_memory = reclaim_memory
                         retry_turns.append(t)
             else:
                 t = Turn(turn.thread_id, turn.persona, turn.chain, turn.reason,
@@ -1359,11 +1408,16 @@ class ThreadEngine:
                          note=turn.note, briefed_at=turn.briefed_at)
                 t.held = turn.held
                 t.reclaims = turn.reclaims + 1
+                t.reclaim_started_mono = started_mono
+                t.reclaim_started_at = started_at
+                t.reclaim_reason = reclaim_reason
+                t.reclaim_memory = reclaim_memory
                 retry_turns.append(t)
             if retry_turns and not getattr(self.broker, "stopping", False):
                 self._unclaim(key, retry_turns)
         except OSError as exc:
             if not turn.dispatch and not getattr(self.broker, "remote", False):
+                self._record_turn_retried(turn, "failed")
                 self.mark(thread_id, turn.persona,
                           f"{threads.display(turn.persona)}'s turn failed: {exc}")
                 return
@@ -1379,8 +1433,11 @@ class ThreadEngine:
                 self._unclaim(key, [Turn.of_entry(*key, item)])
         except asyncio.CancelledError:
             turn.settle = False
+            self._record_turn_retried(turn, "cancelled")
             raise
         except Exception as exc:  # noqa: BLE001 - one turn must not end the queue
+            self._record_turn_retried(
+                turn, "cancelled" if getattr(self.broker, "stopping", False) else "failed")
             if getattr(self.broker, "stopping", False):
                 # Its input is kept for the next start, unless the turn
                 # had already posted words.
@@ -1875,9 +1932,11 @@ class ThreadEngine:
                 detail = getattr(exc, "detail", None)
                 reclaimed = detail.get("reclaimed") if isinstance(detail, dict) else None
                 if (reclaimed in RECLAIM_REASONS
-                        and not getattr(self.broker, "stopping", False)
-                        and turn.reclaims < RECLAIM_RETRIES):
-                    raise _Reclaimed(reclaimed) from exc
+                        and not getattr(self.broker, "stopping", False)):
+                    if turn.reclaims < RECLAIM_RETRIES:
+                        raise _Reclaimed(reclaimed) from exc
+                    self._record_turn_retried(turn, "exhausted", session=session,
+                                              provider=engine, reason=reclaimed)
                 raise
             # The once-only mark, with no await between the send and it.
             turn.sent = True
@@ -1956,7 +2015,11 @@ class ThreadEngine:
                     delta = inner.get("delta") or {}
                     if inner.get("type") == "content_block_delta" and \
                             delta.get("type") == "text_delta":
-                        reply.draft += delta.get("text") or ""
+                        chunk = delta.get("text") or ""
+                        if turn.reclaims > 0 and not turn.reclaim_recorded and chunk.strip():
+                            self._record_turn_retried(
+                                turn, "replied", session=session, provider=engine)
+                        reply.draft += chunk
                         shown = self.shown_draft(turn, reply)
                         if shown is not None:
                             self.publish(turn.thread_id, {
@@ -1969,7 +2032,11 @@ class ThreadEngine:
                         if not isinstance(block, dict):
                             continue
                         if block.get("type") == "text" and top:
-                            reply.said(block.get("text") or "")
+                            text = block.get("text") or ""
+                            if turn.reclaims > 0 and not turn.reclaim_recorded and text.strip():
+                                self._record_turn_retried(
+                                    turn, "replied", session=session, provider=engine)
+                            reply.said(text)
                         elif block.get("type") == "tool_use":
                             label = step_label(block)
                             step(label if top else "↳ " + label, top)
@@ -2073,12 +2140,14 @@ class ThreadEngine:
             seen = (kept or {}).get("through") or "m0"
             if (ended == "exit" and exit_reason in RECLAIM_REASONS
                     and not reply.did
-                    and not getattr(self.broker, "stopping", False)
-                    and turn.reclaims < RECLAIM_RETRIES):
-                threads.remember_session(turn.thread_id, turn.persona, session.id,
-                                         engine, seen, seq=turn.cursor,
-                                         context=session_context(session), watch=False)
-                raise _Reclaimed(exit_reason)
+                    and not getattr(self.broker, "stopping", False)):
+                if turn.reclaims < RECLAIM_RETRIES:
+                    threads.remember_session(turn.thread_id, turn.persona, session.id,
+                                             engine, seen, seq=turn.cursor,
+                                             context=session_context(session), watch=False)
+                    raise _Reclaimed(exit_reason)
+                self._record_turn_retried(turn, "exhausted", session=session,
+                                          provider=engine, reason=exit_reason)
             steps.log(f"{turn.thread_id} {turn.persona}: turn ended ({ended}) "
                       f"before any reply; its messages stay new to the next turn")
         due = self.summary_due(turn, session) if ended in ("result", "handed") else None

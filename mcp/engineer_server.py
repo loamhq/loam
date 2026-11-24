@@ -533,9 +533,9 @@ async def settings(action: str = "describe", setting: str = "", value: str = "",
     description=(
         "Read durable memory and capacity limit events on this server over the "
         "last `days` days (default 7; 0 for all kept history): counts by kind "
-        "(`chat_wait`, `chat_timeout`, `chat_evicted`, `run_wait`, "
-        "`run_skipped`, `job_queued`, `oom_kill`, `pressure_episode`, "
-        "`sustained_swap`, `summary_deferred`), any active episode, the box's "
+        "(`chat_wait`, `chat_timeout`, `chat_evicted`, `turn_retried`, "
+        "`run_wait`, `run_skipped`, `job_queued`, `oom_kill`, "
+        "`pressure_episode`, `sustained_swap`, `summary_deferred`), any active episode, the box's "
         "current RAM/reserve/swap summary, and raw events (IDs, durations and "
         "memory snapshots only; no message content). Optionally filter by "
         "`kind` (one or comma-separated) or cap raw events with `limit`. "
