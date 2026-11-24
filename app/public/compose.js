@@ -388,12 +388,16 @@ function placeCaret(el, offset) {
       if (target) return
       // One `\n` per line, and the newline is *between* lines, so it is spent
       // on the way out of a line rather than on the way in.
+      const empty = child.childNodes.length === 1 && tagOf(child.firstChild) === 'br'
       if (line && child.nextSibling) {
         if (left <= 0) {
-          target = { node: child, offset: child.childNodes.length }
+          target = { node: child, offset: empty ? 0 : child.childNodes.length }
           return
         }
         left -= 1
+      } else if (line && !child.nextSibling && left <= 0) {
+        target = { node: child, offset: empty ? 0 : child.childNodes.length }
+        return
       }
     }
   }

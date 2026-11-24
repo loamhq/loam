@@ -711,6 +711,15 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       if (source && !body.draft_reply) throw new Error('The runtime hasn’t opened a branch composer. Try again after it updates.')
       if (source && o.replyTo) o.replyTo = body.draft_reply
       o.thread = thread; o.creating = false; o.madeHere = true; o.ordered_submissions = thread.ordered_submissions
+      // Replacing `new-thread` with the real id remounts the thread key, which
+      // drops focus and scroll on the kept composer field. Restore both if the
+      // person hasn't moved focus elsewhere.
+      if (typeof options.draft === 'string' && options.draft) {
+        const active = globalThis.document?.activeElement
+        if (!active || active === globalThis.document?.body || active === compose.field() || !active.isConnected) {
+          o.focusDraftEnd = true
+        }
+      }
       attachReplySteps(o)
       attachProse(o); if (!st.fixture) address(thread.id)
       attachQuotes(o)

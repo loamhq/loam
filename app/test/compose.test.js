@@ -457,3 +457,31 @@ test('mentions are subtle spans and preserve markdown, caret offsets and literal
   assert.equal(visibleCaret('Hello @quill', 12), 12)
   assert.match(readField(el).md, /<script>/)
 })
+
+test('placing the caret at the end of a trailing blank line lands inside that empty line', () => {
+  const prevCreateRange = document.createRange
+  const prevGetSelection = globalThis.getSelection
+  let placed = null
+  document.createRange = () => ({
+    start: null,
+    setStart(node, offset) { this.start = { node, offset } },
+    selectNodeContents(node) { this.start = { node, offset: -1 } },
+    collapse() {},
+  })
+  globalThis.getSelection = () => ({
+    removeAllRanges() {},
+    addRange(range) { placed = range.start },
+  })
+  try {
+    const el = document.createElement('div')
+    const md = '> Quoted card text\n> — Scout · Nov 24, 2026 · Chat board\n\n'
+    setMarkdown(el, md, md.length)
+    assert.equal(el.childNodes.length, 4)
+    assert.equal(placed.node, el.childNodes[3])
+    assert.equal(placed.offset, 0)
+    assert.equal(readField(el, placed).caret, md.length)
+  } finally {
+    document.createRange = prevCreateRange
+    globalThis.getSelection = prevGetSelection
+  }
+})
