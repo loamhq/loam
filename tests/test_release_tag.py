@@ -151,6 +151,48 @@ try:
     check("no release-tag file: no release key, no tag",
           ("release" in result, "Release tag" in text,
            "1.6.0" in origin_tags(proj)), (False, False, False))
+
+    # Ancestor-commit tag (`TAG@COMMIT`): hotfix off an earlier release merged back into main
+    # tags the hotfix ancestor (without later main-only commits) while main keeps its own commits.
+    base_110 = origin_tags(proj)["1.1.0"]
+    f = start(proj, "20261002-140005-ffffffff")
+    f_tree = Path(f["path"])
+    f_dir = proj.jobs / f["job"]
+    git(f_tree, "checkout", "-q", "-b", "hotfix-1.1.1", base_110)
+    (f_tree / "hotfix.txt").write_text("fix\n")
+    (f_tree / "manifest.json").write_text(json.dumps({"version": "1.1.1"}))
+    (f_tree / "package.json").write_text(json.dumps({"version": "1.1.1"}))
+    git(f_tree, "add", "-A")
+    git(f_tree, "commit", "-qm", "hotfix 1.1.1")
+    hotfix_sha = git(f_tree, "rev-parse", "HEAD")
+    git(f_tree, "checkout", "-q", f["branch"])
+    git(f_tree, "merge", "-q", "--no-ff", "-s", "ours", "-m", "merge 1.1.1", hotfix_sha)
+    git(f_tree, "branch", "-D", "hotfix-1.1.1")
+    merged_sha = git(f_tree, "rev-parse", "HEAD")
+    (f_dir / wt.RELEASE_FILE).write_text(f"1.1.1@{hotfix_sha}\n")
+    result, text = land(proj, f, f_dir)
+    check("ancestor-commit tag: main lands at merge commit, tag pushes at hotfix ancestor",
+          (result["state"], result["sha"], result["release"]["state"],
+           result["release"]["sha"], origin_tags(proj).get("1.1.1")),
+          ("landed", merged_sha, "pushed", hotfix_sha, hotfix_sha))
+
+    # Non-ancestor target is refused while merge still lands.
+    g = start(proj, "20261002-140006-gggggggg")
+    g_tree = Path(g["path"])
+    g_dir = proj.jobs / g["job"]
+    git(g_tree, "checkout", "-q", "--detach", base_110)
+    (g_tree / "manifest.json").write_text(json.dumps({"version": "1.1.2"}))
+    (g_tree / "package.json").write_text(json.dumps({"version": "1.1.2"}))
+    git(g_tree, "add", "-A")
+    git(g_tree, "commit", "-qm", "unmerged 1.1.2")
+    unmerged_sha = git(g_tree, "rev-parse", "HEAD")
+    git(g_tree, "checkout", "-q", g["branch"])
+    bump(g, "1.6.1", "1.6.1")
+    (g_dir / wt.RELEASE_FILE).write_text(f"1.1.2@{unmerged_sha}\n")
+    result, _ = land(proj, g, g_dir)
+    check("non-ancestor target commit is refused",
+          (result["state"], result["release"]["state"], "1.1.2" in origin_tags(proj)),
+          ("landed", "refused", False))
 finally:
     wt.WORKTREES, loam_lock.LOCK_DIR = saved
     shutil.rmtree(root, ignore_errors=True)

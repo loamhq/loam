@@ -3509,24 +3509,32 @@ def user_bus_env() -> None:
         os.environ.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path={bus}")
 
 
-def run_land() -> int:
+def run_land(argv: list[str] | None = None) -> int:
     """The `--land` form: a job lands what it has committed so far, from
     inside its own session, under the same rules as the landing at its end.
     For the Loam lane, whose canonical checkout is the live runtime, this is
     how a change goes live mid-job. The tree stays; the branch is moved to
     what landed, so the landing at the end starts from there."""
+    args = list(sys.argv[1:] if argv is None else argv)
+    release: str | None = None
+    for i, tok in enumerate(args):
+        if tok == "--release" and i + 1 < len(args):
+            release = args[i + 1].strip() or None
+        elif tok.startswith("--release="):
+            release = tok.split("=", 1)[1].strip() or None
     if os.environ.get("LOAM_WALLED") == "platform":
         # The wall makes the canonical checkout read-only, and a landing's
         # whole job is to move it. Loam's engineer holds sudo, so the landing
         # -- and only the landing -- steps back into the host's mount
         # namespace to do it, as this user.
         env = {k: v for k, v in os.environ.items() if k != "LOAM_WALLED"}
+        extra = ["--release", release] if release else []
         return subprocess.run(
             ["sudo", "-n", "--preserve-env", "nsenter", "--mount=/proc/1/ns/mnt",
              "--", "setpriv", f"--reuid={os.getuid()}", f"--regid={os.getgid()}",
              "--init-groups", "--", "env", f"PATH={os.environ.get('PATH', '')}",
              f"HOME={os.environ.get('HOME', '')}", "LOAM_WALLED=",
-             sys.executable, str(AGENTS / "bin" / "engineer-job"), "--land"],
+             sys.executable, str(AGENTS / "bin" / "engineer-job"), "--land", *extra],
             env=env, check=False).returncode
     job_dir = os.environ.get("LOAM_JOB_DIR")
     record = wt.read_record(Path(job_dir)) if job_dir else None
@@ -3538,9 +3546,12 @@ def run_land() -> int:
     p = paths(project, record["job"])
     meta = read_brief_meta(p)
     result = land_job(project, record["job"], record, meta["title"], p,
-                      keep_tree=True, read_only=meta["read_only"])
+                      keep_tree=True, release=release, read_only=meta["read_only"])
     print(wt.receipt_section(project, record["job"], result))
-    return 0 if result["state"] in ("landed", "nothing", "pull_request") else 1
+    ok = result["state"] in ("landed", "landed_earlier", "nothing", "pull_request")
+    if release and (result.get("release") or {}).get("state") != "pushed":
+        ok = False
+    return 0 if ok else 1
 
 
 def main() -> int:
@@ -3549,7 +3560,7 @@ def main() -> int:
     if "--brief" in argv:
         return run_tool()
     if "--land" in argv:
-        return run_land()
+        return run_land(argv)
     if "--recover" in argv:
         return run_recover()
     if "--status" in argv:

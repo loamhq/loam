@@ -1958,18 +1958,45 @@ def tree_versions(repo: Path, sha: str) -> dict[str, str]:
     return found
 
 
+def parse_release(spec: str | None) -> tuple[str | None, str | None]:
+    """Split a release spec `TAG` or `TAG@COMMIT` into `(tag, target)`."""
+    if not spec:
+        return None, None
+    text = spec.strip()
+    if "@" in text:
+        tag, target = text.split("@", 1)
+        return tag.strip() or None, target.strip() or None
+    return text or None, None
+
+
 def cut_release(repo: Path, result: dict, tag: str, *, require_notes: bool = False) -> dict:
-    """Tag what landed as `tag` and push the tag, or say why not. Never
-    raises and never touches `main`: a refused tag leaves the merge landed.
+    """Tag what landed as `tag` (or an ancestor commit named by `tag@commit`,
+    such as a hotfix branch merged back into `main`) and push the tag, or say
+    why not. Never raises and never touches `main`: a refused tag leaves the
+    merge landed.
 
         state   pushed | refused | failed
         sha     the commit tagged (or that would have been)
         detail  why, when not pushed
     """
-    sha = result.get("sha")
+    parsed_tag, target = parse_release(tag)
+    tag = parsed_tag or tag
+    landed_sha = result.get("sha")
     state = result.get("state")
-    if state not in ("landed", "landed_earlier") or not sha:
+    if state not in ("landed", "landed_earlier") or not landed_sha:
         return release_refused(tag, f"the branch did not land ({state})")
+    sha = landed_sha
+    if target:
+        resolved = rev(repo, f"{target}^{{commit}}")
+        if not resolved:
+            return release_refused(tag, f"release target {target!r} is not a commit in {repo}", landed_sha)
+        if not is_ancestor(repo, resolved, landed_sha):
+            return release_refused(
+                tag,
+                f"release target {resolved[:7]} is not an ancestor of landed {MAIN} ({landed_sha[:7]})",
+                resolved,
+            )
+        sha = resolved
     if git(repo, "check-ref-format", f"refs/tags/{tag}",
            check=False).returncode != 0:
         return release_refused(tag, f"{tag!r} is not a valid tag name", sha)
