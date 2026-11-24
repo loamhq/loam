@@ -1973,7 +1973,8 @@ def cancel(job_id: str, by: str, wait: float | None = None) -> tuple[int, str]:
         # is no session to stop, and the unit holds nothing worth keeping.
         subprocess.run(["systemctl", "--user", "stop", unit],
                        capture_output=True, check=False)
-        eng.reap_job_processes(job_id)
+        if lc.is_install_config() and not os.environ.get("LOAM_OFFLINE"):
+            eng.reap_job_processes(job_id)
         if not p["result"].is_file():
             p["queued"].unlink(missing_ok=True)
             write_cancelled(p, job_id, project)
@@ -1989,7 +1990,8 @@ def cancel(job_id: str, by: str, wait: float | None = None) -> tuple[int, str]:
     if settled is None and read_landing(p) is None:
         subprocess.run(["systemctl", "--user", "stop", unit],
                        capture_output=True, check=False)
-        eng.reap_job_processes(job_id)
+        if lc.is_install_config() and not os.environ.get("LOAM_OFFLINE"):
+            eng.reap_job_processes(job_id)
         settled = await_result(p, 2)
         if settled is None:
             write_cancelled(p, job_id, project)
@@ -2743,13 +2745,14 @@ def run_inner(project: eng.Project, job_id: str) -> int:
             except Exception:  # noqa: BLE001
                 pass
         stop.set()
-        try:
-            reaped = eng.reap_job_processes(job_id)
-            if reaped:
-                landing_say(p)(f"reaped {len(reaped)} leftover job process(es): "
-                               + ", ".join(f"pid {r['pid']}" for r in reaped))
-        except Exception:  # noqa: BLE001
-            pass
+        if lc.is_install_config() and not os.environ.get("LOAM_OFFLINE"):
+            try:
+                reaped = eng.reap_job_processes(job_id)
+                if reaped:
+                    landing_say(p)(f"reaped {len(reaped)} leftover job process(es): "
+                                   + ", ".join(f"pid {r['pid']}" for r in reaped))
+            except Exception:  # noqa: BLE001
+                pass
         eng.remove_scratch(job_id)
         os.environ.pop("TMPDIR", None)
 

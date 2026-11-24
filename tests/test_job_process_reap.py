@@ -36,8 +36,10 @@ check("does NOT spare loam-engineer-<job>.service",
       not eng._is_persistent_loam_unit("0::/user.slice/user@1000.service/app.slice/loam-engineer-20261117-150934-8f16d1fa.service"))
 
 # 2. Spawn detached helpers carrying LOAM_WAKE=engineer:<fake_job_id>
-job_a = "20990101-000001-aaaaaaaa"
-job_b = "20990101-000002-bbbbbbbb"
+# Scope fake job ids to this process so concurrent test runs never reap each other.
+_tag = f"{os.getpid() & 0xffffff:06x}"
+job_a = f"20990101-000001-aa{_tag}"
+job_b = f"20990101-000002-bb{_tag}"
 base_env = {k: v for k, v in os.environ.items() if k not in ("LOAM_WAKE", "LOAM_JOB_DIR")}
 p_a = subprocess.Popen(
     [sys.executable, "-c", "import time; time.sleep(60)"],
