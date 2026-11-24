@@ -26,10 +26,9 @@ import { agentLook, createAgents, when, providerGlyph } from './sessions.js'
 import { recordFaceSlots } from './face-identity.js'
 import { modelsOf, modelLabel, modelTooltip } from './providers.js'
 import { providerMark } from './marks.js'
-import { readEvents } from './sse.js'
 import { createLink } from './link.js'
 import { readField, caretPoint, setMarkdown } from './compose.js'
-import { applyThreadEvent, threadTurns, readThreadRecord, readThreadSummary, readThreadList, readAcceptedMessage, compareThreads, messageSegments, firstMessageTitle, groupJoinNotices, withPending, withMarks, createdAgentId } from './thread-record.js'
+import { applyThreadEvent, threadTurns, readThreadRecord, readThreadSummary, readThreadList, readAcceptedMessage, compareThreads, messageSegments, messageNumber, firstMessageTitle, groupJoinNotices, withPending, withMarks, createdAgentId } from './thread-record.js'
 
 const button = (text, onclick, props = {}) => h('button', { class: 'pillbtn', type: 'button', onclick, ...props }, text)
 export function createThreads({ registry = createCoreRegistry(), linePending = () => false, headerActionPending = () => false, api, redraw, agents, changedAgent = () => {}, agentsReady = () => false, loadAgents = () => {}, providers = () => [], rail, nav, enter, leave, compose, openProfile, openSettings = null, openRef, address = () => {}, viewAddress = () => {}, archiveAddress = () => false, historyButton = () => null, visitId = () => null, messageState = createMessageState(), sidebar = null, renderText = markdown, marketCards = null, fixture = false, running = null, stepUI = null, dom = document, navigate = null, side = () => null, sidePanel = false, visible = () => true, listIsMain = () => true, missing = () => {} }) {
@@ -51,8 +50,9 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     outbox.listen((message, id) => {
       if (st.fixture) return
       if (message && st.open?.thread.id === id) {
-        applyThreadEvent(st.open, { type: 'message.done', message })
+        applyThreadEvent(st.open, { type: 'message.done', message, advanceCursor: false })
         receivedNote(st.open, message)
+        watchSendEcho(st.open, message)
       }
       if (message) refreshList()
       redraw()
@@ -86,10 +86,43 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
   function refreshCreationCards(messages) {
     if (!st.fixture && messages?.some(m => m.agent_created)) loadAgents()
   }
-  let controller = null, generation = 0, retry = null, listingRequest = 0
+  let controller = null, threadLink = null, generation = 0, retry = null, retryOpening = null, listingRequest = 0
+  let echoTimer = null, echoTarget = 0
   let awaitTimer = null, awaitDue = Infinity
   let returnTimer = null
   function clearReturn() { clearTimeout(returnTimer); returnTimer = null; st.returning = null }
+  function clearEcho() { clearTimeout(echoTimer); echoTimer = null; echoTarget = 0 }
+  function stopStream() {
+    threadLink?.stop(); threadLink = null
+    controller?.abort(); controller = null
+    clearTimeout(retry); retry = null; retryOpening = null
+    clearEcho()
+  }
+  function connectionNoticeState(failures = 1) {
+    if (globalThis.navigator?.onLine === false) return { text: 'Offline — updates will resume when you’re back online.', down: true }
+    if (failures >= 2) return { text: 'Can’t reach the server — still trying.', down: true }
+    return { text: 'Reconnecting…', down: false }
+  }
+  function watchSendEcho(o, message) {
+    if (!threadLink || !message?.id) return
+    const target = messageNumber(message.id)
+    if (!target || messageNumber(o.after) >= target) return
+    clearEcho()
+    echoTarget = target
+    // The broker publishes `message.done` on the thread stream as it accepts
+    // an HTTP send. If the stream is already down/stale, reconnect immediately;
+    // otherwise resync if the echo doesn't arrive within a few seconds.
+    if (threadLink.phase !== 'open' || threadLink.isStale()) {
+      wakeOpen({ resync: true })
+      return
+    }
+    const ticket = generation
+    echoTimer = setTimeout(() => {
+      echoTimer = null
+      if (ticket !== generation || st.open !== o) return
+      if (messageNumber(o.after) < target) wakeOpen({ resync: true })
+    }, 3500)
+  }
   const awaitingSince = new Map()
   const visits = new Map()
   const readingPlaces = new Map()
@@ -120,8 +153,8 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
           st.threads = st.threads.filter((t) => t.id !== id)
           listingRequest++
           if (st.open?.thread.id === id) {
-            generation++; controller?.abort(); clearTimeout(retry)
-            Object.assign(st.open, { loading: false, refreshing: false, readFailed: true, connection: '', error: 'This thread was deleted.' })
+            generation++; stopStream()
+            Object.assign(st.open, { loading: false, refreshing: false, readFailed: true, connection: '', connectionDown: false, error: 'This thread was deleted.' })
             missing(id)
           }
           redraw(); return
@@ -328,7 +361,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     }
     compose.field().__paintMention = null
     compose.leave()
-    generation++; controller?.abort(); controller = null; clearTimeout(retry)
+    generation++; stopStream()
     cards.questionDrafts.clear()
     st.open = null; st.manage = false; st.mention = null; draft.value = ''
     clearReturn()
@@ -378,7 +411,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     if (!st.fixture) agentDraftController.load(id)
     await readOpening(id, ticket, o, { savedVisit, summary, listing })
   }
-  async function readOpening(id, ticket, o, { savedVisit, summary, listing }) {
+  async function readOpening(id, ticket, o, { savedVisit, summary, listing }, attempts = 1) {
     try {
       // A cold/deep-linked open needs the same pre-read count and agent catalog
       // as a row tap. The newest-page GET clears the host's count.
@@ -391,6 +424,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       }
       const body = readThreadRecord(await transport('GET', `${path(id)}?limit=${OPENING_MESSAGES}`), id)
       if (ticket !== generation) return
+      retryOpening = null
       cancelRemoval(id)
       const previous = o.messages, known = new Map(previous.map((m) => [m.id, m])), first = body.messages.findIndex((m) => known.has(m.id))
       // A revisit can span more than one latest page. Fill a gap in the
@@ -410,7 +444,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
           ...(fresh.steps == null && m?.steps && fresh.text === m.text && fresh.author === m.author ? { steps: m.steps } : {}) }
       })] : []
       Object.assign(o, body, { messages, has_more: retained.length && messages.length ? savedVisit.has_more : body.has_more,
-        loading: false, refreshing: false, connection: '', after: body.messages.at(-1)?.id ?? null })
+        loading: false, refreshing: false, connection: '', connectionDown: false, after: body.messages.at(-1)?.id ?? null })
       refreshCreationCards(messages)
       const latestOwner = messages.findLast(m => isOwner(m.author))
       if (!o.thread.default && latestOwner?.unaddressed && !messages.some(m => m.answer_for === latestOwner.id)) {
@@ -435,8 +469,17 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       if (ticket === generation && !authExpired()) {
         if (!error.status || [404, 408, 429].includes(error.status) || error.status >= 500) {
           if (error.status === 404) confirmRemoval(id)
-          o.connection = 'Reconnecting…'
-          retry = setTimeout(() => { if (ticket === generation) readOpening(id, ticket, o, { savedVisit, summary, listing }) }, 2500)
+          const notice = connectionNoticeState(attempts)
+          o.connection = notice.text
+          o.connectionDown = notice.down
+          retryOpening = () => readOpening(id, ticket, o, { savedVisit, summary, listing }, attempts + 1)
+          retry = setTimeout(() => {
+            if (ticket === generation) {
+              const run = retryOpening
+              retryOpening = null
+              run?.()
+            }
+          }, 2500)
         } else {
           o.loading = false; o.refreshing = false; o.readFailed = true; o.error = error.message
         }
@@ -485,34 +528,71 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       } })
   }
   function connect(id, ticket, deliver) {
-    controller = new AbortController()
-    const abort = controller
-    const after = st.open?.after ?? 'm0'
-    if (fixtureStream) { const stop = fixtureStream(id, deliver, after); abort.signal.addEventListener('abort', stop); return }
-    ;(async () => {
-      try {
-        const res = await fetch(`/api${path(id)}/events?after=${encodeURIComponent(after)}`, { signal: abort.signal })
-        if (!res.ok) {
-          if (res.status === 404) confirmRemoval(id)
-          const body = await res.json().catch(() => null)
-          throw new Error(body?.error ?? `Live updates paused (${res.status}).`)
+    stopStream()
+    const after = () => st.open?.after ?? 'm0'
+    if (fixtureStream) {
+      controller = new AbortController()
+      const stop = fixtureStream(id, deliver, after())
+      controller.signal.addEventListener('abort', stop)
+      return
+    }
+    // Reconnect only from completed message IDs; a GET here would mark
+    // unseen replies read even while the person is browsing earlier pages.
+    threadLink = createLink({
+      href: () => `/api${path(id)}/events?after=${encodeURIComponent(after())}`,
+      stopOn404: false,
+      watchdog: true,
+      fetchImpl: async (...args) => {
+        const res = await fetch(...args)
+        if (res.status === 404 && ticket === generation) confirmRemoval(id)
+        return res
+      },
+      onEvent: (e) => {
+        if (ticket !== generation) return
+        if (st.open) { st.open.connection = ''; st.open.connectionDown = false }
+        deliver(e)
+      },
+      onPhase: (phase, _detail, info = {}) => {
+        if (ticket !== generation || !st.open || authExpired()) return
+        if (phase === 'open') {
+          if (st.open.connection || st.open.connectionDown) {
+            st.open.connection = ''
+            st.open.connectionDown = false
+            redraw()
+          }
+        } else if (phase === 'retrying') {
+          const notice = connectionNoticeState(info.attempt ?? 1)
+          st.open.connection = notice.text
+          st.open.connectionDown = notice.down
+          redraw()
         }
-        for await (const e of readEvents(res)) {
-          if (ticket !== generation) return
-          if (st.open) st.open.connection = ''
-          deliver(e)
-        }
-        if (!abort.signal.aborted) throw new Error('Live updates paused. Reconnecting…')
-      } catch (error) {
-        if (abort.signal.aborted || ticket !== generation || authExpired()) return
-        st.open.connection = 'Reconnecting…'; redraw()
-        // Reconnect only from completed message IDs; a GET here would mark
-        // unseen replies read even while the person is browsing earlier pages.
-        retry = setTimeout(() => {
-          if (ticket === generation) connect(id, ticket, deliver)
-        }, 2500)
-      }
-    })()
+      },
+    })
+    threadLink.start().catch(() => {})
+  }
+  function wakeOpen({ resync = false, backoff = true, manual = false } = {}) {
+    if (authExpired() || !st.open || st.open.readFailed || st.open.creating || st.open.createFailed || st.fixture) return false
+    if (manual) {
+      st.open.connection = 'Reconnecting…'
+      st.open.connectionDown = false
+      redraw()
+    }
+    if (retryOpening) {
+      if (!backoff && !resync) return false
+      clearTimeout(retry); retry = null
+      const run = retryOpening; retryOpening = null
+      run()
+      return true
+    }
+    if (!threadLink) return false
+    if (threadLink.phase === 'stopped') return threadLink.restart()
+    return threadLink.wake({ force: resync, backoff })
+  }
+  function offline() {
+    if (!st.open || st.open.readFailed || st.open.creating || st.open.createFailed || st.fixture) return
+    st.open.connection = 'Offline — updates will resume when you’re back online.'
+    st.open.connectionDown = true
+    redraw()
   }
   function event(e, ticket) {
     const o = st.open
@@ -529,6 +609,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     if (e.type === 'broker.permission_resolved') forgetAnswers(o, e.request_id)
     if (e.type === 'turn.finished' && o.deleteBlocked === o.error) { o.error = ''; o.deleteBlocked = null }
     if (e.type === 'message.done') {
+      if (echoTarget && messageNumber(o.after) >= echoTarget) clearEcho()
       receivedNote(o, e.message)
       refreshList(); if (o.atEnd !== false) markRead(o)
       if (!st.fixture && createdAgentId(e.message)) loadAgents()
@@ -699,8 +780,9 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       if (st.drafts.get(o.thread.id)?.text.trim() === text) st.drafts.delete(o.thread.id)
       if (st.open !== o) return
       o.replyTo = null; o.changingDraft = null; draft.value = ''; compose.clear()
-      applyThreadEvent(o, { type: 'message.done', message })
+      applyThreadEvent(o, { type: 'message.done', message, advanceCursor: false })
       receivedNote(o, message)
+      watchSendEcho(o, message)
       refreshList()
     } catch (e) { o.error = accepted ? `Message sent. ${e.message} Refresh to read the latest reply.` : e.status
       ? `${e.message} Your message is still here.`
@@ -1705,6 +1787,14 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     return o.thread.default ? `Tell ${name(o.thread.default)} what to change` : 'Say what to change'
   }
 
+  function connectionNotice(o) {
+    if (!o.connection) return null
+    return h('div', { class: `noticerow warn tt-connection${o.connectionDown ? ' is-down' : ''}`, role: 'status' },
+      h('span', { class: 'noticerow-dot', 'aria-hidden': 'true' }),
+      h('span', { class: 'tt-connection-text', text: o.connection }),
+      o.connectionDown ? button('Try again', () => wakeOpen({ resync: true, manual: true }), { class: 'noticerow-act tt-connection-retry' }) : null)
+  }
+
   function thread() {
     const o = st.open
     if (!o) return emptyThread()
@@ -1798,7 +1888,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
         chatDock(h('div', { class: 'tt-composer' },
           listeners,
           o.error ? h('div', { class: 'banner', role: 'alert' }, o.error, o.createFailed ? button('Try creating again', () => create(o.thread.default, { promptTitle: o.promptTitle, promptBody: o.promptBody, placeholder: o.promptPlaceholder, draft: draft.value, source: o.replyTo?.thread ? o.replyTo : null })) : button('Refresh thread', () => open(o.thread.id))) : null,
-          o.connection ? h('div', { class: 'noticerow', role: 'status', text: o.connection }) : null,
+          connectionNotice(o),
           composingReply(), renderedComposer), compose.hint?.())),
       branchPanel(),
     ] })
@@ -1970,13 +2060,19 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     o?.prose?.watch(pane)
     o?.replySteps?.watch(pane)
   }
-  function tick(active) {
+  function tick(active, { resync = false, backoff = false } = {}) {
     if (authExpired()) return
-    if (!active) { stopList(); return }
-    ensureList(); listLink?.wake()
+    const wakeBackoff = backoff || resync
+    if (!active) {
+      stopList()
+      if (st.open && visible()) wakeOpen({ resync, backoff: wakeBackoff })
+      return
+    }
+    ensureList(); listLink?.wake({ force: resync, backoff: wakeBackoff })
+    wakeOpen({ resync, backoff: wakeBackoff })
     refreshCreationCards(st.open?.messages)
-    if (st.open && Date.now() - (st.open.jobsReadAt ?? 0) >= 5000) refreshJobs(st.open)
-    if (!st.listLive && st.checked && Date.now() - st.refreshed > 15000 && !st.loading) load({ quiet: true })
+    if (st.open && (resync || Date.now() - (st.open.jobsReadAt ?? 0) >= 5000)) refreshJobs(st.open)
+    if (!st.listLive && st.checked && (resync || Date.now() - st.refreshed > 15000) && !st.loading) load({ quiet: true })
   }
   function dirty() {
     const state = st.open
@@ -1984,12 +2080,12 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     const context = { slot: 'below', thread: state.thread, state }
     return registry.entries('thread.header.action', context).some(entry => registry.invoke(entry, 'dirty', context))
   }
-  function pause() { generation++; gesture.reset(); selection.disconnect(); clearReturn(); clearListeningTimers(st.open); clearTaskTimers(st.open); clearTimeout(st.open?.replyHighlightTimer); clearTimeout(st.open?.copyMessageTimer); if (st.open) st.open.copiedMessage = null; authors.disconnect(); st.open?.prose?.stop(); st.open?.replySteps?.watch(null); clearTimeout(awaitTimer); awaitTimer = null; controller?.abort(); clearTimeout(retry); stopList() }
+  function pause() { generation++; gesture.reset(); selection.disconnect(); clearReturn(); clearListeningTimers(st.open); clearTaskTimers(st.open); clearTimeout(st.open?.replyHighlightTimer); clearTimeout(st.open?.copyMessageTimer); if (st.open) st.open.copiedMessage = null; authors.disconnect(); st.open?.prose?.stop(); st.open?.replySteps?.watch(null); clearTimeout(awaitTimer); awaitTimer = null; stopStream(); stopList() }
   const uploadPreview = (file, name) => transport('POST', `${path(st.open.thread.id)}/attachments`, { name, size: file.size, type: file.type })
   return { uploadPreview, st, load, agentDrafts, loadAgentDrafts, refreshAgents() { runtimeAgents = null; redraw() }, preview, open, close, create, list, showArchived, row: threadRow, activityRows, activityFace: t => threadFace(t, 36), activityInfo: t => {
     const state = threadSubtitle({ ...t, unread: 0 }, name, activityOptions(t))
     const groups = threadActivity(t, activityOptions(t))
     return { status: groups.asking.length ? 'Needs your input' : groups.working.length ? 'Working' : groups.waiting.length ? 'Waiting' : 'Quiet',
       secondary: state === 'Quiet' ? t.last?.text || 'Quiet' : state }
-  }, catalog, view, pane, currentView, setView, afterRender, tick, dirty, send, saveCompose, transferTo, receiveVisit: (id, visit) => visits.set(id, visit), mention, mentionKey, pause, defaultName: () => name(st.open?.thread.default) }
+  }, catalog, view, pane, currentView, setView, afterRender, tick, wake: wakeOpen, offline, dirty, send, saveCompose, transferTo, receiveVisit: (id, visit) => visits.set(id, visit), mention, mentionKey, pause, defaultName: () => name(st.open?.thread.default) }
 }

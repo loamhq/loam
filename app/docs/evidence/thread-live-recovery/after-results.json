@@ -1,0 +1,102 @@
+{
+  "browser": "156.0.8078.79",
+  "baseline": false,
+  "results": [
+    {
+      "width": 390,
+      "theme": "light",
+      "baseline": false,
+      "visibilityResynced": true,
+      "thinkingVisibleAfterResync": true,
+      "silentStallRecovered": true,
+      "disconnectedNoticeCalmAndAligned": {
+        "nLeft": 12,
+        "cLeft": 12,
+        "nRight": 378,
+        "cRight": 378
+      },
+      "tryAgainRecovered": true,
+      "offlineOnlineRecovered": true,
+      "pageshowRecovered": true,
+      "threadReadsDuringRecovery": 0,
+      "captures": [
+        "after-thinking-390-light.png",
+        "after-reply-390-light.png",
+        "after-disconnected-390-light.png"
+      ],
+      "errors": []
+    },
+    {
+      "width": 390,
+      "theme": "dark",
+      "baseline": false,
+      "visibilityResynced": true,
+      "thinkingVisibleAfterResync": true,
+      "silentStallRecovered": true,
+      "disconnectedNoticeCalmAndAligned": {
+        "nLeft": 12,
+        "cLeft": 12,
+        "nRight": 378,
+        "cRight": 378
+      },
+      "tryAgainRecovered": true,
+      "offlineOnlineRecovered": true,
+      "pageshowRecovered": true,
+      "threadReadsDuringRecovery": 0,
+      "captures": [
+        "after-thinking-390-dark.png",
+        "after-reply-390-dark.png",
+        "after-disconnected-390-dark.png"
+      ],
+      "errors": []
+    },
+    {
+      "width": 1440,
+      "theme": "light",
+      "baseline": false,
+      "visibilityResynced": true,
+      "thinkingVisibleAfterResync": true,
+      "silentStallRecovered": true,
+      "disconnectedNoticeCalmAndAligned": {
+        "nLeft": 560,
+        "cLeft": 560,
+        "nRight": 1320,
+        "cRight": 1320
+      },
+      "tryAgainRecovered": true,
+      "offlineOnlineRecovered": true,
+      "pageshowRecovered": true,
+      "threadReadsDuringRecovery": 0,
+      "captures": [
+        "after-thinking-1440-light.png",
+        "after-reply-1440-light.png",
+        "after-disconnected-1440-light.png"
+      ],
+      "errors": []
+    },
+    {
+      "width": 1440,
+      "theme": "dark",
+      "baseline": false,
+      "visibilityResynced": true,
+      "thinkingVisibleAfterResync": true,
+      "silentStallRecovered": true,
+      "disconnectedNoticeCalmAndAligned": {
+        "nLeft": 560,
+        "cLeft": 560,
+        "nRight": 1320,
+        "cRight": 1320
+      },
+      "tryAgainRecovered": true,
+      "offlineOnlineRecovered": true,
+      "pageshowRecovered": true,
+      "threadReadsDuringRecovery": 0,
+      "captures": [
+        "after-thinking-1440-dark.png",
+        "after-reply-1440-dark.png",
+        "after-disconnected-1440-dark.png"
+      ],
+      "errors": []
+    }
+  ]
+}

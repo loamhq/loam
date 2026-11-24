@@ -1346,16 +1346,17 @@ quickActions.refresh()
 
 // Coming back is the moment this page has to act on, and a phone gives it
 // several names: the tab becoming visible, a page restored from the
-// back/forward cache, the network returning, the window regaining focus. All
-// four mean the same thing here — check every stream and reopen at once what is
-// closed or has gone quiet. `wake()` does nothing to a healthy one.
-function cameBack() {
+// back/forward cache, the network returning, the window regaining focus.
+// Returning from sleep/background/offline passes `resync: true` so streams
+// reopen right away instead of waiting out a ping timeout on a dead socket;
+// `focus` leaves a healthy stream alone and only wakes a stale or waiting one.
+function cameBack({ resync = false } = {}) {
   running.wake()
   if (authExpired()) return
   loadAgentAvailability()
   fitViewport()
-  threads.tick(['threads', 'home', 'activity', 'profile'].includes(state.screen) || state.wide && state.navigator === 'chats')
-  sidePanel.threads.tick(panels.visible() && sidePanel.host.state.screen === 'threads')
+  threads.tick(['threads', 'home', 'activity', 'profile'].includes(state.screen) || state.wide && state.navigator === 'chats', { resync, backoff: true })
+  sidePanel.threads.tick(panels.visible() && sidePanel.host.state.screen === 'threads', { resync, backoff: true })
   schedule()
 }
 
@@ -1430,12 +1431,13 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     sendKeys.refresh()
     registry.emit('page.visible', {})
-    cameBack()
+    cameBack({ resync: true })
   }
   // Going away is leaving the chat as far as the mark is concerned: a phone
   // locked mid-turn has read what is on its screen, and a throttle that had not
   // fired yet would take that reading with it.
 })
+document.addEventListener('resume', () => cameBack({ resync: true }))
 // A tab being closed is the same moment, and it is the one a `visibilitychange`
 // is not promised for on every browser.
 // A file dropped anywhere but a chat. The browser's own answer to that is to
@@ -1467,9 +1469,21 @@ document.addEventListener('dragleave', (event) => {
   schedule()
 })
 
-window.addEventListener('pageshow', cameBack)
-window.addEventListener('online', cameBack)
-window.addEventListener('focus', cameBack)
+window.addEventListener('pageshow', (event) => cameBack({ resync: event?.persisted !== false }))
+window.addEventListener('online', () => cameBack({ resync: true }))
+window.addEventListener('offline', () => {
+  threads.offline()
+  sidePanel.threads.offline()
+  schedule()
+})
+window.addEventListener('focus', () => cameBack())
+let connectionType = globalThis.navigator?.connection?.type
+globalThis.navigator?.connection?.addEventListener?.('change', () => {
+  const next = globalThis.navigator?.connection?.type
+  const switched = next !== undefined && connectionType !== undefined && next !== connectionType
+  connectionType = next
+  cameBack({ resync: switched })
+})
 
 // A slow heartbeat, for a page left open on a desk: none of the events above
 // fires when a connection dies under a page nobody touched. It also redraws,
