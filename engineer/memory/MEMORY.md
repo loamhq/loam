@@ -3118,3 +3118,20 @@ listener for immediate notification in an open page.
   exists`) on `POST /user/repos`; `_ensure_share_repo` distinguishes that from
   missing permissions (`administration: write` checked on the live installation
   and on 403) and points every refusal to Settings › Connections › GitHub.
+
+## 2026-11-24 — notes-only landings and small-RAM suite assumptions
+
+- **Notes-only landings skip the test suite.** In `lib/loam_worktree.py:_prepare`,
+  when `is_notes_only(project, tree, main_sha, tip, merged)` is true (both the
+  branch diff `main...tip` and the merged tree diff `main..merged` change only
+  paths under `memory_prefix(project)`) and no release tag was requested, the
+  landing still runs merge, scope check, identity settlement, and `push_gate`,
+  then skips `run_tests` and records `notes_only: True`. `bin/engineer-job` also
+  skips runtime daemon/service reconciliation for `notes_only` platform landings.
+- **Test suite on <= 8 GB hosts.** `loam_broker` and `loam_lock` compute
+  `BOX_MB`, `MEMORY_RESERVE_MB`, `SESSION_START_MB`, `MAX_SESSIONS`,
+  `THREAD_IDLE_S`, and `CLASSIC_IDLE_S` from `/proc/meminfo` at import time.
+  Tests must derive thresholds from those module constants (and `max(THREAD_IDLE_S, DEFAULT_THREAD_IDLE_S)`
+  for `summary_due`) rather than hardcoding 16+ GB values (`2048`, `450`, `30`,
+  `600`/`1800`). Simulating a small box locally works by bind-mounting a fake
+  `/proc/meminfo` inside `unshare -Urm`.
