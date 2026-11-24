@@ -53,10 +53,10 @@ NOT_COVERED = [
      "data the runtime writes as it runs, not setup; large and changing every minute"),
     ("plugins' private data (<state>/plugins/private/)", "each plugin's own data, not setup"),
     ("Caddy's certificates and its own data", "private keys the web server re-issues by itself"),
-    ("Docker images, containers and volumes other than the login's two files",
+    ("Docker images, containers and volumes, and the login's Redis session store",
      "rebuilt from the compose files that are covered; an app's own data is the app's "
-     "(the login's sessions cost one sign-in per device; its notification file holds "
-     "one-time codes, never setup)"),
+     "(the login's sessions in /var/lib/loam-authelia-redis cost one sign-in per device; "
+     "its notification file holds one-time codes, never setup)"),
     ("installed packages, the kernel, the network and the firewall's base rules",
      "the operating system's, not Loam's; the provider's or the person's own tools restore them"),
     ("SSH keys", "identity, not setup; ~/.ssh/config is covered"),

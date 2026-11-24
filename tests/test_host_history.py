@@ -359,25 +359,59 @@ class TestLogin(Scratch):
         self.assertFalse(any(a[:1] == ["docker"] for a in self.ran))
 
     def test_finding_the_login(self):
-        lh.shutil.which = lambda name, path=None: None
-        folder, note = lh.find_login()
-        self.assertIsNone(folder)
-        self.assertIn("no Docker", note)
-        fake = Path(self.tmp.name) / "docker"
-        for script, want in [
-                ("echo 'Error response from daemon: get authelia-data: no such volume' >&2;"
-                 " exit 1", None),
-                (f"echo {self.login}", str(self.login)),
-                ("echo /nowhere/at/all", None)]:
-            fake.write_text(f"#!/bin/sh\n{script}\n")
-            fake.chmod(0o755)
-            lh.shutil.which = lambda name, path=None: str(fake)
+        orig_native, orig_unit, orig_legacy = lh.LOGIN_NATIVE_DIR, lh.LOGIN_SERVICE_UNIT, lh.LOGIN_LEGACY_COMPOSE
+        lh.LOGIN_NATIVE_DIR = str(Path(self.tmp.name) / "no-native-login")
+        lh.LOGIN_SERVICE_UNIT = str(Path(self.tmp.name) / "no-native.service")
+        lh.LOGIN_LEGACY_COMPOSE = str(Path(self.tmp.name) / "no-compose.yaml")
+        try:
+            lh.shutil.which = lambda name, path=None: None
             folder, note = lh.find_login()
-            self.assertEqual(folder, want, note)
-        # Docker there but not answering: the last state's folder, if still there
-        fake.write_text("#!/bin/sh\necho 'Cannot connect to the Docker daemon' >&2; exit 1\n")
-        folder, _note = lh.find_login({"login": {"dir": str(self.login)}})
-        self.assertEqual(folder, str(self.login))
+            self.assertIsNone(folder)
+            self.assertIn("no Docker", note)
+            fake = Path(self.tmp.name) / "docker"
+            for script, want in [
+                    ("echo 'Error response from daemon: get authelia-data: no such volume' >&2;"
+                     " exit 1", None),
+                    (f"echo {self.login}", str(self.login)),
+                    ("echo /nowhere/at/all", None)]:
+                fake.write_text(f"#!/bin/sh\n{script}\n")
+                fake.chmod(0o755)
+                lh.shutil.which = lambda name, path=None: str(fake)
+                folder, note = lh.find_login()
+                self.assertEqual(folder, want, note)
+            # Docker there but not answering: the last state's folder, if still there
+            fake.write_text("#!/bin/sh\necho 'Cannot connect to the Docker daemon' >&2; exit 1\n")
+            folder, _note = lh.find_login({"login": {"dir": str(self.login)}})
+            self.assertEqual(folder, str(self.login))
+
+            # Native login folder found directly without invoking Docker
+            lh.LOGIN_NATIVE_DIR = str(self.login)
+            lh.shutil.which = lambda name, path=None: (_ for _ in ()).throw(
+                AssertionError("find_login must not invoke Docker in native mode"))
+            folder, note = lh.find_login()
+            self.assertEqual(folder, str(self.login))
+            self.assertIn(lh.LOGIN_SERVICE, note)
+        finally:
+            lh.LOGIN_NATIVE_DIR, lh.LOGIN_SERVICE_UNIT, lh.LOGIN_LEGACY_COMPOSE = orig_native, orig_unit, orig_legacy
+
+    def test_native_service_restore_stops_and_starts_systemd_unit(self):
+        self.about = dict(self.about, login={"dir": str(self.login),
+                                             "service": lh.LOGIN_SERVICE})
+        self.scope = (self.rules, self.about)
+        orig_active = lh._is_active
+        lh._is_active = lambda name: name == lh.LOGIN_SERVICE
+        try:
+            good = self.snap()["commit"]
+            self.add("phone-2")
+            self.assertEqual(self.names(), ["owner phone", "phone-2"])
+            code, said = self.restore(good)
+            self.assertEqual(code, 0, said)
+            self.assertEqual(self.names(), ["owner phone"])
+            self.assertIn(["systemctl", "stop", lh.LOGIN_SERVICE], self.ran)
+            self.assertIn(["systemctl", "start", lh.LOGIN_SERVICE], self.ran)
+            self.assertFalse(any(a[:1] == ["docker"] for a in self.ran))
+        finally:
+            lh._is_active = orig_active
 
 
 class TestCommand(unittest.TestCase):

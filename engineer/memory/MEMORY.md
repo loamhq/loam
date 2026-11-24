@@ -3171,3 +3171,39 @@ listener for immediate notification in an open page.
   `chat_wait`, ~59 MB zram), whereas multi-job concurrency, Node/browser
   builds, or core-repo landings that run parallel `tests/run-all` are what push
   past 2 GB into 4 GB territory.
+## 2026-11-24 — Native login services (Authelia + Unix-socket Redis outside Docker)
+
+- **Why glibc tarballs, not musl.** Authelia's `-musl` Linux tarballs are
+  dynamically linked against `/lib/ld-musl-x86_64.so.1` (not static) and fail
+  to exec on glibc systems. The regular `linux-amd64.tar.gz` and
+  `linux-arm64.tar.gz` tarballs require at most `GLIBC_2.28`, work across
+  Debian 12/13 and Ubuntu 24.04/26.04, and are pinned in `lib/loam_deploy.py`
+  (`AUTHELIA_BUILDS`) by version + SHA-256 and unpacked into
+  `/opt/loam/authelia/versions/<version>/` with atomic `current` symlink swap.
+- **Session store over private Unix socket + RDB version mismatch.** Authelia
+  4.39.23 has no SQLite/file session provider — only in-memory or Redis — and
+  supports Redis over a Unix socket (`session.redis: {host: '/run/loam-authelia-redis/redis.sock', port: 0}`).
+  `loam-authelia-redis.service` runs the distro's `redis-server` or
+  `valkey-server` as `loam-authelia` with `--port 0`,
+  `RestrictAddressFamilies=AF_UNIX`, `RuntimeDirectoryPreserve=yes` (so a Redis
+  restart does not invalidate `loam-authelia.service`'s bind-mount inode under
+  `ProtectSystem=strict`), and snapshots under `/var/lib/loam-authelia-redis`.
+  Docker's `redis:7.4.12-alpine` writes RDB v12 (`REDIS0012`), which Debian 12's
+  `redis-server` 7.0.15 cannot load (max RDB v10). Live sessions are therefore
+  migrated with a binary-safe Lua `SCAN`+`GET`+`PTTL` RESP exporter piped into
+  native Redis over the Unix socket followed by `SAVE`.
+- **PTY password hashing without argv/env/disk leaks.** `authelia crypto hash
+  generate argon2 --no-confirm` refuses pipes and requires a PTY on both stdin
+  and stdout (`TIOCSWINSZ` ioctl). `loam_deploy.hash_password()` opens a PTY
+  with `ECHO` disabled and writes the password only after the `Password:`
+  prompt.
+- **Safe migration and pre-service rollback.** `bin/gen-deploy` writes a
+  durable `.configuration.yml.container-backup`, copies `users_database.yml`
+  and a clean `sqlite3.backup()` of `db.sqlite3` into `/var/lib/loam-authelia`
+  (or `<data_dir>/login/authelia-data`), starts the native services, and rolls
+  back automatically to the Docker containers if health checks fail — cleaning
+  up old containers, volumes and images only after native login answers
+  `/api/health` and `/api/state`. Rolling back to a pre-service release via
+  `loam update rollback` invokes `gen-deploy --restore-container-login` before
+  re-execing into the older release. `bin/gen-deploy` checks `_claim_is_ancestor()`
+  so a claim-time `gen-deploy` call never kills its own parent `loam-claim.service`.

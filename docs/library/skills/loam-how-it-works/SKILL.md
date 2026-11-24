@@ -361,7 +361,10 @@ for vanished source directories, along with bytecode left idle for 14 days.
 **Sleeping until needed.** To fit smaller servers without losing capability,
 the agents' shared browser and on-demand plugin servers sleep when idle and
 wake automatically on the first request that needs them:
-- **Agents' browser (`loam-browser`) and Docker.** A socket-activated proxy
+- **Agents' browser (`loam-browser`) and Docker.** Loam's login runs as
+  ordinary system services (`loam-authelia.service` and
+  `loam-authelia-redis.service`, outside Docker), so Docker is needed only for
+  the agents' browser and any containerized app. A socket-activated proxy
   (`loam-browser-proxy.socket`) holds `127.0.0.1:8931` and answers session
   handshake and tool-listing calls (`initialize`, `tools/list`, SSE) locally
   without waking Docker or Chromium. On the first browser tool call, it starts
@@ -369,8 +372,9 @@ wake automatically on the first request that needs them:
   `loam-browser` on its internal port, and replays the session handshake
   transparently. Open browser sessions are never stopped mid-use; after ten
   quiet minutes with no open session and no call, `loam-browser` stops — and
-  when no other container needs Docker, Docker and containerd sleep with it.
-  Saved files in `/var/lib/loam/browser` remain on disk.
+  when no other container needs Docker, Docker and containerd sleep with it,
+  on a claimed server as well. Saved files in `/var/lib/loam/browser` remain on
+  disk.
 - **Plugin servers.** Server plugins sleep by default until their first
   request arrives on `/x/<id>/`, the unauthenticated share door `/s/<token>`,
   or their loopback `LOAM_PLUGIN_URL`, and go back to sleep after ten quiet

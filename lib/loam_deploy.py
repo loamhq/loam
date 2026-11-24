@@ -48,9 +48,29 @@ CADDYFILE = Path("/etc/caddy/Caddyfile")
 DAEMON_JSON = Path("/etc/docker/daemon.json")
 AUTHELIA_DIR = ETC / "authelia"
 AUTHELIA_CONFIG = AUTHELIA_DIR / "configuration.yml"
+# Legacy container compose file and pre-migration backup (removed once the
+# native service is proven healthy).
 AUTHELIA_COMPOSE = AUTHELIA_DIR / "compose.yaml"
+AUTHELIA_CONFIG_BACKUP = AUTHELIA_DIR / ".configuration.yml.container-backup"
 AUTHELIA_SECRETS = AUTHELIA_DIR / "secrets.env"
 AUTHELIA_FIRST_LOGIN = AUTHELIA_DIR / "first-login.txt"
+# Native login services (Authelia + local Unix-socket Redis session store),
+# running as their own unprivileged system user so Docker can sleep on a
+# claimed box.
+AUTHELIA_USER = "loam-authelia"
+AUTHELIA_GROUP = "loam-authelia"
+AUTHELIA_ROOT = Path("/opt/loam/authelia")
+AUTHELIA_VERSIONS = AUTHELIA_ROOT / "versions"
+AUTHELIA_BIN = AUTHELIA_ROOT / "current" / "authelia"
+AUTHELIA_KEEP_VERSIONS = 2
+AUTHELIA_DEFAULT_DATA_DIR = Path("/var/lib/loam-authelia")
+AUTHELIA_REDIS_DIR = Path("/var/lib/loam-authelia-redis")
+AUTHELIA_REDIS_RUN_DIR = Path("/run/loam-authelia-redis")
+AUTHELIA_REDIS_SOCKET = AUTHELIA_REDIS_RUN_DIR / "redis.sock"
+AUTHELIA_SERVICE_NAME = "loam-authelia.service"
+AUTHELIA_REDIS_SERVICE_NAME = "loam-authelia-redis.service"
+AUTHELIA_UNIT = Path("/etc/systemd/system") / AUTHELIA_SERVICE_NAME
+AUTHELIA_REDIS_UNIT = Path("/etc/systemd/system") / AUTHELIA_REDIS_SERVICE_NAME
 BROWSER_DIR = ETC / "browser"
 BROWSER_COMPOSE = BROWSER_DIR / "compose.yaml"
 SIGHT_FIREWALL_SCRIPT = BROWSER_DIR / "firewall.sh"
@@ -73,11 +93,26 @@ LOGIN_ASSETS = "/_loam/login"
 # not a default. The firewall script is run by systemd, so it is executable.
 MODES = {SUDOERS: 0o440, SIGHT_FIREWALL_SCRIPT: 0o755}
 
-# Pinned images. An upgrade is an edit here, a `gen-deploy`, and a line in
-# the receipt; never a `:latest` that moves under the box.
-AUTHELIA_IMAGE = "authelia/authelia:4.39.23"
-# Persist login sessions across container restarts. Configure the store to flush on
-# shutdown.
+# Pinned Authelia binary release, verified by SHA-256 checksum on install and
+# upgrade. An upgrade is an edit here, a `gen-deploy`, and a line in the
+# receipt; never a floating latest build.
+AUTHELIA_VERSION = "4.39.23"
+AUTHELIA_BUILDS = {
+    "amd64": {
+        "url": (f"https://github.com/authelia/authelia/releases/download/"
+                f"v{AUTHELIA_VERSION}/authelia-v{AUTHELIA_VERSION}-linux-amd64.tar.gz"),
+        "sha256": "d8a7ff7f14b4130495c05ab5c08e5f0adc4f4ae0ae8989aeb57e9338545473c7",
+    },
+    "arm64": {
+        "url": (f"https://github.com/authelia/authelia/releases/download/"
+                f"v{AUTHELIA_VERSION}/authelia-v{AUTHELIA_VERSION}-linux-arm64.tar.gz"),
+        "sha256": "4779a51ccade132da2744a888ecee2c117f17e1ebb5a3f006851ad2e78005162",
+    },
+}
+# Legacy container images, kept only for migrating/cleaning up pre-service
+# installs and rolling back to an older release that still runs Authelia in
+# Docker.
+AUTHELIA_IMAGE = f"authelia/authelia:{AUTHELIA_VERSION}"
 AUTHELIA_REDIS_IMAGE = "redis:7.4.12-alpine"
 # The pinned browser server supports page evaluation and timer-independent settling.
 # Keep its advertised tools aligned with the configured browser clients.
@@ -568,21 +603,17 @@ FORBIDDEN_SERVICE_KEYS = ("privileged", "cap_add", "devices", "sysctls",
 # have bounded retention.
 APP_LOGGING = {"driver": "journald", "options": {"tag": "{{.Name}}"}}
 
-# The runtime's own two containers, by the name each compose project and each
-# container carries. One home for each: `authelia_compose` and
-# `browser_compose` below render from these, and so does the table beneath
-# them, so a rename cannot leave the drift check looking for the old name.
+# The runtime's own container (the persona browser), plus legacy login
+# container names kept for migration cleanup and drift detection.
 AUTHELIA_PROJECT = "loam-authelia"
 AUTHELIA_REDIS = f"{AUTHELIA_PROJECT}-redis"
 BROWSER_PROJECT = "loam-browser"
 
 # The runtime's own containers and the network each belongs on. Read with the
 # app records below to answer one question of the running box: is anything on
-# a network it has no record for? The login has no `networks:` in its compose
-# file, so it is on that project's implicit default; the browser names its own.
+# a network it has no record for? The login now runs as a native system service,
+# leaving only the persona browser in Docker.
 RUNTIME_CONTAINER_NETWORKS = {
-    AUTHELIA_PROJECT: (f"{AUTHELIA_PROJECT}_default",),
-    AUTHELIA_REDIS: (f"{AUTHELIA_PROJECT}_default",),
     BROWSER_PROJECT: (SIGHT_NETWORK,),
 }
 
@@ -809,6 +840,75 @@ SystemCallArchitectures=native
 [Install]
 WantedBy=multi-user.target
 """
+
+
+def login_findings() -> list[tuple[str, str]]:
+    """Report drift in the native login services: pinned binary, system user,
+    Redis binary, active/enabled state on a claimed box, secret/data permissions,
+    or leftover Docker login containers/compose files. Never wakes Docker."""
+    import pwd  # noqa: PLC0415
+    out: list[tuple[str, str]] = []
+    if not AUTHELIA_BIN.exists():
+        out.append(("authelia binary",
+                    f"{AUTHELIA_BIN} is missing; `sudo {lc.ROOT}/bin/gen-deploy` installs "
+                    f"Authelia {AUTHELIA_VERSION}"))
+    else:
+        live_ver = authelia_live_version()
+        said_ver = authelia_version_of(AUTHELIA_BIN)
+        if live_ver != AUTHELIA_VERSION or said_ver != AUTHELIA_VERSION:
+            out.append(("authelia binary",
+                        f"{AUTHELIA_BIN} points at {live_ver or 'unknown'} and says "
+                        f"{said_ver or 'nothing'}; this release pins {AUTHELIA_VERSION}. "
+                        f"`sudo {lc.ROOT}/bin/gen-deploy` puts the pin in place"))
+    try:
+        pw = pwd.getpwnam(AUTHELIA_USER)
+    except KeyError:
+        pw = None
+        out.append(("authelia user",
+                    f"system user {AUTHELIA_USER!r} is missing; `sudo {lc.ROOT}/bin/gen-deploy` creates it"))
+    redis_bin = Path(redis_server_bin())
+    if not redis_bin.is_file():
+        out.append(("authelia redis binary",
+                    f"{redis_bin} is missing (neither redis-server nor valkey-server is installed); "
+                    f"`sudo {lc.ROOT}/bin/gen-deploy` installs it"))
+    if AUTHELIA_SECRETS.exists():
+        try:
+            st = os.stat(AUTHELIA_SECRETS)
+            if st.st_uid != 0 or (st.st_mode & 0o777) != 0o600:
+                out.append(("authelia secrets",
+                            f"{AUTHELIA_SECRETS} is uid {st.st_uid} mode {st.st_mode & 0o777:04o}; "
+                            f"must be root 0600"))
+        except OSError:
+            pass
+    data_dir = authelia_data_dir()
+    if data_dir.exists() and pw is not None:
+        try:
+            st = os.stat(data_dir)
+            if st.st_uid != pw.pw_uid or st.st_gid != pw.pw_gid or (st.st_mode & 0o077):
+                out.append(("authelia data dir",
+                            f"{data_dir} is {st.st_uid}:{st.st_gid} mode {st.st_mode & 0o777:04o}; "
+                            f"expected {AUTHELIA_USER}:{AUTHELIA_GROUP} 0700"))
+        except OSError:
+            pass
+    if not unclaimed() and AUTHELIA_SECRETS.exists():
+        for unit in (AUTHELIA_REDIS_SERVICE_NAME, AUTHELIA_SERVICE_NAME):
+            active = _sudo(["systemctl", "is-active", unit]).stdout.strip() or "unknown"
+            if active != "active":
+                out.append((unit, f"{unit} is {active}; `sudo {lc.ROOT}/bin/gen-deploy` starts it"))
+            enabled = _sudo(["systemctl", "is-enabled", unit]).stdout.strip() or "unknown"
+            if enabled != "enabled":
+                out.append((unit, f"{unit} is {enabled}, not enabled; `sudo {lc.ROOT}/bin/gen-deploy` enables it"))
+        if AUTHELIA_COMPOSE.exists():
+            out.append(("authelia legacy compose",
+                        f"{AUTHELIA_COMPOSE} still exists; the login runs as {AUTHELIA_SERVICE_NAME} now. "
+                        f"`sudo {lc.ROOT}/bin/gen-deploy` finishes migration and removes it"))
+        if docker_active():
+            for cname in (AUTHELIA_PROJECT, AUTHELIA_REDIS):
+                res = _sudo(["docker", "ps", "-q", "--filter", f"name=^{cname}$"])
+                if res.returncode == 0 and res.stdout.strip():
+                    out.append((cname, f"legacy container {cname} is running beside {AUTHELIA_SERVICE_NAME}; "
+                                       f"`sudo {lc.ROOT}/bin/gen-deploy` moves the login out of Docker"))
+    return out
 
 
 def service_apps(apps: list[App] | None = None) -> list[App]:
@@ -1857,12 +1957,210 @@ def daemon_json() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Authelia
+# Authelia (native system services: loam-authelia + loam-authelia-redis)
 # ---------------------------------------------------------------------------
+
+def authelia_data_dir() -> Path:
+    """Host directory holding users_database.yml, db.sqlite3 and notification.txt:
+    <data_dir>/login/authelia-data on a --data-dir install, /var/lib/loam-authelia
+    on an ordinary install."""
+    return login_data_dir() or AUTHELIA_DEFAULT_DATA_DIR
+
+
+def authelia_arch() -> str:
+    """Map the host architecture to Authelia's release tarball suffix."""
+    import platform  # noqa: PLC0415
+    m = platform.machine().lower()
+    mapped = {"x86_64": "amd64", "amd64": "amd64",
+              "aarch64": "arm64", "arm64": "arm64"}.get(m)
+    if not mapped:
+        raise DeployError(f"unsupported architecture {m!r} for pinned Authelia {AUTHELIA_VERSION}")
+    return mapped
+
+
+def authelia_version_of(binary: Path) -> str | None:
+    """Ask an Authelia binary its version string (e.g. '4.39.23'), or None."""
+    try:
+        done = subprocess.run([str(binary), "--version"], capture_output=True,
+                              text=True, timeout=30, stdin=subprocess.DEVNULL, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = re.search(r"v?(\d+\.\d+\.\d+)", done.stdout or "")
+    return m.group(1) if done.returncode == 0 and m else None
+
+
+def authelia_live_version() -> str | None:
+    """The pinned version directory that AUTHELIA_ROOT/current points at, or None."""
+    link = AUTHELIA_ROOT / "current"
+    try:
+        target = Path(os.readlink(link))
+    except OSError:
+        return None
+    if not target.is_absolute():
+        target = link.parent / target
+    try:
+        rel = target.resolve().relative_to(AUTHELIA_VERSIONS.resolve())
+    except ValueError:
+        return None
+    return rel.parts[0] if rel.parts else None
+
+
+def redis_server_bin() -> str:
+    """The native Redis-compatible server binary for the session store.
+    Prefers redis-server (Debian 12/13, Ubuntu 24.04/26.04) and falls back to
+    valkey-server where Valkey is installed instead."""
+    import shutil  # noqa: PLC0415
+    for cand in ("/usr/bin/redis-server", "/usr/bin/valkey-server"):
+        if Path(cand).is_file():
+            return cand
+    for name in ("redis-server", "valkey-server"):
+        found = shutil.which(name)
+        if found:
+            return found
+    return "/usr/bin/redis-server"
+
+
+def read_env_file(path: Path) -> dict[str, str]:
+    """Parse KEY=VALUE lines from an environment file (such as secrets.env)."""
+    env: dict[str, str] = {}
+    text = read_root_text(path)
+    if not text:
+        return env
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        env[k.strip()] = v.strip()
+    return env
+
+
+def hash_password(password: str, binary: Path | None = None, timeout: float = 60.0) -> str:
+    """Hash `password` to argon2id using the native Authelia binary over a PTY
+    so the password never appears in process argv, environment, or on disk."""
+    import fcntl  # noqa: PLC0415
+    import pty  # noqa: PLC0415
+    import select  # noqa: PLC0415
+    import struct  # noqa: PLC0415
+    import termios  # noqa: PLC0415
+    import time  # noqa: PLC0415
+
+    if "\n" in password or "\r" in password:
+        raise ValueError("password must not contain newline characters")
+    exe = Path(binary) if binary is not None else AUTHELIA_BIN
+    if not exe.is_file():
+        raise RuntimeError(f"Authelia binary not found at {exe}")
+    master, slave = pty.openpty()
+    try:
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+        attrs = termios.tcgetattr(slave)
+        attrs[3] &= ~termios.ECHO
+        termios.tcsetattr(slave, termios.TCSANOW, attrs)
+        proc = subprocess.Popen(
+            [str(exe), "crypto", "hash", "generate", "argon2", "--no-confirm"],
+            stdin=slave, stdout=slave, stderr=subprocess.PIPE,
+            close_fds=True,
+        )
+    except Exception:
+        os.close(master)
+        os.close(slave)
+        raise
+    os.close(slave)
+    chunks: list[bytes] = []
+    sent = False
+    deadline = time.monotonic() + timeout
+    try:
+        while time.monotonic() < deadline:
+            remaining = max(0.05, min(0.2, deadline - time.monotonic()))
+            r, _, _ = select.select([master], [], [], remaining)
+            if r:
+                try:
+                    data = os.read(master, 4096)
+                except OSError:
+                    break
+                if not data:
+                    break
+                chunks.append(data)
+                if not sent and b"Password:" in b"".join(chunks):
+                    os.write(master, password.encode("utf-8") + b"\n")
+                    sent = True
+            if proc.poll() is not None:
+                while True:
+                    r2, _, _ = select.select([master], [], [], 0.05)
+                    if not r2:
+                        break
+                    try:
+                        more = os.read(master, 4096)
+                        if not more:
+                            break
+                        chunks.append(more)
+                    except OSError:
+                        break
+                break
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
+            raise RuntimeError("hashing timed out")
+        _, err_bytes = proc.communicate(timeout=5)
+    finally:
+        os.close(master)
+    out = b"".join(chunks).decode("utf-8", "replace")
+    err = (err_bytes or b"").decode("utf-8", "replace")
+    m = re.search(r"Digest:\s*(\S+)", out)
+    if proc.returncode != 0 or not m:
+        raise RuntimeError(f"hashing failed: {(err or out).strip()[:300]}")
+    return m.group(1)
+
+
+def redis_ping(socket_path: Path = AUTHELIA_REDIS_SOCKET, timeout: float = 3.0) -> bool:
+    """True when the native Redis session store answers +PONG on its Unix socket."""
+    import socket  # noqa: PLC0415
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout)
+            sock.connect(str(socket_path))
+            sock.sendall(b"*1\r\n$4\r\nPING\r\n")
+            return sock.recv(64).startswith(b"+PONG")
+    except OSError:
+        return False
+
+
+def login_health_ok(timeout: float = 3.0) -> tuple[bool, str]:
+    """Prove Authelia is answering both /api/health and /api/state (the latter
+    exercises the configuration and Redis session store)."""
+    import urllib.request  # noqa: PLC0415
+    base = f"http://127.0.0.1:{AUTHELIA_PORT}"
+    try:
+        with urllib.request.urlopen(f"{base}/api/health", timeout=timeout) as resp:
+            body = resp.read().decode("utf-8", "replace")
+            if resp.status != 200 or "OK" not in body:
+                return False, f"/api/health answered {resp.status}"
+    except OSError as exc:
+        return False, f"/api/health unreachable: {exc}"
+    try:
+        cfg = config()
+        portal = f"{cfg['auth_host']}.{cfg['domain']}"
+    except Exception:  # noqa: BLE001
+        portal = "auth.localhost"
+    req = urllib.request.Request(
+        f"{base}/api/state",
+        headers={"X-Forwarded-Host": portal, "X-Forwarded-Proto": "https",
+                 "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8", "replace")
+            if resp.status != 200 or '"status":"OK"' not in body.replace(" ", ""):
+                return False, f"/api/state answered {resp.status}"
+    except OSError as exc:
+        return False, f"/api/state failed (session store or config): {exc}"
+    return True, "healthy"
+
 
 def authelia_config() -> str:
     cfg = config()
     dom, auth = cfg["domain"], cfg["auth_host"]
+    data_dir = authelia_data_dir()
     # First the sentinel that turns second-factor enrolment on (see
     # SECOND_FACTOR_HOST), then any record that asks for two_factor, then
     # every other host at one factor. A passkey login satisfies one_factor.
@@ -1889,7 +2187,9 @@ def authelia_config() -> str:
         cookies.append({"domain": extra, "authelia_url": f"https://{auth}.{extra}"})
     doc = {
         "theme": "auto",
-        "server": {"address": "tcp://0.0.0.0:9091"},
+        # Loopback only: Caddy is the box's one public listener, matching the
+        # container's 127.0.0.1:9091 publish.
+        "server": {"address": f"tcp://127.0.0.1:{AUTHELIA_PORT}"},
         "log": {"level": "info"},
         "totp": {"issuer": dom},
         "webauthn": {
@@ -1916,7 +2216,7 @@ def authelia_config() -> str:
             # An install without mail delivery cannot offer working password-reset emails.
             "password_reset": {"disable": bool(EDGE)},
             "password_change": {"disable": False},
-            "file": {"path": "/data/users_database.yml", "watch": True,
+            "file": {"path": str(data_dir / "users_database.yml"), "watch": True,
                      "search": {"case_insensitive": True}},
         },
         "access_control": {"default_policy": "deny", "rules": rules},
@@ -1934,87 +2234,145 @@ def authelia_config() -> str:
             # domain per device (per month, with remember_me), and a passkey
             # is bound to the domain it was enrolled on.
             "cookies": cookies,
-            # Persist Authelia sessions in the login stack's private Redis service.
-            "redis": {"host": "redis", "port": 6379},
+            # Persist Authelia sessions across service restarts and reboots in
+            # the private Unix-socket Redis service (loam-authelia-redis.service).
+            "redis": {"host": str(AUTHELIA_REDIS_SOCKET), "port": 0},
         },
         "regulation": {"max_retries": 5, "find_time": "2m", "ban_time": "10m"},
-        "storage": {"local": {"path": "/data/db.sqlite3"}},
+        "storage": {"local": {"path": str(data_dir / "db.sqlite3")}},
         # The file notifier is Authelia's test-only notifier and it is the
         # right one here: no mail leaves this box. A password reset or a
-        # one-time code lands in this file inside the volume, readable by
-        # the platform engineer on a brief.
+        # one-time code lands in this file, readable by loam-claim (and the
+        # platform engineer on a brief).
         "notifier": {"disable_startup_check": False,
-                     "filesystem": {"filename": "/data/notification.txt"}},
+                     "filesystem": {"filename": str(data_dir / "notification.txt")}},
     }
     header = (
         "# GENERATED by agents/bin/gen-deploy (lib/loam_deploy.authelia_config).\n"
         "# Do not edit. No secret is in this file: the three Authelia needs are\n"
         f"# environment variables from {AUTHELIA_SECRETS} (root-only), and the\n"
-        "# users file with its argon2id hash lives in the authelia-data volume.\n"
+        f"# users file with its argon2id hash lives in {data_dir}.\n"
     )
     return header + yaml.safe_dump(doc, sort_keys=False, default_flow_style=False)
 
 
-def authelia_compose() -> str:
-    doc = {
-        "name": AUTHELIA_PROJECT,
-        "services": {
-            "authelia": {
-                "image": AUTHELIA_IMAGE,
-                "container_name": AUTHELIA_PROJECT,
-                "restart": "unless-stopped",
-                # The image's entrypoint chowns /config and drops to PUID via
-                # su-exec, which needs CAP_SETGID; with every capability
-                # dropped it loops on "setgroups: Operation not permitted".
-                # Running the binary directly as the container's root is the
-                # daemon's remapped uid 200000 with no capability at all.
-                "entrypoint": ["authelia"],
-                "command": ["--config", "/config/configuration.yml"],
-                "ports": [f"127.0.0.1:{AUTHELIA_PORT}:9091"],
-                "volumes": [
-                    f"{AUTHELIA_CONFIG}:/config/configuration.yml:ro",
-                    "authelia-data:/data",
-                ],
-                "env_file": [str(AUTHELIA_SECRETS)],
-                # Allow the filesystem operations required by Authelia's startup checks.
-                "cap_drop": ["ALL"],
-                "security_opt": ["no-new-privileges:true"],
-                "mem_limit": "256m",
-                "pids_limit": 128,
-                "init": True,
-                "depends_on": ["redis"],
-            },
-            "redis": {
-                "image": AUTHELIA_REDIS_IMAGE,
-                "container_name": AUTHELIA_REDIS,
-                "restart": "unless-stopped",
-                # Run the service binary directly under its configured user. Its image entrypoint
-                # expects ownership-changing privileges.
-                "user": "999:1000",
-                "entrypoint": ["redis-server"],
-                "command": ["--save", "60", "1", "--appendonly", "no",
-                            "--dir", "/data", "--protected-mode", "no",
-                            "--maxmemory", "48mb", "--maxmemory-policy", "volatile-lru"],
-                "volumes": ["authelia-sessions:/data"],
-                "read_only": True,
-                "cap_drop": ["ALL"],
-                "security_opt": ["no-new-privileges:true"],
-                "mem_limit": "64m",
-                "pids_limit": 64,
-                "init": True,
-            },
-        },
-        # External: the volume is state (the users file, the SQLite store,
-        # every passkey) and `compose down -v` must not be able to take it.
-        # `gen-deploy --init-login` creates it. The sessions volume is not
-        # external: losing it costs one login per device, nothing more.
-        "volumes": {"authelia-data": {"external": True, "name": "authelia-data"},
-                    "authelia-sessions": {"name": "authelia-sessions"}},
-    }
-    header = ("# GENERATED by agents/bin/gen-deploy (lib/loam_deploy.authelia_compose).\n"
-              "# Do not edit. The login container: loopback publish only, behind\n"
-              "# Caddy's forward_auth and the auth.<domain> portal block.\n")
-    return header + yaml.safe_dump(doc, sort_keys=False, default_flow_style=False)
+def authelia_redis_unit() -> str:
+    """`loam-authelia-redis.service`: private Unix-socket Redis (or Valkey)
+    session store for Authelia, keeping remembered sessions alive across
+    Authelia restarts and box reboots with no TCP listener and no Docker."""
+    server = redis_server_bin()
+    return (
+        "# GENERATED by agents/bin/gen-deploy (lib/loam_deploy.authelia_redis_unit).\n"
+        "# Do not edit. Private Unix-socket session store for loam-authelia.service:\n"
+        "# mode 0600 owned by loam-authelia, no network socket, flushes dump.rdb on\n"
+        "# clean shutdown so sign-ins survive restarts and reboots.\n"
+        "[Unit]\n"
+        "Description=Loam: sign-in session store (Redis)\n"
+        "After=local-fs.target\n"
+        "\n"
+        "[Service]\n"
+        "Type=notify\n"
+        f"User={AUTHELIA_USER}\n"
+        f"Group={AUTHELIA_GROUP}\n"
+        "UMask=0077\n"
+        "RuntimeDirectory=loam-authelia-redis\n"
+        "RuntimeDirectoryMode=0750\n"
+        "RuntimeDirectoryPreserve=yes\n"
+        "StateDirectory=loam-authelia-redis\n"
+        "StateDirectoryMode=0700\n"
+        f"ExecStart={server} --supervised systemd --port 0 "
+        f"--unixsocket {AUTHELIA_REDIS_SOCKET} --unixsocketperm 600 "
+        f"--dir {AUTHELIA_REDIS_DIR} --save 60 1 --appendonly no "
+        "--maxmemory 48mb --maxmemory-policy volatile-lru\n"
+        "Restart=always\n"
+        "RestartSec=2s\n"
+        "TimeoutStopSec=15s\n"
+        "SyslogIdentifier=loam-authelia-redis\n"
+        "OOMScoreAdjust=0\n"
+        "ProtectSystem=strict\n"
+        "ProtectHome=yes\n"
+        "PrivateTmp=yes\n"
+        "PrivateDevices=yes\n"
+        "ProtectKernelTunables=yes\n"
+        "ProtectKernelModules=yes\n"
+        "ProtectKernelLogs=yes\n"
+        "ProtectControlGroups=yes\n"
+        "ProtectClock=yes\n"
+        "ProtectHostname=yes\n"
+        "RestrictNamespaces=yes\n"
+        "RestrictSUIDSGID=yes\n"
+        "RestrictRealtime=yes\n"
+        "LockPersonality=yes\n"
+        "CapabilityBoundingSet=\n"
+        "AmbientCapabilities=\n"
+        "NoNewPrivileges=yes\n"
+        "RestrictAddressFamilies=AF_UNIX\n"
+        "SystemCallArchitectures=native\n"
+        "SystemCallFilter=@system-service\n"
+        "SystemCallErrorNumber=EPERM\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=multi-user.target\n"
+    )
+
+
+def authelia_unit() -> str:
+    """`loam-authelia.service`: pinned native Authelia binary running as its
+    own unprivileged user on loopback 127.0.0.1:9091, behind Caddy's gate."""
+    data_dir = authelia_data_dir()
+    mounts = f"RequiresMountsFor={lc.DATA_DIR}\n" if lc.DATA_DIR is not None else ""
+    return (
+        "# GENERATED by agents/bin/gen-deploy (lib/loam_deploy.authelia_unit).\n"
+        "# Do not edit. The login service: loopback 127.0.0.1:9091 only, behind\n"
+        "# Caddy's forward_auth and the auth.<domain> portal block. Secrets stay\n"
+        f"# root-only in {AUTHELIA_SECRETS} (loaded by systemd before dropping to\n"
+        f"# {AUTHELIA_USER}).\n"
+        "[Unit]\n"
+        "Description=Loam: sign-in server (Authelia)\n"
+        f"After=network-online.target {AUTHELIA_REDIS_SERVICE_NAME}\n"
+        "Wants=network-online.target\n"
+        f"Requires={AUTHELIA_REDIS_SERVICE_NAME}\n"
+        f"{mounts}"
+        "\n"
+        "[Service]\n"
+        "Type=simple\n"
+        f"User={AUTHELIA_USER}\n"
+        f"Group={AUTHELIA_GROUP}\n"
+        "UMask=0077\n"
+        "Environment=AUTHELIA_SERVER_DISABLE_HEALTHCHECK=true\n"
+        f"EnvironmentFile={AUTHELIA_SECRETS}\n"
+        f"ExecStart={AUTHELIA_BIN} --config {AUTHELIA_CONFIG}\n"
+        "Restart=always\n"
+        "RestartSec=2s\n"
+        "TimeoutStopSec=15s\n"
+        "SyslogIdentifier=loam-authelia\n"
+        "OOMScoreAdjust=0\n"
+        "ProtectSystem=strict\n"
+        f"ReadWritePaths={data_dir} {AUTHELIA_REDIS_RUN_DIR}\n"
+        "ProtectHome=yes\n"
+        "PrivateTmp=yes\n"
+        "PrivateDevices=yes\n"
+        "ProtectKernelTunables=yes\n"
+        "ProtectKernelModules=yes\n"
+        "ProtectKernelLogs=yes\n"
+        "ProtectControlGroups=yes\n"
+        "ProtectClock=yes\n"
+        "ProtectHostname=yes\n"
+        "RestrictNamespaces=yes\n"
+        "RestrictSUIDSGID=yes\n"
+        "RestrictRealtime=yes\n"
+        "LockPersonality=yes\n"
+        "CapabilityBoundingSet=\n"
+        "AmbientCapabilities=\n"
+        "NoNewPrivileges=yes\n"
+        "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK\n"
+        "SystemCallArchitectures=native\n"
+        "SystemCallFilter=@system-service\n"
+        "SystemCallErrorNumber=EPERM\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=multi-user.target\n"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2291,7 +2649,7 @@ def inbound_firewall_unit() -> str:
             "DefaultDependencies=no\n"
             "After=local-fs.target loam-data-disk.service ufw.service firewalld.service\n"
             "Requires=loam-data-disk.service\n"
-            "Before=docker.service caddy.service loam-app@.service loam-claim.service loam-user-manager.service shutdown.target\n"
+            "Before=docker.service caddy.service loam-app@.service loam-authelia.service loam-claim.service loam-user-manager.service shutdown.target\n"
             "Conflicts=shutdown.target\n"
             "\n"
             "[Service]\n"
@@ -2558,7 +2916,8 @@ def generated(today: dt.date | None = None) -> dict[Path, str]:
         CADDYFILE: caddyfile(today),
         DAEMON_JSON: daemon_json(),
         AUTHELIA_CONFIG: authelia_config(),
-        AUTHELIA_COMPOSE: authelia_compose(),
+        AUTHELIA_UNIT: authelia_unit(),
+        AUTHELIA_REDIS_UNIT: authelia_redis_unit(),
         BROWSER_COMPOSE: browser_compose(),
         BROWSER_PROXY_SOCKET: browser_proxy_socket(),
         BROWSER_PROXY_UNIT: browser_proxy_unit(),

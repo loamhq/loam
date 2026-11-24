@@ -25,7 +25,8 @@ together**, oldest entries dropped first, no age limit. At 3.5 GB on
 | **Web requests, per host** (every host Caddy serves: `loam-ui`, `vault`, `files`, `auth` and each site host) | `/var/log/caddy/access/<host>.log`, one JSON line per request; rolled files beside it, gzipped | Rolled by Caddy at 50 MiB; at most 14 rolled files, none older than 14 days | `bin/logs caddy loam-ui` · `sudo tail -F /var/log/caddy/access/loam-ui.example.com.log` |
 | Caddy itself (reloads, certificates, upstream errors) | journal, `caddy.service` | journal | `bin/logs caddy-errors` · `journalctl -u caddy -f` |
 | **An app container's stdout** (`loam-ui` and any other app; where the app's own request lines go) | journal, tag = container name | journal: survives a restart **and** a redeploy | `bin/logs app loam-ui` · `journalctl -t loam-ui -f` |
-| The login (Authelia) | the container's json-file log | 3 × 10 MB, and gone when the container is recreated | `bin/logs authelia` · `sudo docker logs loam-authelia` |
+| The login (Authelia) | journal, `loam-authelia.service` (legacy container installs: json-file log) | journal | `bin/logs authelia` · `journalctl -u loam-authelia -f` |
+| The login session store (Redis) | journal, `loam-authelia-redis.service` | journal | `bin/logs authelia-redis` · `journalctl -u loam-authelia-redis -f` |
 | The persona browser | the container's json-file log | 3 × 10 MB, as above | `bin/logs browser` · `sudo docker logs loam-browser` |
 | The session broker | journal, user unit `loam-session-broker` | journal | `bin/logs broker` · `journalctl --user -u loam-session-broker -f` |
 | One persona session's events | `agents/state/broker/sessions/<id>.jsonl` (with its record `<id>.json`) | **forever**: it is the conversation's record, not a log, and nothing prunes it but a fork's duplicate | `bin/logs broker-session <id>` |
@@ -157,7 +158,6 @@ cat agents/logs/memsample.jsonl.1 agents/logs/memsample.jsonl 2>/dev/null | jq -
   generator refuses one that does not, and `bin/check-drift` asks each running
   container, because a log config only changes when the container is
   recreated (`sudo bin/deploy <app> up <commit>`).
-- The runtime's own two containers (Authelia, the browser) are still on the
-  daemon's json-file default. Moving the login to the journal means
-  recreating it, and its sessions are in memory, so that is one fresh login
-  on every device; it was not done as a side effect.
+- The persona browser container (`loam-browser`) still uses the daemon's
+  json-file default; the login runs outside Docker as `loam-authelia.service`
+  and `loam-authelia-redis.service`, so its logs go straight to the journal.

@@ -87,19 +87,21 @@ def run(argv: list[str], **kw) -> subprocess.CompletedProcess:
 
 
 # ---------------------------------------------------------------------------
-# The login's files, in its data volume
+# The login's files, in its native data directory
 # ---------------------------------------------------------------------------
 
-def ensure_docker() -> None:
-    if not dep.docker_active():
-        run(["systemctl", "start", "docker.service"], timeout=90)
-
-
 def volume_dir() -> Path | None:
-    if dep.unclaimed() and not dep.docker_active():
-        return None
-    import loam_data_disk as dd  # noqa: PLC0415
-    return dd.docker_volume_path("authelia-data", run=run)
+    """Host directory holding users_database.yml and notification.txt:
+    authelia_data_dir() directly on native installs (zero Docker), falling back
+    to Docker's authelia-data volume only while a legacy compose file still
+    stands and Docker is already running."""
+    native = dep.authelia_data_dir()
+    if native.is_dir() or not dep.AUTHELIA_COMPOSE.exists():
+        return native
+    if dep.docker_active():
+        import loam_data_disk as dd  # noqa: PLC0415
+        return dd.docker_volume_path("authelia-data", run=run)
+    return native
 
 
 def users() -> dict:
@@ -115,27 +117,17 @@ def users() -> dict:
 
 
 def hash_password(password: str) -> str:
-    """argon2id by Authelia's own CLI, as `gen-deploy --init-login` does. The
-    password goes in on stdin through the container's environment-free
-    shell, so it is in no argv on the host."""
-    ensure_docker()
-    res = run(["docker", "run", "--rm", "-i", "--network", "none",
-               "--entrypoint", "sh", dep.AUTHELIA_IMAGE, "-c",
-               'IFS= read -r PW; exec authelia crypto hash generate argon2 --password "$PW"'],
-              input=password + "\n", timeout=120)
-    m = re.search(r"Digest:\s*(\S+)", res.stdout)
-    if res.returncode or not m:
-        raise RuntimeError(f"hashing failed: {(res.stderr or res.stdout).strip()[:300]}")
-    return m.group(1)
+    """argon2id by Authelia's own native binary over a PTY, so the password
+    never appears in argv, environment or disk, and Docker is never woken."""
+    return dep.hash_password(password)
 
 
 def write_users(username: str, display: str, digest: str) -> None:
-    ensure_docker()
+    import pwd  # noqa: PLC0415
     domain = dep.domain()
     text = (
         "# The login's users. Written by the claim (bin/loam-claim); Authelia\n"
-        "# rewrites it when the password changes. Lives in the authelia-data\n"
-        "# volume, never in a repo.\n"
+        "# rewrites it when the password changes. Lives outside every repo.\n"
         "users:\n"
         f"  {username}:\n"
         "    disabled: false\n"
@@ -144,13 +136,30 @@ def write_users(username: str, display: str, digest: str) -> None:
         f"    email: '{username}@{domain}'\n"
         "    groups:\n"
         "      - 'admins'\n")
-    res = run(["docker", "run", "--rm", "-i", "--network", "none", "-v",
-               "authelia-data:/data", "--entrypoint", "sh", dep.AUTHELIA_IMAGE, "-c",
-               "umask 077; cat > /data/users_database.yml.new && "
-               "mv /data/users_database.yml.new /data/users_database.yml"],
-              input=text, timeout=120)
-    if res.returncode:
-        raise RuntimeError(f"writing the users file failed: {res.stderr.strip()[:300]}")
+    data_dir = volume_dir() or dep.authelia_data_dir()
+    try:
+        pw = pwd.getpwnam(dep.AUTHELIA_USER)
+        uid, gid = pw.pw_uid, pw.pw_gid
+    except KeyError:
+        uid, gid = os.geteuid(), os.getegid()
+    data_dir.parent.mkdir(parents=True, mode=0o755, exist_ok=True)
+    data_dir.mkdir(mode=0o700, exist_ok=True)
+    if os.geteuid() == 0:
+        os.chown(data_dir, uid, gid)
+    os.chmod(data_dir, 0o700)
+    target = data_dir / "users_database.yml"
+    tmp = target.with_name(f".users_database.yml.new.{os.getpid()}")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        if os.geteuid() == 0:
+            os.chown(tmp, uid, gid)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, target)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def finish_claim() -> None:

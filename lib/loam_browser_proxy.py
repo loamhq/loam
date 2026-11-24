@@ -337,7 +337,9 @@ class DockerController:
 
     def other_containers_need_docker(self) -> bool:
         """True if any container other than `loam-browser` is running or configured to run."""
-        if not dep.unclaimed() and dep.AUTHELIA_SECRETS.exists():
+        # Keep Docker awake only if this install still uses the legacy container
+        # login (compose.yaml present); native loam-authelia.service needs no Docker.
+        if not dep.unclaimed() and dep.AUTHELIA_COMPOSE.exists():
             return True
         if not self.docker_active():
             return False

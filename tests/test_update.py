@@ -1086,6 +1086,58 @@ check("`loam-update update --to 2.1.0 --yes --foreground --no-tell` applies with
        list((SKEW / "state" / "update" / "notices").glob("*.json"))),
       (0, "v2.1.0-only-attr", []))
 
+# -- Rollback across native-login -> pre-service-login boundary ----------------------
+# Verify `_target_has_native_login` distinguishes pre-service and native commits,
+# and `restore_container_login_if_older` invokes `gen-deploy --restore-container-login`
+# only when rolling back to a pre-service commit while native login is installed.
+RB_REPO = TMP / "rb-login-repo"
+RB_REPO.mkdir()
+subprocess.run(["git", "init", "-q", "-b", "main", str(RB_REPO)], check=True)
+write(RB_REPO / "bin" / "gen-deploy", "#!/usr/bin/env python3\n")
+write(RB_REPO / "lib" / "loam_deploy.py", "def authelia_compose():\n    return ''\n")
+git(RB_REPO, "add", "-A")
+git(RB_REPO, "commit", "-qm", "Pre-service login")
+old_commit = git(RB_REPO, "rev-parse", "HEAD")
+write(RB_REPO / "lib" / "loam_deploy.py", "def authelia_unit():\n    return ''\n")
+git(RB_REPO, "add", "-A")
+git(RB_REPO, "commit", "-qm", "Native login service")
+new_commit = git(RB_REPO, "rev-parse", "HEAD")
+
+orig_root = up.lc.ROOT
+orig_subproc = up.subprocess.run
+orig_unit = up.loam_deploy.AUTHELIA_UNIT
+orig_compose = up.loam_deploy.AUTHELIA_COMPOSE
+try:
+    up.lc.ROOT = RB_REPO
+    check("_target_has_native_login is False for pre-service commit and True for native commit",
+          (up._target_has_native_login(old_commit), up._target_has_native_login(new_commit)),
+          (False, True))
+    fake_unit = TMP / "fake-authelia.service"
+    fake_unit.write_text("[Unit]\n", encoding="utf-8")
+    fake_compose = TMP / "fake-authelia-compose.yaml"
+    up.loam_deploy.AUTHELIA_UNIT = fake_unit
+    up.loam_deploy.AUTHELIA_COMPOSE = fake_compose
+    ran_cmds: list[list[str]] = []
+
+    def fake_subproc(argv, **kw):
+        if "gen-deploy" in " ".join(str(a) for a in argv):
+            ran_cmds.append(list(argv))
+            return subprocess.CompletedProcess(argv, 0, "ok", "")
+        return orig_subproc(argv, **kw)
+
+    up.subprocess.run = fake_subproc
+    up.restore_container_login_if_older(new_commit)
+    check("rolling to a native-login commit does NOT invoke --restore-container-login",
+          ran_cmds, [])
+    up.restore_container_login_if_older(old_commit)
+    check("rolling back to a pre-service commit invokes gen-deploy --restore-container-login",
+          len(ran_cmds) == 1 and "--restore-container-login" in ran_cmds[0], True)
+finally:
+    up.lc.ROOT = orig_root
+    up.subprocess.run = orig_subproc
+    up.loam_deploy.AUTHELIA_UNIT = orig_unit
+    up.loam_deploy.AUTHELIA_COMPOSE = orig_compose
+
 shutil.rmtree(TMP, ignore_errors=True)
 print(f"\n{'FAILED' if FAILURES else 'OK'}: {FAILURES} failure(s)")
 sys.exit(1 if FAILURES else 0)

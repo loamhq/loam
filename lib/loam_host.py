@@ -141,10 +141,14 @@ class Rule:
 # new state. Putting it back stops the login's container, removes any
 # journal or WAL beside the database (they belong to the copy being
 # replaced), writes it, and starts the container again.
-LOGIN_VOLUME = "authelia-data"         # loam_deploy.authelia_compose()
-LOGIN_CONTAINER = "loam-authelia"      # loam_deploy.AUTHELIA_PROJECT
-LOGIN_USERS = "users_database.yml"     # authentication_backend.file.path, under /data
-LOGIN_DB = "db.sqlite3"                # storage.local.path, under /data
+LOGIN_VOLUME = "authelia-data"         # legacy Docker volume (pre-service installs)
+LOGIN_CONTAINER = "loam-authelia"      # legacy Docker container
+LOGIN_SERVICE = "loam-authelia.service"
+LOGIN_SERVICE_UNIT = "/etc/systemd/system/loam-authelia.service"
+LOGIN_NATIVE_DIR = "/var/lib/loam-authelia"
+LOGIN_LEGACY_COMPOSE = "/etc/loam/authelia/compose.yaml"
+LOGIN_USERS = "users_database.yml"     # authentication_backend.file.path
+LOGIN_DB = "db.sqlite3"                # storage.local.path
 SQLITE_SIDECARS = ("-journal", "-wal", "-shm")
 # The database is kept whatever its size up to this; the 2 MB limit is for
 # setup files, and this is the one file whose loss locks the owner out.
@@ -219,14 +223,37 @@ def _docker_asleep() -> bool:
         return False
 
 
-def find_login(previous: dict | None = None) -> tuple[str | None, str]:
-    """The host folder of the login's volume, and a sentence saying what was
-    found. ``previous`` is the last state's ``about``: when Docker is there
-    but does not answer, the folder it named last time is used if it is
-    still there, so a Docker restart does not drop the login from a state."""
+def _find_native_login(data_dir: str | Path | None = None) -> tuple[str | None, str]:
+    """Locate the native login service's data directory without touching Docker."""
+    candidates: list[str] = []
+    if data_dir:
+        candidates.append(os.path.join(str(data_dir), "login", "authelia-data"))
+    candidates.append(LOGIN_NATIVE_DIR)
+    native_unit_present = os.path.isfile(LOGIN_SERVICE_UNIT)
+    legacy_compose_present = os.path.isfile(LOGIN_LEGACY_COMPOSE)
+    for cand in candidates:
+        if not os.path.isdir(cand):
+            continue
+        has_files = (os.path.isfile(os.path.join(cand, LOGIN_USERS))
+                     or os.path.isfile(os.path.join(cand, LOGIN_DB)))
+        if native_unit_present or (has_files and not legacy_compose_present):
+            return cand, f"the login's accounts and passkeys, in {cand} (service {LOGIN_SERVICE})"
+    return None, ""
+
+
+def find_login(previous: dict | None = None, *, data_dir: str | Path | None = None) -> tuple[str | None, str]:
+    """The host folder of the login's data (native service dir first, falling
+    back to Docker's `authelia-data` volume on legacy installs), and a sentence
+    saying what was found. ``previous`` is the last state's ``about``: when
+    Docker is there but does not answer, the folder it named last time is used
+    if it is still there, so a Docker restart does not drop the login from a
+    state."""
+    native_dir, native_note = _find_native_login(data_dir)
+    if native_dir:
+        return native_dir, native_note
     docker = shutil.which("docker", path=ENV["PATH"])
     if not docker:
-        return None, "no Docker on this machine, so no login database to keep"
+        return None, "no native login folder and no Docker on this machine, so no login database to keep"
     if _docker_asleep():
         last = ((previous or {}).get("login") or {}).get("dir", "")
         if last and os.path.isdir(last):
@@ -330,11 +357,18 @@ def rules(cfg=None, previous: dict | None = None) -> tuple[list[Rule], dict]:
         Rule(f"{home}/.ssh", "config", "which key reaches which git host"),
     ]
     about = {"user": user, "user_units": units, "config_dir": str(config_file.parent)}
-    folder, note = find_login(previous)
+    data_dir = getattr(cfg, "DATA_DIR", None)
+    try:
+        folder, note = find_login(previous, data_dir=data_dir)
+    except TypeError:
+        folder, note = find_login(previous)
     if folder:
         out += login_rules(folder)
-        about["login"] = {"dir": folder, "container": LOGIN_CONTAINER,
-                          "volume": LOGIN_VOLUME}
+        if f"(service {LOGIN_SERVICE})" in note:
+            about["login"] = {"dir": folder, "service": LOGIN_SERVICE}
+        else:
+            about["login"] = {"dir": folder, "container": LOGIN_CONTAINER,
+                              "volume": LOGIN_VOLUME}
     about["_login_note"] = note
     return out, about
 
@@ -820,7 +854,8 @@ class After:
     compose: list = None
     other: list = None
     user: str = ""
-    login: str = ""          # the login's container, when its files are written
+    login: str = ""          # the login's service or container, when its files are written
+    login_kind: str = ""     # "service" | "container"
     login_db: list = None    # databases written there, whose journals go
     login_dir: str = ""
 
@@ -842,10 +877,16 @@ def consequences(steps: list[Step], about: dict) -> After:
     a = After(start=[], stop=[], restart=[], compose=[], other=[], user=about.get("user", ""),
               login_db=[])
     folder = login_dir(about)
+    login_meta = (about.get("login") or {})
     for s in steps:
         p = s.path
         if folder and p.startswith(folder.rstrip("/") + "/"):
-            a.login = (about.get("login") or {}).get("container", LOGIN_CONTAINER)
+            if login_meta.get("service"):
+                a.login = login_meta["service"]
+                a.login_kind = "service"
+            else:
+                a.login = login_meta.get("container", LOGIN_CONTAINER)
+                a.login_kind = "container"
             a.login_dir = folder
             if os.path.basename(p) == LOGIN_DB or p.endswith((".sqlite3", ".sqlite", ".db")):
                 a.login_db.append(p)
@@ -880,6 +921,11 @@ def consequences(steps: list[Step], about: dict) -> After:
             f = p if name in COMPOSE else _compose_beside(p)
             if f not in a.compose:
                 a.compose.append(f)
+        elif (p.startswith(about.get("config_dir", "/etc/loam") + "/authelia/")
+              and name in ("configuration.yml", "secrets.env")
+              and not _compose_beside(p)
+              and (login_meta.get("service") or os.path.isfile(LOGIN_SERVICE_UNIT))):
+            a.restart.append(("system", login_meta.get("service") or LOGIN_SERVICE))
         else:
             a.other.append(p)
     # a unit both started and restarted is only started
@@ -1045,9 +1091,14 @@ def apply(steps: list[Step], after: After, about: dict) -> list[str]:
             _run(_systemctl(scope, user) + ["stop", unit], said)
     login_was_running = False
     if after.login:
-        login_was_running = _container_running(after.login)
-        if login_was_running:
-            _run(["docker", "stop", after.login], said)
+        if after.login_kind == "service":
+            login_was_running = have_systemctl and _is_active(after.login)
+            if login_was_running:
+                _run(["systemctl", "stop", after.login], said)
+        else:
+            login_was_running = _container_running(after.login)
+            if login_was_running:
+                _run(["docker", "stop", after.login], said)
         for db in after.login_db:
             for side in SQLITE_SIDECARS:
                 with contextlib.suppress(FileNotFoundError):
@@ -1077,7 +1128,10 @@ def apply(steps: list[Step], after: After, about: dict) -> list[str]:
     if after.sysctl and shutil.which("sysctl", path=ENV["PATH"]):
         _run(["sysctl", "--system", "-q"], said)
     if login_was_running:
-        _run(["docker", "start", after.login], said)
+        if after.login_kind == "service":
+            _run(["systemctl", "start", after.login], said)
+        else:
+            _run(["docker", "start", after.login], said)
     elif after.login:
         said.append(f"  the login ({after.login}) was not running, so it was not started")
     if after.compose and shutil.which("docker", path=ENV["PATH"]):

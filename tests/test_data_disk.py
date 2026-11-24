@@ -324,51 +324,31 @@ class TestDockerLoginVolumeAndDrift(unittest.TestCase):
             folder, note = lh.find_login()
         self.assertEqual(folder, str(login_dir), note)
 
-    def test_gen_deploy_ensure_login_volume_plain_vs_data_dir(self):
+    def test_gen_deploy_ensure_login_data_dir_plain_vs_data_dir(self):
         gd = load_cmd("gen-deploy")
-        calls = []
-
-        def fake_run(argv, **kw):
-            calls.append(argv)
-            if argv[:3] == ["docker", "volume", "inspect"]:
-                return subprocess.CompletedProcess(argv, 1, "", "no such volume")
-            return subprocess.CompletedProcess(argv, 0, "authelia-data\n", "")
-
-        # Without data_dir: plain volume create, unchanged.
-        with patch.object(gd.dep, "login_data_dir", return_value=None), \
-                patch.object(gd, "run", side_effect=fake_run):
-            gd.ensure_login_volume()
-        self.assertEqual(calls, [["docker", "volume", "create", "authelia-data"]])
-
-        # With data_dir: bind-backed local volume + ownership aligned.
-        calls.clear()
-        target = self.base / "disk" / "login" / "authelia-data"
+        plain_dir = self.base / "default-authelia"
         me = (os.getuid(), os.getgid())
+
+        # Without data_dir: creates default native dir with 0700 ownership.
+        with patch.object(gd.dep, "login_data_dir", return_value=None), \
+                patch.object(gd.dep, "AUTHELIA_DEFAULT_DATA_DIR", plain_dir), \
+                patch.object(gd, "_authelia_ids", return_value=me):
+            gd.ensure_login_data_dir(dry=False)
+        self.assertTrue(plain_dir.is_dir())
+        self.assertEqual(plain_dir.stat().st_mode & 0o777, 0o700)
+
+        # With data_dir: creates <data_dir>/login/authelia-data directly without Docker.
+        target = self.base / "disk" / "login" / "authelia-data"
         with patch.object(gd.dep, "login_data_dir", return_value=target), \
-                patch.object(gd.dep, "docker_root_owner", return_value=me), \
-                patch.object(gd, "run", side_effect=fake_run):
-            gd.ensure_login_volume()
+                patch.object(gd, "_authelia_ids", return_value=me):
+            gd.ensure_login_data_dir(dry=False)
         self.assertTrue(target.is_dir())
         self.assertEqual(target.stat().st_mode & 0o777, 0o700)
-        self.assertIn(
-            ["docker", "volume", "create", "--driver", "local",
-             "--opt", "type=none", "--opt", "o=bind",
-             "--opt", f"device={target}", "authelia-data"],
-            calls)
-
-        # Idempotent when volume already points at target.
-        calls.clear()
-        existing_json = json.dumps({"Options": {"device": str(target)}})
-
-        def fake_existing(argv, **kw):
-            calls.append(argv)
-            return subprocess.CompletedProcess(argv, 0, existing_json, "")
-
+        # Idempotent on re-run.
         with patch.object(gd.dep, "login_data_dir", return_value=target), \
-                patch.object(gd.dep, "docker_root_owner", return_value=me), \
-                patch.object(gd, "run", side_effect=fake_existing):
-            gd.ensure_login_volume()
-        self.assertFalse(any(c[:3] == ["docker", "volume", "create"] for c in calls))
+                patch.object(gd, "_authelia_ids", return_value=me):
+            gd.ensure_login_data_dir(dry=False)
+        self.assertTrue(target.is_dir())
 
     def test_drift_findings_clean_and_broken_states(self):
         data_dir = self.base / "disk"
@@ -390,11 +370,51 @@ class TestDockerLoginVolumeAndDrift(unittest.TestCase):
             data_dir, home, uid=1000, etc=etc, local_base=local_base,
             systemd_dir=systemd_dir, enable=False)
 
-        good_docker = lambda cmd: subprocess.CompletedProcess(
-            cmd, 0, json.dumps({"Options": {"device": str(dd.login_data_dir(data_dir))}}), "")
+        # Native login mode: checks configuration.yml without waking Docker.
+        auth_dir = etc / "authelia"
+        auth_dir.mkdir(parents=True)
+        cfg = auth_dir / "configuration.yml"
+        cfg.write_text(
+            f"authentication_backend:\n  file:\n    path: {dd.login_data_dir(data_dir)}/users_database.yml\n"
+            f"storage:\n  local:\n    path: {dd.login_data_dir(data_dir)}/db.sqlite3\n",
+            encoding="utf-8",
+        )
+        docker_called = []
+
+        def fail_if_docker_called(cmd):
+            docker_called.append(cmd)
+            raise AssertionError("Docker should not be invoked in native login mode")
+
         good_systemd = lambda cmd: subprocess.CompletedProcess(cmd, 0, "enabled\n", "")
 
-        # All checks green -> 0 findings.
+        with patch.object(dd, "is_separate_mount", return_value=True), \
+                patch.object(dd, "is_bind_mounted", return_value=True):
+            got = dd.drift_findings(
+                data_dir, home, etc=etc, local_base=local_base, fstab=fstab,
+                uid=1000, systemd_dir=systemd_dir,
+                docker_run=fail_if_docker_called, systemd_run=good_systemd)
+        self.assertEqual(got, [])
+        self.assertEqual(docker_called, [])
+
+        # Native login config pointing outside data disk -> reported without Docker.
+        cfg.write_text(
+            "authentication_backend:\n  file:\n    path: /var/lib/loam-authelia/users_database.yml\n"
+            "storage:\n  local:\n    path: /var/lib/loam-authelia/db.sqlite3\n",
+            encoding="utf-8",
+        )
+        with patch.object(dd, "is_separate_mount", return_value=True), \
+                patch.object(dd, "is_bind_mounted", return_value=True):
+            got = dd.drift_findings(
+                data_dir, home, etc=etc, local_base=local_base, fstab=fstab,
+                uid=1000, systemd_dir=systemd_dir,
+                docker_run=fail_if_docker_called, systemd_run=good_systemd)
+        self.assertIn("data disk login config", [g[0] for g in got])
+
+        # Legacy Docker compose mode: still checks Docker bind volume.
+        cfg.unlink()
+        (auth_dir / "compose.yaml").write_text("services:\n  authelia: {}\n", encoding="utf-8")
+        good_docker = lambda cmd: subprocess.CompletedProcess(
+            cmd, 0, json.dumps({"Options": {"device": str(dd.login_data_dir(data_dir))}}), "")
         with patch.object(dd, "is_separate_mount", return_value=True), \
                 patch.object(dd, "is_bind_mounted", return_value=True):
             got = dd.drift_findings(

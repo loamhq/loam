@@ -64,7 +64,7 @@ The rules (`rules()` in lib/loam_host.py):
 
 | Where | What |
 |---|---|
-| `/etc/loam/**` | Loam's config (`loam.toml`, `deploy.toml`) and what `gen-deploy` renders there: the login's and the browser's compose files and walls, Authelia's config and secrets file, the login page, share links |
+| `/etc/loam/**` | Loam's config (`loam.toml`, `deploy.toml`) and what `gen-deploy` renders there: the browser's compose file and walls, Authelia's config and secrets file, the login page, share links |
 | `/etc/caddy/**` | the web server's config |
 | `/etc/systemd/system/loam*`, `loam*.d/*`, `*.wants/loam*`, `caddy.service.d/*`, `docker.service.d/*` | Loam's system units, their drop-ins, and which are enabled |
 | `/etc/sudoers.d/loam*`, `/etc/sysctl.d/*loam*`, `/etc/docker/daemon.json`, `/etc/claude-code/managed-settings.json`, `/etc/profile.d/loam.sh`, `/usr/local/bin/loam` | the system settings Loam installs |
@@ -74,25 +74,27 @@ The rules (`rules()` in lib/loam_host.py):
 | `<state>/broker/settings.json`, `<state>/plugins/*.json`, `keys/*`, `lanes/*`, `<state>/sites/*.toml`, `<state>/github/*.json` | the owner's settings, which built-in plugins are on, the plugins' keys, the agents' sites, the GitHub connection |
 | the checkout's `projects/*.json` and `deploy/*/*` that git does not track | this install's own project and app records (a tracked file has the checkout's history, and an old one must never be put over a newer release's) |
 | `~/.ssh/config` | which key reaches which git host |
-| the login's volume (`authelia-data`): `users_database.yml`, `db.sqlite3` | the login's accounts and their password hashes; its passkeys and one-time-password secrets. Only where Docker and that volume are found; see below |
+| the login's data folder (`/var/lib/loam-authelia` or `<data_dir>/login/authelia-data`; legacy Docker volume `authelia-data`): `users_database.yml`, `db.sqlite3` | the login's accounts and their password hashes; its passkeys and one-time-password secrets; see below |
 
 ## The login's accounts and passkeys
 
-*Since 2026-11-19 (the same day, a second job).* The login (Authelia) keeps
-the accounts and their password hashes in a users file and the passkeys
-and one-time-password secrets in a SQLite database, both in the Docker
-volume `authelia-data`. Without them in the history, a restore could put
-back the login's config while the owner's passkey was gone.
+*Since 2026-11-19 (updated 2026-11-24 for the native login service).* The login
+(Authelia) keeps the accounts and their password hashes in a users file and the
+passkeys and one-time-password secrets in a SQLite database, stored directly in
+`/var/lib/loam-authelia` (or `<data_dir>/login/authelia-data` with
+`--data-dir`; older pre-migration installs kept them in the Docker volume
+`authelia-data`). Without them in the history, a restore could put back the
+login's config while the owner's passkey was gone.
 
-**Found, not assumed.** Each snapshot asks Docker where the volume is
-(`docker volume inspect`); with user namespaces remapped it is under
-`/var/lib/docker/<uid>.<gid>/`, and elsewhere somewhere else. No Docker, or
-no such volume (an install without the login), and there is nothing to keep
-and nothing is said; `sudo loam host covered` says which it found. If
-Docker is there but does not answer, the folder the last state found is
-used while it still exists, so a Docker restart does not drop the login
-from a state. A folder Docker names that this machine cannot reach (Docker
-running in a VM) is not kept, and `covered` says so.
+**Found without waking Docker.** When `loam-authelia.service` or its native
+data directory is present, each snapshot reads `users_database.yml` and
+`db.sqlite3` directly without invoking Docker, so snapshots never wake a
+sleeping Docker daemon. On older installs that still use the container login
+(where `/etc/loam/authelia/compose.yaml` exists and `loam-authelia.service`
+does not), it falls back to `docker volume inspect authelia-data` (and caches
+the last seen folder if Docker does not answer). No login data directory means
+there is nothing to keep and nothing is said; `sudo loam host covered` says
+which path it found.
 
 **Copied without stopping the login.** The database is not copied as a
 file: a file copy of a live SQLite database can catch a write half done.
@@ -135,13 +137,14 @@ ends its list, just above the question (and again below a diff), with:
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 ```
 
-When it goes ahead it stops the login's container (`docker stop
-loam-authelia`), removes any `-journal`, `-wal` or `-shm` beside the
-database (they belong to the copy being replaced, and replaying them onto
-the restored one would corrupt it), writes the files with their owner and
-mode, and starts the container again. A login that was not running is
-left stopped, and the restore says so. Sessions are in Redis, not in this
-volume, so a restore does not sign anyone out.
+When it goes ahead it stops the login service (`systemctl stop
+loam-authelia.service`, or `docker stop loam-authelia` on a legacy container
+state), removes any `-journal`, `-wal` or `-shm` beside the database (they
+belong to the copy being replaced, and replaying them onto the restored one
+would corrupt it), writes the files with their owner and mode, and starts the
+login again. A login that was not running is left stopped, and the restore says
+so. Sessions are in Redis (`loam-authelia-redis.service`), not in this folder,
+so a restore does not sign anyone out.
 
 **One thing a restore cannot do**: a passkey's signature counter. Authelia
 refuses a passkey whose counter is lower than the one it stored, as a sign
@@ -169,10 +172,10 @@ terminal, and the passkey alone then signed in.
 - **Plugins' private data** (`<state>/plugins/private/`): each plugin's
   own.
 - **Caddy's certificates and data**: private keys it re-issues by itself.
-- **Docker images, containers, and volumes other than the login's two
-  files**: rebuilt from the covered compose files; an app's own data is the
-  app's. The login's sessions (Redis, `authelia-sessions`) cost one sign-in
-  per device if lost; its notification file holds one-time codes, not setup.
+- **Docker images, containers, and app volumes**: rebuilt from the covered
+  compose files; an app's own data is the app's. The login's sessions
+  (`/var/lib/loam-authelia-redis`) cost one sign-in per device if lost; its
+  notification file holds one-time codes, not setup.
 - **Packages, the kernel, the network, the base firewall**: the operating
   system's, not Loam's. A whole-machine snapshot is the provider's or the
   person's own tool (and many machines Loam runs on have none).
@@ -216,8 +219,8 @@ timer off or its units stale.
 Linux with systemd: the system manager, and a user manager for Loam's user
 (`systemctl --user -M <user>@`, systemd 248 or later). git, Python 3.11 and
 `tar`. Caddy is validated and reloaded only when it is installed; Docker
-Compose files are re-applied, and the login's files kept and put back, only
-when Docker is. Nothing assumes a cloud
+Compose files are re-applied only when Docker is present and the restored state
+carries them. Nothing assumes a cloud
 provider, a snapshot API or one machine's paths: every path comes from
 `/etc/loam/loam.toml`, the user's home and the standard places (`/etc`,
 `/var/lib`, `/var/spool/cron`).

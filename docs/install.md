@@ -103,11 +103,9 @@ Loam's symlink-refusing guards all behave identically to a single-disk install:
     switches/keys/private state including Git backup keys, GitHub connection,
     agent sites, project registry, schedules, reviewer state, reports, jobs
     metadata, logs, attention, autocommit and update records).
-  - `DIR/login/authelia-data` — mounted into the `authelia-data` Docker volume
-    using Docker's `local` bind driver (`type=none,o=bind,device=...`), keeping
-    `users_database.yml` and `db.sqlite3` (passwords, TOTP, passkeys) on the
-    data disk. `bin/gen-deploy` aligns its ownership to the server's remapped
-    Docker root (`dockremap`).
+  - `DIR/login/authelia-data` — used directly by `loam-authelia.service` (owned
+    by `loam-authelia:loam-authelia`, mode `0700`), keeping `users_database.yml`
+    and `db.sqlite3` (passwords, TOTP, passkeys) on the data disk outside Docker.
 - **On the server's local disk**:
   - Seven overlays under `/var/lib/loam/local/` bind-mounted back on top inside
     `/home/<user>` so heavy I/O, build scratch and reproducible files stay on
@@ -117,10 +115,11 @@ Loam's symlink-refusing guards all behave identically to a single-disk install:
     per server), and `.local/state/loam/worktrees` (engineer job checkouts and
     builds).
   - System paths on `/`: `/var/lib/loam/{install,edge.json,browser,host-history,swapfile}`,
-    `/var/lib/loam-releases/`, `/var/lib/loam-app/`, `/var/lib/docker/`
-    (images, containers, ephemeral `authelia-sessions`), `/var/lib/caddy/`
-    (TLS certificates, re-issued automatically), `/var/cache/loam/`,
-    `/opt/loam/chromium/`, `/tmp/loam-job-*`.
+    `/var/lib/loam-releases/`, `/var/lib/loam-app/`, `/var/lib/loam-authelia-redis/`
+    (ephemeral login sessions), `/opt/loam/authelia/` (pinned Authelia binary),
+    `/var/lib/docker/` (images and containers for the agents' browser and any
+    containerized apps), `/var/lib/caddy/` (TLS certificates, re-issued
+    automatically), `/var/cache/loam/`, `/opt/loam/chromium/`, `/tmp/loam-job-*`.
 
 ## Memory floor and automatic swap
 
@@ -194,18 +193,19 @@ No `--domain`, `--name`, `--owner` or `--timezone` is needed:
    starter files, skip `seed-starter` and `preinstall-plugins`, re-provision
    existing live agents, reconcile all schedules and enabled plugin servers and
    timers, and take a fresh server host-history snapshot.
-5. Steps 10–11 align `DIR/login/authelia-data` ownership to the new server's
-   `dockremap` UID/GID, attach the `authelia-data` Docker volume, start
-   Authelia immediately against the preserved login (skipping `/claim` when
-   already claimed), deploy the app to local `/var/lib/loam-releases/`, and
-   issue fresh TLS certificates once DNS points to the new server.
+5. Steps 10–11 align `DIR/login/authelia-data` ownership to `loam-authelia`,
+   install the pinned Authelia binary, start `loam-authelia-redis.service` and
+   `loam-authelia.service` immediately against the preserved login (skipping
+   `/claim` when already claimed, without waking Docker), deploy the app to
+   local `/var/lib/loam-releases/`, and issue fresh TLS certificates once DNS
+   points to the new server.
 
 `loam update`, `bin/check-drift`, `loam status`, autocommit and Git backup all
 work without writing person data to the server's root disk. `bin/check-drift`
 and `loam status` also check that the data disk is mounted separately, has a
 persistent mount entry in `/etc/fstab` (or a systemd `.mount` unit), all nine
 bind mounts and the `/etc/fstab` block match, `loam-data-disk.service` and its
-ordering drop-ins match, and `authelia-data` points at
+ordering drop-ins match, and Authelia's configuration points at
 `DIR/login/authelia-data`.
 
 ### Boot mount ordering and missing volumes
@@ -223,11 +223,12 @@ To prevent both without any cloud-specific code, a `--data-dir` install installs
 with `RequiresMountsFor=` covering `DIR` and all nine bind targets) plus
 `10-loam-data-disk.conf` drop-ins (`Requires=loam-data-disk.service` and
 `After=loam-data-disk.service`) on `docker.service`, `caddy.service`,
-`loam-app@.service`, `loam-claim.service`, `loam-user-manager.service`,
-`user@<uid>.service`, `loam-swap.service`, `loam-browser-proxy.service`,
-`loam-docker-idle.service`, `loam-await-dns.service` and
-`loam-host-history.service`. `loam-inbound-firewall.service` is likewise
-ordered after `loam-data-disk.service` and before Loam's listeners (omitting
+`loam-app@.service`, `loam-authelia.service`, `loam-claim.service`,
+`loam-user-manager.service`, `user@<uid>.service`, `loam-swap.service`,
+`loam-browser-proxy.service`, `loam-docker-idle.service`,
+`loam-await-dns.service` and `loam-host-history.service`.
+`loam-inbound-firewall.service` is likewise ordered after
+`loam-data-disk.service` and before Loam's listeners (omitting
 `Before=network-pre.target` so a detached volume never delays networking or
 SSH).
 
@@ -235,7 +236,7 @@ SSH).
   and all nine bind mounts, verifies `DIR` is a separate filesystem with a
   valid `loam-data.json`, and releases Loam's services in order.
 - **Volume detached at boot:** SSH comes up immediately; `loam-data-disk.service`
-  fails cleanly and holds every Loam service (including Docker/Authelia and
+  fails cleanly and holds every Loam service (including Authelia, Docker and
   `user@<uid>.service`) back so nothing writes beneath empty `/etc/loam` or
   `/home/<user>` on the root disk. Once the volume is attached later, run
   `sudo /var/lib/loam/local/loam/bin/loam-data-disk up` to mount and bring Loam
@@ -246,10 +247,10 @@ SSH).
 - **Never run two servers against the same data disk at once**, and do not run
   old and new servers concurrently with copied OAuth refresh tokens (providers
   rotate refresh tokens on use).
-- **Custom stateful Docker app volumes** created outside Loam's core (other
-  than `authelia-data`) stay under `/var/lib/docker/` unless backed by a bind
-  path under `DIR`. Source repositories in `~/projects/` and agent static sites
-  in `state/sites/` move with the disk.
+- **Custom stateful Docker app volumes** created outside Loam's core stay under
+  `/var/lib/docker/` unless backed by a bind path under `DIR`. Source
+  repositories in `~/projects/` and agent static sites in `state/sites/` move
+  with the disk.
 - **Local commits directly inside `paths.root` (`/home/loam/loam`)** live on
   the server disk (reinstalled from the release on a new server). Keep
   customisations as plugins under `~/plugins/`, which live on the data disk.
@@ -342,7 +343,7 @@ reads it).
 | — | bootstrap (`install.sh`) | root; git, curl, Python and certificates if missing; finds the newest release tag (`git ls-remote`), clones it to `/var/lib/loam/install/release`; runs that release's `bin/loam-install` |
 | 1 | preflight | Debian 12 or 13, or Ubuntu 24.04 or 26.04; memory, disk; ports 80 and 443 free (Caddy itself excepted, for a re-run); the box's public IPv4 from its route; where it lives (`--domain`, `--name`, or asked) and the owner's name and the zone; writes `/etc/loam/loam.toml` (never rewritten after: it is the person's) |
 | 2 | the name | a name: `lib/loam_install.name_check` (below). Taken: stop. Here: go on. Not yet: print the two records and go on. An own domain: `domain_check`; never stops; prints what is missing and the two records |
-| 3 | packages | git, python3 and python3-yaml, sqlite3, ripgrep, ffmpeg, nftables, iptables, sudo, bind9-dnsutils and the rest, with `fonts-noto-core` and a Chromium headless shell for the app's page previews (Debian's `chromium-headless-shell` package; on Ubuntu, which has none, Playwright's at a pinned version, linked as `/usr/local/bin/chromium-headless-shell`); Caddy, Docker CE (the login and the agents' browser run in it; the app does not) and Node 24 from their own apt repositories |
+| 3 | packages | git, python3 and python3-yaml, sqlite3, ripgrep, ffmpeg, nftables, iptables, sudo, bind9-dnsutils and the rest, `redis-server` (or `valkey-server`, with its default TCP service left disabled so only Loam's private Unix-socket unit runs), `fonts-noto-core` and a Chromium headless shell for the app's page previews (Debian's `chromium-headless-shell` package; on Ubuntu, which has none, Playwright's at a pinned version, linked as `/usr/local/bin/chromium-headless-shell`); Caddy, Docker CE (for the agents' browser and any containerized apps; neither the app nor the login runs in it) and Node 24 from their own apt repositories |
 | 4 | the user | `loam`, with lingering, `sudo` (NOPASSWD: the agents get the whole machine); the zone; `PYTHONPYCACHEPREFIX` for its services, shells and sudo, so Python never writes into the checkout; Docker's `daemon.json` before anything uses Docker |
 | 5 | Loam | the release cloned to `paths.root` (`/home/loam/loam`), `origin` set to the source; the vault, workspaces, projects and plugins folders (plugins a git repo); uv; the MCP servers' Python; `/usr/local/bin/loam` |
 | 6 | the vault | `bin/library seed-vault`; the vault and workspaces made git repos; **`<workspaces>/_shared/reach.md` written** (below) |
@@ -437,21 +438,22 @@ The other hosts keep their usual gate. On an unclaimed install,
   letters, digits, hyphens or underscores and start with a letter. They
   are saved in lowercase and matched without regard to case by Authelia.
   Passwords have at least 10 characters.
-- **202** accepts the submission. A worker runs Authelia's Argon2id hash
-  with the password supplied on stdin, writes the admin to the
-  `authelia-data` volume, records `/etc/loam/claimed` and removes the
-  token. Simultaneous submissions receive **409** while the worker is
-  saving and **410** once the account exists.
+- **202** accepts the submission. A worker runs the native Authelia binary's
+  Argon2id hash over a private PTY (never in argv, environment or on disk),
+  writes the admin to `/var/lib/loam-authelia/users_database.yml` (or
+  `<data_dir>/login/authelia-data/users_database.yml` with `--data-dir`),
+  records `/etc/loam/claimed` and removes the token. Simultaneous submissions
+  receive **409** while the worker is saving and **410** once the account exists.
 - `GET /claim?status` gives the stage of setup without account details.
   If saving fails, the welcome link can be used again. Once sign-in is
   saved, the browser can be closed. A restart of the service resumes
   activation when the claim route is still on disk.
-- `gen-deploy` starts Authelia and waits for its health endpoint before
-  replacing the claim route with the gated app. The browser sees the new
-  gate redirect and goes to the apex, which takes the owner to sign-in.
-  A failed reload keeps the claim route on disk so activation can be
-  retried. `loam status` gives the operator recovery steps if those
-  retries run out.
+- `gen-deploy` starts `loam-authelia-redis.service` and `loam-authelia.service`
+  (outside Docker) and waits for Authelia's health endpoint before replacing
+  the claim route with the gated app. The browser sees the new gate redirect
+  and goes to the apex, which takes the owner to sign-in. A failed reload keeps
+  the claim route on disk so activation can be retried. `loam status` gives the
+  operator recovery steps if those retries run out.
 
 `bin/loam-claim` serves `app/public/claim.html` from its release. The
 page is self-contained, with inline CSS and JavaScript and two embedded

@@ -64,6 +64,7 @@ ORDERED_UNITS: tuple[str, ...] = (
     "docker.service",
     "caddy.service",
     "loam-app@.service",
+    "loam-authelia.service",
     "loam-claim.service",
     "loam-user-manager.service",
     "loam-swap.service",
@@ -822,7 +823,31 @@ def drift_findings(data_dir: Path, home: Path, *, etc: Path = Path("/etc/loam"),
                     f"{state}; run `sudo systemctl enable {GATE_UNIT_NAME}`",
                 ))
 
-    if check_docker:
+    want_login = login_data_dir(data_dir)
+    if not want_login.is_dir():
+        findings.append((
+            "data disk login dir",
+            str(want_login),
+            "missing login data directory on the data disk",
+        ))
+    authelia_cfg = etc / "authelia" / "configuration.yml"
+    legacy_compose = etc / "authelia" / "compose.yaml"
+    if authelia_cfg.is_file() and not legacy_compose.exists():
+        # Native loam-authelia.service mode: verify configuration.yml points
+        # directly at the data disk rather than /var/lib/loam-authelia (no Docker needed).
+        try:
+            cfg_text = authelia_cfg.read_text(encoding="utf-8")
+        except OSError:
+            cfg_text = ""
+        want_str = str(want_login)
+        if f"{want_str}/users_database.yml" not in cfg_text or f"{want_str}/db.sqlite3" not in cfg_text:
+            findings.append((
+                "data disk login config",
+                str(authelia_cfg),
+                f"does not point users_database.yml and db.sqlite3 at {want_str}; "
+                "run `sudo bin/gen-deploy` so the login database stays on the data disk",
+            ))
+    elif check_docker:
         docker_asleep = False
         if docker_run is None or getattr(docker_run, "__module__", "") == "loam_deploy":
             try:
@@ -835,19 +860,19 @@ def drift_findings(data_dir: Path, home: Path, *, etc: Path = Path("/etc/loam"),
                 docker_asleep = False
         info = None if docker_asleep else docker_volume_info("authelia-data", use_sudo=True, run=docker_run)
         if info is not None:
-            want_login = login_data_dir(data_dir).resolve()
+            want_resolved = want_login.resolve()
             dev = ((info.get("Options") or {}).get("device") or "").strip()
             if not dev:
                 findings.append((
                     "data disk login volume",
                     "docker volume authelia-data",
-                    f"is not bind-backed to {want_login} (Options.device is empty; "
+                    f"is not bind-backed to {want_resolved} (Options.device is empty; "
                     "login database lives on server disk)",
                 ))
-            elif Path(dev).resolve() != want_login:
+            elif Path(dev).resolve() != want_resolved:
                 findings.append((
                     "data disk login volume",
                     "docker volume authelia-data",
-                    f"points at {dev}, expected {want_login}",
+                    f"points at {dev}, expected {want_resolved}",
                 ))
     return findings

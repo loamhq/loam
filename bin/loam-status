@@ -73,6 +73,26 @@ def app_health(name: str) -> str:
         return "running starting"
 
 
+def login_health() -> str:
+    """The login's state in `container_health`'s words. Since Authelia runs as
+    `loam-authelia.service` with `loam-authelia-redis.service`, check both units
+    and `GET /api/health` on loopback without waking Docker. Falls back to the
+    legacy container only before migration when compose.yaml still exists."""
+    if not dep.AUTHELIA_UNIT.exists() and dep.AUTHELIA_COMPOSE.exists():
+        return container_health(dep.AUTHELIA_PROJECT)
+    redis_state = run(["systemctl", "is-active", dep.AUTHELIA_REDIS_SERVICE_NAME]).stdout.strip() or "unknown"
+    auth_state = run(["systemctl", "is-active", dep.AUTHELIA_SERVICE_NAME]).stdout.strip() or "unknown"
+    if auth_state != "active":
+        return "absent" if auth_state in ("inactive", "unknown") else auth_state
+    if redis_state != "active":
+        return f"session store {redis_state}"
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{dep.AUTHELIA_PORT}/api/health", timeout=4) as r:
+            return "running healthy" if r.status == 200 else f"running answering {r.status}"
+    except (OSError, ValueError):
+        return "running starting"
+
+
 def broker_up() -> bool:
     import loam_broker as brk  # noqa: PLC0415
     try:
@@ -164,7 +184,7 @@ def gather() -> dict:
     if dep.unclaimed():
         part("login", "Sign-in", WAIT, "starts when you claim this Loam with the link below")
     else:
-        login = container_health(dep.AUTHELIA_PROJECT)
+        login = login_health()
         up = login.startswith("running") and "unhealthy" not in login and "starting" not in login
         part("login", "Sign-in", OK if up else BAD, "running" if up else login,
              "" if up else f"sudo {lc.ROOT}/bin/gen-deploy")

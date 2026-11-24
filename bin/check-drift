@@ -872,6 +872,10 @@ def check_deploy(findings: list) -> list[str]:
         # up, and is nothing still holding its name in Docker.
         for name, why in dep.service_findings(apps):
             findings.append((f"deploy service {name}", "systemctl is-active / docker ps", why))
+        # The login runs as native systemd units (loam-authelia + loam-authelia-redis):
+        # pinned binary, user, units active/enabled on claimed boxes, no legacy container.
+        for name, why in dep.login_findings():
+            findings.append((f"deploy login {name}", "loam-authelia.service", why))
     except dep.DeployError as exc:
         findings.append(("deploy live state", "docker ps / ss", str(exc)))
     # The wall around the browser's network is rules in the kernel, and the

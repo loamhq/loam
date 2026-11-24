@@ -63,7 +63,8 @@ Rendered by `sudo bin/gen-deploy` into, and diffed by `bin/check-drift` against:
 | `/etc/caddy/Caddyfile` | `loam_deploy.caddyfile()` |
 | `/etc/docker/daemon.json` | `loam_deploy.daemon_json()` |
 | `/etc/loam/authelia/configuration.yml` | `loam_deploy.authelia_config()` |
-| `/etc/loam/authelia/compose.yaml` | `loam_deploy.authelia_compose()` |
+| `/etc/systemd/system/loam-authelia.service` | `loam_deploy.authelia_unit()` |
+| `/etc/systemd/system/loam-authelia-redis.service` | `loam_deploy.authelia_redis_unit()` |
 | `/etc/loam/browser/compose.yaml` | `loam_deploy.browser_compose()` |
 | `/etc/loam/browser/firewall.sh` | `loam_deploy.sight_firewall_script()`; check-drift also asks the kernel for every rule |
 | `/etc/systemd/system/loam-sight-firewall.service` | `loam_deploy.sight_firewall_unit()` |
@@ -74,10 +75,11 @@ Rendered by `sudo bin/gen-deploy` into, and diffed by `bin/check-drift` against:
 | `/etc/loam/login/{index.html,login.css,login.js,icon.svg}` | `loam_deploy.login_files()`, from `deploy/login/` |
 
 Three things are never rendered: Authelia's secrets (`/etc/loam/authelia/secrets.env`,
-root-only, written once by `gen-deploy --init-login`), the users file (in the
-`authelia-data` volume), and a share token (`/etc/loam/share/<app>.token`,
-root-only, minted by `gen-deploy --share`). The generator reads them; nothing
-prints them.
+root-only, written once by `gen-deploy --init-login` or `--init-secrets`), the
+users file and SQLite database (`/var/lib/loam-authelia/`, or
+`<data_dir>/login/authelia-data/` with `--data-dir`), and a share token
+(`/etc/loam/share/<app>.token`, root-only, minted by `gen-deploy --share`). The
+generator reads them; nothing prints them.
 
 **Logs** (2026-09-28; the whole map is `docs/logs.md`). Every host block
 imports `access_log <host>`, so each host writes JSON access lines to
@@ -113,20 +115,34 @@ and unchanged. `login.page` in `/etc/loam/loam.toml` picks the page:
 or `staged` (Loam's only for sign-ins to `login.staged_host`). `?authelia=1`
 always reaches Authelia's own page. `deploy/login/README.md` has the rest.
 
-The login is **Authelia** in a container on loopback, one user, file
-backend with an argon2id hash, passkey login on, password plus TOTP as the
-fallback, a month-long remember-me. Caddy's `forward_auth` sends every
-request on a private host to it first.
+The login is **Authelia** running as a hardened systemd service
+(`loam-authelia.service`, outside Docker) under an unprivileged system user
+(`loam-authelia`), listening on `127.0.0.1:9091` only. `bin/gen-deploy`
+downloads the pinned Authelia Linux release tarball (verified by SHA-256) into
+`/opt/loam/authelia/versions/<version>/`, checks `authelia --version`, and
+swaps `/opt/loam/authelia/current` atomically. One user, file backend with an
+argon2id hash, passkey login on, password plus TOTP as the fallback, a
+month-long remember-me. Caddy's `forward_auth` sends every request on a private
+host to it first.
 
-**Sessions live in Redis, not in Authelia** (since 2026-11-09). Authelia
-kept them in its own memory, so every reboot, and a resize is two, signed
-the owner out on every device. `loam-authelia-redis` is the login project's
-second container: on the project's default network only, no published
-port, no password because only Authelia can reach it, running as the
-image's `redis` user (999:1000, the owner of `/data`), and snapshotting to
-the `authelia-sessions` volume every minute there was a change and on the
-SIGTERM a shutdown sends. That volume is not external: losing it costs one
-sign-in per device and nothing else.
+**Sessions live in Redis, not in Authelia** (since 2026-11-09; moved out of
+Docker on 2026-11-24). Authelia kept them in its own memory, so every restart
+or reboot signed the owner out on every device. `loam-authelia-redis.service`
+runs the distribution's native `redis-server` (or `valkey-server`) under the
+same `loam-authelia` user with no TCP listener (`--port 0`,
+`RestrictAddressFamilies=AF_UNIX`), listening only on a mode-0600 Unix socket
+at `/run/loam-authelia-redis/redis.sock`, and snapshotting under
+`/var/lib/loam-authelia-redis` every minute there was a change and on SIGTERM.
+Losing that directory costs one sign-in per device and nothing else. Because
+neither login service uses Docker, Docker and containerd can sleep on a claimed
+server whenever nothing else needs them. On update from an older container-based
+login, `bin/gen-deploy` copies `users_database.yml` and a clean SQLite backup
+of `db.sqlite3` from `authelia-data`, exports live sessions into native Redis
+over the Unix socket, validates and starts the native services, rolls back
+automatically to the old containers if health checks fail, and removes the old
+containers, volumes and images only once native login is proven healthy.
+Rolling back to a pre-service release via `loam update rollback` invokes
+`gen-deploy --restore-container-login` to put the Docker layout back first.
 
 **Every host compresses** (`import compress`, zstd then gzip), on a match
 list that is Caddy's default minus `text/event-stream`, so an SSE stream is
@@ -1078,13 +1094,13 @@ clean removes it after it expires. A record with the same host inside the
 
 ## App data
 
-Named volumes only. The generator refuses a bind mount, a privileged
-container, host networking, added capabilities and the rest of
-`FORBIDDEN_SERVICE_KEYS`, and any network but the two above. The first
-stateful volume on the box is
-`authelia-data` (the users file, the SQLite store, every passkey);
-`gen-deploy --init-login` creates it as an external volume so `compose
-down -v` cannot take it.
+Named volumes only for containerized apps. The generator refuses a bind mount,
+a privileged container, host networking, added capabilities and the rest of
+`FORBIDDEN_SERVICE_KEYS`, and any network but the two above. The login's own
+data (`users_database.yml` and `db.sqlite3`: accounts, password hashes,
+passkeys and TOTP secrets) lives directly on disk under `/var/lib/loam-authelia`
+(or `<data_dir>/login/authelia-data` with `--data-dir`), owned by
+`loam-authelia:loam-authelia` mode `0700`, outside Docker.
 
 **The backup timer, not built yet — its shape for the first stateful
 app's brief:** a system unit pair `loam-backup.service` /

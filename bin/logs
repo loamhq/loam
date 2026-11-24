@@ -25,7 +25,9 @@ usage: logs                          the list of names, and where each lives
                        (loam limits for counts and filtering)
   drift-check          the daily check-drift runs (bin/loam-check)
   check                the one check on a clock: its state file now
-  authelia | browser   the login's and the persona browser's containers
+  authelia             the login service's log, from the journal (loam-authelia)
+  authelia-redis       the login session store's log, from the journal
+  browser              the persona browser's container log
 
 Every command it runs is printed first, on stderr, so the command is the thing
 learned and this helper is only a shortcut to it.
@@ -123,9 +125,16 @@ def command(name: str, arg: str | None, n: int, follow: bool) -> list[str]:
         return 0
     if name == "drift-check":
         return tail(LOGS / "drift-check.log", n, follow)
-    if name in ("authelia", "browser"):
+    if name == "authelia":
+        if not dep.AUTHELIA_UNIT.exists() and dep.AUTHELIA_COMPOSE.exists():
+            return ["sudo", "-n", "docker", "logs", "--tail", str(n),
+                    *(["-f"] if follow else []), dep.AUTHELIA_PROJECT]
+        return journal(n, follow, "-u", dep.AUTHELIA_SERVICE_NAME)
+    if name == "authelia-redis":
+        return journal(n, follow, "-u", dep.AUTHELIA_REDIS_SERVICE_NAME)
+    if name == "browser":
         return ["sudo", "-n", "docker", "logs", "--tail", str(n), *(["-f"] if follow else []),
-                dep.AUTHELIA_PROJECT if name == "authelia" else dep.BROWSER_PROJECT]
+                dep.BROWSER_PROJECT]
     die(f"no log named {name!r}; `logs` with no arguments lists them")
     return []
 

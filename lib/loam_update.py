@@ -154,7 +154,7 @@ TRIGGERS = {
     # deployment layer is re-rendered (its unit template among it), then the
     # app is unpacked at the new commit and restarted, and put back on its
     # old release if the new one does not answer.
-    "deploy": {"script": "bin/gen-deploy", "also": ["bin/browser-proxy", "bin/loam-data-disk"],
+    "deploy": {"script": "bin/gen-deploy", "also": ["bin/browser-proxy", "bin/loam-claim", "bin/loam-data-disk"],
                "dirs": ["deploy/", "broker/firewall.sh",
                         "systemd/system/loam-claim.service",
                         "systemd/system/loam-broker-firewall.service"]},
@@ -1377,6 +1377,18 @@ class Box:
             )
             subprocess.run(["sudo", "-n", "systemctl", "start", "docker.service"],
                            capture_output=True, text=True, check=False)
+        # Belt-and-suspenders if rolling back to a pre-service login release
+        # without having gone through restore_container_login_if_older().
+        dep_src = runtime() / "lib" / "loam_deploy.py"
+        if (loam_deploy.AUTHELIA_UNIT.exists() and dep_src.is_file()
+                and "def authelia_unit(" not in dep_src.read_text(encoding="utf-8")):
+            subprocess.run(
+                ["sudo", "-n", "systemctl", "disable", "--now",
+                 loam_deploy.AUTHELIA_SERVICE_NAME, loam_deploy.AUTHELIA_REDIS_SERVICE_NAME],
+                capture_output=True, text=True, check=False,
+            )
+            subprocess.run(["sudo", "-n", "systemctl", "start", "docker.service"],
+                           capture_output=True, text=True, check=False)
         self._root(self.bin("gen-deploy"))
         return "rendered"
 
@@ -1665,9 +1677,38 @@ def move_to(tag: str, kind: str, commit: str | None = None) -> str:
         return f"checked out {tag}"
 
 
+def _target_has_native_login(target: str) -> bool:
+    text = show(target, prefix() + "lib/loam_deploy.py") or ""
+    return "def authelia_unit(" in text
+
+
+def restore_container_login_if_older(target: str) -> None:
+    """Called under the live lock before moving to a release that predates
+    native login services: hands login data back to Docker and removes the
+    native login units while this release's helper is still on disk."""
+    if not loam_deploy.AUTHELIA_UNIT.exists() and not loam_deploy.AUTHELIA_REDIS_UNIT.exists():
+        return
+    if _target_has_native_login(target):
+        return
+    gen_deploy = runtime() / "bin" / "gen-deploy"
+    if not gen_deploy.is_file():
+        return
+    done = subprocess.run(
+        ["sudo", "-n", "env", f"PYTHONPYCACHEPREFIX={ROOT_PYCACHE}",
+         sys.executable, str(gen_deploy), "--restore-container-login"],
+        capture_output=True, text=True, check=False, timeout=900,
+    )
+    if done.returncode != 0:
+        raise RuntimeError(
+            "could not hand the login back to Docker for rollback: "
+            + ((done.stderr or done.stdout).strip()[-500:] or f"exit {done.returncode}")
+        )
+
+
 def reset_to(commit: str) -> str:
     with loam_lock.live("Loam", "update"):
         combine_if_older(commit)
+        restore_container_login_if_older(commit)
         git("merge", "--abort", check=False)
         git("reset", "--quiet", "--hard", commit)
     return f"the checkout is at {commit[:12]} again"
@@ -1835,7 +1876,9 @@ def _finish_apply(run: Run, pending: dict, box: Box, *, tell: bool = True) -> di
         run.rec["changed_files"] = len(changed)
         by_hand = [f for f in changed
                    if f.startswith(prefix() + "systemd/system/")
-                   and not f.endswith("/loam-swap.service")]
+                   and not f.endswith(("/loam-swap.service",
+                                       "/loam-claim.service",
+                                       "/loam-broker-firewall.service"))]
         if by_hand:
             run.rec["warnings"] = [f"system units changed and are installed by hand "
                                    f"(root): {', '.join(by_hand)}"]
@@ -1888,7 +1931,9 @@ def _undo(run: Run, box: Box, old_commit: str, backup: str | None,
                      "deferred: the box was not idle), so it runs the previous "
                      "release already")
             continue
-        if name in done or (name == "broker" and run.rec.get("failed_step") == "broker"):
+        if (name in done
+                or (name == "broker" and run.rec.get("failed_step") == "broker")
+                or (name == "deploy" and run.rec.get("failed_step") == "deploy")):
             try:
                 run.step(f"undo-{name}", getattr(box, name.replace("-", "_")))
             except StepFailed:

@@ -703,6 +703,25 @@ def add_repo(name: str, key_url: str, line: str) -> None:
     Path(f"/etc/apt/sources.list.d/{name}.list").write_text(line.format(keyring=keyring) + "\n")
 
 
+def ensure_login_redis() -> None:
+    """Ensure a native Redis-compatible server binary (redis-server or
+    valkey-server) is installed for loam-authelia-redis.service. If the
+    installer installs the package itself, disable the distro's default
+    port-6379 service so only Loam's private Unix-socket store runs."""
+    if Path("/usr/bin/redis-server").is_file() or Path("/usr/bin/valkey-server").is_file():
+        return
+    env = {"DEBIAN_FRONTEND": "noninteractive"}
+    for pkg, svc in (("redis-server", "redis-server.service"),
+                     ("valkey-server", "valkey-server.service")):
+        res = run(["apt-get", "install", "-y", "-q", "--no-install-recommends", pkg],
+                  env=env, timeout=1800, check=False)
+        if res.returncode == 0 and (Path("/usr/bin/redis-server").is_file()
+                                    or Path("/usr/bin/valkey-server").is_file()):
+            run(["systemctl", "disable", "--now", svc], check=False)
+            return
+    raise Stop("could not install redis-server or valkey-server for the sign-in session store")
+
+
 def step_packages(a, ans: dict) -> None:
     osr = os_release()
     distro, codename = osr["ID"], osr.get("VERSION_CODENAME", "bookworm")
@@ -711,6 +730,7 @@ def step_packages(a, ans: dict) -> None:
         run(["apt-get", "update", "-q"], env=env)
     with progress("Installing system software", "System software installed."):
         apt(*apt_packages(distro))
+        ensure_login_redis()
     with progress("Finding Docker, Caddy and Node", "Docker, Caddy and Node found."):
         arch = run(["dpkg", "--print-architecture"]).stdout.strip()
         add_repo("caddy-stable", "https://dl.cloudsmith.io/public/caddy/stable/gpg.key",
@@ -720,8 +740,9 @@ def step_packages(a, ans: dict) -> None:
         add_repo("nodesource", "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key",
                  "deb [signed-by={keyring}] https://deb.nodesource.com/node_24.x nodistro main")
         run(["apt-get", "update", "-q"], env=env)
-    # Docker carries the login (Authelia) and the agents' shared browser, and
-    # is there for an agent's own project; Loam's app does not use it.
+    # Docker carries the agents' shared browser and is there for an agent's own
+    # project; Loam's app and sign-in run as ordinary system services so Docker
+    # can sleep when idle.
     with progress("Installing Docker, Caddy and Node", "Docker, Caddy and Node installed."):
         apt("caddy", "docker-ce", "docker-ce-cli", "containerd.io", "docker-compose-plugin", "nodejs")
         run(["systemctl", "enable", "--now", "docker", "caddy"])

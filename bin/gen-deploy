@@ -4,30 +4,41 @@
 Same rule as provision and gen-units: derives from disk, never copies, and
 rewrites nothing it would not change. What it renders is in
 lib/loam_deploy.py; this file is the hands -- it writes as root, validates
-the Caddyfile before it lands, reloads Caddy, and brings the runtime's two
-containers up on their compose files. bin/check-drift diffs the same renders
-against the same live paths, so a hand edit to any of them is reported.
+the Caddyfile and Authelia config before they land, reloads Caddy, manages
+the native login services (loam-authelia.service and loam-authelia-redis.service),
+and prepares the agents' browser container asleep behind its lazy-wake socket.
+bin/check-drift diffs the same renders against the same live paths, so a hand
+edit to any of them is reported.
 
 Usage:
-  gen-deploy -h | --help            print this and do nothing else
-  gen-deploy [--dry-run]            render, show what changes, write, apply
-  gen-deploy --show <name>          print one render: caddyfile | daemon |
-                                    authelia | authelia-compose | browser |
-                                    firewall | firewall-unit | sudoers |
-                                    preview-sysctl
-  gen-deploy --init-login <user>    ONCE: mint Authelia's secrets, the user
-                                    with a generated password, start the
-                                    login, pre-generate a TOTP device, write
-                                    the first-login file (root-only). Prints
-                                    no secret.
-  gen-deploy --init-secrets         an install's login before its claim:
-                                    the secrets and the data volume, no
-                                    user (bin/loam-claim writes the user)
-  gen-deploy --share <app>          mint (or re-mint) the app's share token
-                                    and regenerate; prints the link once
-  gen-deploy --unshare <app>        delete the token and regenerate
-  gen-deploy --link <app>           print the live share link from the
-                                    existing token (no minting)
+  gen-deploy -h | --help             print this and do nothing else
+  gen-deploy [--dry-run]             render, show what changes, write, apply
+  gen-deploy --show <name>           print one render: caddyfile | daemon |
+                                     authelia | authelia-unit |
+                                     authelia-redis-unit | browser |
+                                     browser-proxy-socket | browser-proxy-unit |
+                                     docker-idle-unit | firewall |
+                                     firewall-unit | inbound-firewall |
+                                     inbound-firewall-unit | sudoers |
+                                     preview-sysctl
+  gen-deploy --init-login <user>     ONCE: mint Authelia's secrets, the user
+                                     with a generated password, start the
+                                     login, pre-generate a TOTP device, write
+                                     the first-login file (root-only). Prints
+                                     no secret.
+  gen-deploy --init-secrets          an install's login before its claim:
+                                     the user, binary, Redis, secrets and data
+                                     directory, no user account (bin/loam-claim
+                                     writes the account)
+  gen-deploy --restore-container-login
+                                     hand a native login back to the legacy
+                                     Docker containers (used by loam update
+                                     when rolling back to a pre-service release)
+  gen-deploy --share <app>           mint (or re-mint) the app's share token
+                                     and regenerate; prints the link once
+  gen-deploy --unshare <app>         delete the token and regenerate
+  gen-deploy --link <app>            print the live share link from the
+                                     existing token (no minting)
 
 Secrets never pass through this process's stdout. The password and TOTP
 secret are written to /etc/loam/authelia/first-login.txt, mode 0600, root,
@@ -38,13 +49,18 @@ from __future__ import annotations
 
 import datetime as dt
 import difflib
+import hashlib
+import io
 import os
 import pwd
 import re
 import secrets
 import shutil
+import socket
+import sqlite3
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 import urllib.request
@@ -55,6 +71,37 @@ import loam_deploy as dep  # noqa: E402
 
 DOCKER = ["docker"]
 CADDY_USER = "caddy"   # the Debian package's unit runs Caddy as this user
+
+# Export string keys (Authelia sessions) from a running Docker Redis container
+# as binary-safe RESP SET commands, so sessions survive across Redis RDB format
+# differences (e.g. Docker Redis 7.4 RDB v12 -> Debian 12 Redis 7.0 RDB v10).
+_REDIS_EXPORT_LUA = (
+    "local cur = ARGV[1]\n"
+    "local res = redis.call('SCAN', cur, 'COUNT', 1000)\n"
+    "local next_cur = res[1]\n"
+    "local keys = res[2]\n"
+    "local parts = {next_cur .. '\\n'}\n"
+    "for i = 1, #keys do\n"
+    "  local k = keys[i]\n"
+    "  if redis.call('TYPE', k)['ok'] == 'string' then\n"
+    "    local ttl = redis.call('PTTL', k)\n"
+    "    if ttl ~= -2 then\n"
+    "      local v = redis.call('GET', k)\n"
+    "      if v then\n"
+    "        if ttl > 0 then\n"
+    "          local ts = tostring(ttl)\n"
+    "          parts[#parts + 1] = '*5\\r\\n$3\\r\\nSET\\r\\n$' .. #k .. '\\r\\n' .. k .. "
+    "'\\r\\n$' .. #v .. '\\r\\n' .. v .. '\\r\\n$2\\r\\nPX\\r\\n$' .. #ts .. '\\r\\n' .. ts .. '\\r\\n'\n"
+    "        else\n"
+    "          parts[#parts + 1] = '*3\\r\\n$3\\r\\nSET\\r\\n$' .. #k .. '\\r\\n' .. k .. "
+    "'\\r\\n$' .. #v .. '\\r\\n' .. v .. '\\r\\n'\n"
+    "        end\n"
+    "      end\n"
+    "    end\n"
+    "  end\n"
+    "end\n"
+    "return table.concat(parts)\n"
+)
 
 
 def die(msg: str, code: int = 1) -> None:
@@ -84,6 +131,188 @@ def write_root(path: Path, content: str, mode: int = 0o644) -> bool:
     os.chown(tmp, 0, 0)
     os.replace(tmp, path)
     return True
+
+
+def _fetch_url(url: str, timeout: float = 600.0) -> bytes:
+    req = urllib.request.Request(url, headers={"User-Agent": "loam-gen-deploy"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        return resp.read()
+
+
+def _authelia_ids() -> tuple[int, int]:
+    pw = pwd.getpwnam(dep.AUTHELIA_USER)
+    return pw.pw_uid, pw.pw_gid
+
+
+def _vkey(version: str) -> tuple[int, ...]:
+    return tuple(int(x) for x in version.split(".") if x.isdigit())
+
+
+def ensure_authelia_user(dry: bool) -> bool:
+    """Ensure the unprivileged `loam-authelia` system user/group exists."""
+    try:
+        pwd.getpwnam(dep.AUTHELIA_USER)
+        return False
+    except KeyError:
+        pass
+    print(f"  {'would create' if dry else 'created'} system user {dep.AUTHELIA_USER}")
+    if dry:
+        return True
+    res = run(["useradd", "--system", "--no-create-home", "--home-dir", "/nonexistent",
+               "--shell", "/usr/sbin/nologin", "--user-group", dep.AUTHELIA_USER])
+    if res.returncode != 0:
+        die(f"could not create system user {dep.AUTHELIA_USER}: {res.stderr.strip()}")
+    return True
+
+
+def ensure_authelia_binary(dry: bool) -> bool:
+    """Ensure the release-pinned Authelia binary is installed at AUTHELIA_BIN,
+    verified by SHA-256 checksum and `--version`. Returns True if installed or
+    repointed."""
+    arch = dep.authelia_arch()
+    spec = dep.AUTHELIA_BUILDS[arch]
+    version = dep.AUTHELIA_VERSION
+    target_dir = dep.AUTHELIA_VERSIONS / version
+    target_bin = target_dir / "authelia"
+    link = dep.AUTHELIA_ROOT / "current"
+
+    if (dep.AUTHELIA_BIN.is_file()
+            and dep.authelia_live_version() == version
+            and dep.authelia_version_of(dep.AUTHELIA_BIN) == version):
+        return False
+
+    if dry:
+        print(f"  would install Authelia {version} ({arch}) at {dep.AUTHELIA_BIN}")
+        return True
+
+    for d in (dep.AUTHELIA_ROOT.parent, dep.AUTHELIA_ROOT, dep.AUTHELIA_VERSIONS):
+        d.mkdir(parents=True, mode=0o755, exist_ok=True)
+        os.chmod(d, 0o755)
+        if os.geteuid() == 0:
+            os.chown(d, 0, 0)
+
+    if not (target_bin.is_file() and dep.authelia_version_of(target_bin) == version):
+        try:
+            blob = _fetch_url(spec["url"])
+        except Exception as exc:  # noqa: BLE001
+            die(f"could not download Authelia {version} ({arch}): {exc}")
+        got_sha = hashlib.sha256(blob).hexdigest()
+        if got_sha != spec["sha256"]:
+            die(f"Authelia {version} ({arch}): SHA-256 checksum mismatch "
+                f"(got {got_sha}, expected {spec['sha256']})")
+        binary_bytes = None
+        try:
+            with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tar:
+                for member in tar.getmembers():
+                    if member.isfile() and Path(member.name).name == "authelia" and ".." not in Path(member.name).parts:
+                        fh = tar.extractfile(member)
+                        if fh is not None:
+                            binary_bytes = fh.read()
+                            break
+        except (tarfile.TarError, OSError) as exc:
+            die(f"could not unpack Authelia {version} ({arch}) archive: {exc}")
+        if not binary_bytes:
+            die(f"Authelia {version} ({arch}) archive did not contain the `authelia` binary")
+        partial = dep.AUTHELIA_VERSIONS / f".{version}.tmp-{os.getpid()}"
+        shutil.rmtree(partial, ignore_errors=True)
+        partial.mkdir(mode=0o755)
+        os.chmod(partial, 0o755)
+        if os.geteuid() == 0:
+            os.chown(partial, 0, 0)
+        staged = partial / "authelia"
+        staged.write_bytes(binary_bytes)
+        os.chmod(staged, 0o755)
+        if os.geteuid() == 0:
+            os.chown(staged, 0, 0)
+        got_ver = dep.authelia_version_of(staged)
+        if got_ver != version:
+            shutil.rmtree(partial, ignore_errors=True)
+            die(f"downloaded Authelia binary reported version {got_ver!r}, expected {version!r}")
+        if target_dir.exists():
+            shutil.rmtree(target_dir)
+        os.replace(partial, target_dir)
+
+    tmp_link = dep.AUTHELIA_ROOT / f".current.tmp-{os.getpid()}"
+    tmp_link.unlink(missing_ok=True)
+    os.symlink(target_dir, tmp_link)
+    os.replace(tmp_link, link)
+    if dep.authelia_version_of(dep.AUTHELIA_BIN) != version:
+        die(f"{dep.AUTHELIA_BIN} did not report version {version} after linking")
+
+    # Prune old versions beyond AUTHELIA_KEEP_VERSIONS (keeps rollback targets).
+    keep = {version}
+    others = sorted(
+        (p.name for p in dep.AUTHELIA_VERSIONS.iterdir()
+         if p.is_dir() and not p.name.startswith(".") and p.name not in keep
+         and re.fullmatch(r"\d+(\.\d+)+", p.name)),
+        key=_vkey,
+    )
+    for old_ver in others[:-dep.AUTHELIA_KEEP_VERSIONS] if dep.AUTHELIA_KEEP_VERSIONS else others:
+        shutil.rmtree(dep.AUTHELIA_VERSIONS / old_ver, ignore_errors=True)
+
+    print(f"  authelia binary: {version} ({arch}) verified and linked at {dep.AUTHELIA_BIN}")
+    return True
+
+
+def ensure_redis_server(dry: bool) -> bool:
+    """Ensure a native Redis-compatible server binary (redis-server or
+    valkey-server) is installed. When Loam installs the package itself, disable
+    and stop the distribution's default port-6379 service so only Loam's
+    private Unix-socket loam-authelia-redis.service runs."""
+    if Path(dep.redis_server_bin()).is_file():
+        return False
+    if dry:
+        print("  would install redis-server (or valkey-server) for loam-authelia-redis.service")
+        return True
+    env = {**os.environ, "DEBIAN_FRONTEND": "noninteractive"}
+    run(["apt-get", "update", "-q"], env=env, timeout=600)
+    installed_svc = None
+    for pkg, svc in (("redis-server", "redis-server.service"),
+                     ("valkey-server", "valkey-server.service")):
+        res = run(["apt-get", "install", "-y", "-q", "--no-install-recommends", pkg],
+                  env=env, timeout=600)
+        if res.returncode == 0 and Path(dep.redis_server_bin()).is_file():
+            installed_svc = svc
+            break
+    if not Path(dep.redis_server_bin()).is_file():
+        die("could not install redis-server or valkey-server for the login session store")
+    if installed_svc:
+        run(["systemctl", "disable", "--now", installed_svc])
+        print(f"  redis: installed {dep.redis_server_bin()} (default {installed_svc} disabled)")
+    return True
+
+
+def ensure_login_data_dir(dry: bool) -> None:
+    """Ensure Authelia's data directory exists, owned by loam-authelia 0700.
+    Aligns ownership recursively on existing files (needed on --data-dir
+    adoption where loam-authelia may get a new UID on a second server)."""
+    target = dep.authelia_data_dir()
+    if dry:
+        if not target.exists():
+            print(f"  would create {target} ({dep.AUTHELIA_USER}:{dep.AUTHELIA_GROUP} 0700)")
+        return
+    uid, gid = _authelia_ids()
+    target.parent.mkdir(parents=True, mode=0o755, exist_ok=True)
+    os.chmod(target.parent, 0o755)
+    if not target.exists():
+        target.mkdir(mode=0o700)
+        os.chown(target, uid, gid)
+        os.chmod(target, 0o700)
+        print(f"  created {target} ({dep.AUTHELIA_USER}:{dep.AUTHELIA_GROUP} 0700)")
+        return
+    st = os.stat(target)
+    if st.st_uid != uid or st.st_gid != gid or (st.st_mode & 0o777) != 0o700:
+        os.chown(target, uid, gid)
+        os.chmod(target, 0o700)
+    for top, dirs, files in os.walk(target, followlinks=False):
+        for name in dirs + files:
+            p = os.path.join(top, name)
+            try:
+                lst = os.lstat(p)
+                if lst.st_uid != uid or lst.st_gid != gid:
+                    os.lchown(p, uid, gid)
+            except OSError:
+                pass
 
 
 def ensure_access_log_dir(dry: bool) -> None:
@@ -135,23 +364,19 @@ def diff(path: Path, new: str) -> str:
 
 
 def validate_authelia(content: str) -> None:
-    """Authelia's own validator on the render before it lands. Authelia does
-    not reload its file, so a bad render is a force-recreate into a crash
-    loop with the login down; the validator runs the same code the daemon
-    runs at startup. Needs the secrets as environment, exactly as the
-    container has them; nothing is printed but the verdict. Skipped when the
-    login is not initialised (no secrets yet) or docker is not on the box."""
-    if not dep.AUTHELIA_SECRETS.exists() or not shutil.which("docker"):
+    """Authelia's own validator on the render before it lands. Runs the native
+    pinned binary with the secrets environment; never wakes Docker. Skipped
+    when secrets are absent (pre-init) or the binary is not yet installed
+    (e.g. --dry-run before first install)."""
+    if not dep.AUTHELIA_SECRETS.exists() or not dep.AUTHELIA_BIN.is_file():
         return
     with tempfile.NamedTemporaryFile("w", suffix=".yml", delete=False) as fh:
         fh.write(content)
         tmp = fh.name
     try:
-        os.chmod(tmp, 0o644)
-        res = run([*DOCKER, "run", "--rm", "--env-file", str(dep.AUTHELIA_SECRETS),
-                   "-v", f"{tmp}:/config/configuration.yml:ro",
-                   "--entrypoint", "authelia", dep.AUTHELIA_IMAGE,
-                   "config", "validate", "--config", "/config/configuration.yml"])
+        os.chmod(tmp, 0o600)
+        env = {**os.environ, **dep.read_env_file(dep.AUTHELIA_SECRETS)}
+        res = run([str(dep.AUTHELIA_BIN), "config", "validate", "--config", tmp], env=env)
     finally:
         os.unlink(tmp)
     if res.returncode != 0:
@@ -256,19 +481,32 @@ def ensure_browser_output_dir(dry: bool) -> None:
             os.chmod(out, 0o755)
 
 
+def check_native_login_ready(timeout_s: float = 30.0) -> tuple[bool, str]:
+    """Wait until both native login services are active and Authelia answers
+    both /api/health and /api/state cleanly."""
+    deadline = time.monotonic() + timeout_s
+    last = "not checked"
+    while time.monotonic() < deadline:
+        r_active = run(["systemctl", "is-active", "--quiet", dep.AUTHELIA_REDIS_SERVICE_NAME]).returncode == 0
+        a_active = run(["systemctl", "is-active", "--quiet", dep.AUTHELIA_SERVICE_NAME]).returncode == 0
+        if not r_active:
+            last = f"{dep.AUTHELIA_REDIS_SERVICE_NAME} is not active"
+        elif not a_active:
+            last = f"{dep.AUTHELIA_SERVICE_NAME} is not active"
+        else:
+            ok, detail = dep.login_health_ok(timeout=3.0)
+            if ok:
+                return True, "healthy"
+            last = detail
+        time.sleep(0.5)
+    return False, last
+
+
 def wait_for_login() -> None:
     """Leave the claim page reachable until Authelia can accept sign-ins."""
-    url = f"http://127.0.0.1:{dep.AUTHELIA_PORT}/api/health"
-    deadline = time.monotonic() + 30
-    while time.monotonic() < deadline:
-        try:
-            with urllib.request.urlopen(url, timeout=2) as response:
-                if response.status == 200:
-                    return
-        except OSError:
-            pass
-        time.sleep(0.5)
-    die("authelia did not become healthy. The claim page is still up.")
+    ok, reason = check_native_login_ready(30.0)
+    if not ok:
+        die(f"authelia did not become healthy ({reason}). The claim page is still up.")
 
 
 def switch_claim_edge(content: str) -> None:
@@ -286,7 +524,491 @@ def switch_claim_edge(content: str) -> None:
     print("  caddy: the sign-in is ready and the claim route is removed")
 
 
+# ---------------------------------------------------------------------------
+# Safe migration between legacy Docker login and native systemd services
+# ---------------------------------------------------------------------------
+
+def _sqlite_clean_copy(src: Path, dst: Path, uid: int, gid: int) -> None:
+    """Copy a SQLite database via SQLite's online backup API from a scratch
+    snapshot (never writing to `src`'s directory), verify PRAGMA integrity_check,
+    atomically install at `dst` with `uid:gid` 0600, and remove stale sidecars."""
+    with tempfile.TemporaryDirectory(prefix="loam-authelia-db-") as scratch:
+        os.chmod(scratch, 0o700)
+        stage_src = Path(scratch) / src.name
+        shutil.copy2(src, stage_src)
+        for side in ("-wal", "-shm", "-journal"):
+            s = Path(str(src) + side)
+            if s.is_file():
+                shutil.copy2(s, Path(str(stage_src) + side))
+        stage_out = Path(scratch) / "out.sqlite3"
+        src_con = sqlite3.connect(str(stage_src), timeout=30)
+        dst_con = sqlite3.connect(str(stage_out))
+        try:
+            src_con.backup(dst_con)
+            chk = dst_con.execute("PRAGMA integrity_check").fetchone()
+            if not chk or chk[0] != "ok":
+                raise RuntimeError(f"integrity_check failed: {chk!r}")
+        finally:
+            dst_con.close()
+            src_con.close()
+        tmp = dst.with_name(f".{dst.name}.migrate-{os.getpid()}")
+        shutil.copy2(stage_out, tmp)
+        os.chown(tmp, uid, gid)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, dst)
+    for side in ("-wal", "-shm", "-journal"):
+        Path(str(dst) + side).unlink(missing_ok=True)
+
+
+def _copy_file_atomic(src: Path, dst: Path, uid: int, gid: int, mode: int = 0o600) -> None:
+    tmp = dst.with_name(f".{dst.name}.migrate-{os.getpid()}")
+    tmp.write_bytes(src.read_bytes())
+    os.chown(tmp, uid, gid)
+    os.chmod(tmp, mode)
+    os.replace(tmp, dst)
+
+
+def copy_login_data(src_dir: Path, dst_dir: Path, uid: int, gid: int) -> None:
+    """Copy users_database.yml, db.sqlite3 (via clean SQLite backup) and
+    notification.txt from `src_dir` into `dst_dir` owned by `uid:gid` 0600.
+    Handles both distinct directories and in-place (`--data-dir`) moves without
+    modifying `src_dir` when the two differ."""
+    dst_dir.parent.mkdir(parents=True, mode=0o755, exist_ok=True)
+    os.chmod(dst_dir.parent, 0o755)
+    dst_dir.mkdir(mode=0o700, exist_ok=True)
+    os.chown(dst_dir, uid, gid)
+    os.chmod(dst_dir, 0o700)
+    same = src_dir.resolve() == dst_dir.resolve()
+
+    users_src = src_dir / "users_database.yml"
+    users_dst = dst_dir / "users_database.yml"
+    if not users_src.is_file():
+        raise RuntimeError(f"missing {users_src}")
+    if same:
+        os.chown(users_dst, uid, gid)
+        os.chmod(users_dst, 0o600)
+    else:
+        _copy_file_atomic(users_src, users_dst, uid, gid, 0o600)
+
+    db_src = src_dir / "db.sqlite3"
+    db_dst = dst_dir / "db.sqlite3"
+    if db_src.is_file():
+        _sqlite_clean_copy(db_src, db_dst, uid, gid)
+
+    notif_src = src_dir / "notification.txt"
+    notif_dst = dst_dir / "notification.txt"
+    if notif_src.is_file():
+        if same:
+            os.chown(notif_dst, uid, gid)
+            os.chmod(notif_dst, 0o600)
+        else:
+            _copy_file_atomic(notif_src, notif_dst, uid, gid, 0o600)
+
+    if same:
+        for top, dirs, files in os.walk(dst_dir, followlinks=False):
+            for name in dirs + files:
+                p = os.path.join(top, name)
+                try:
+                    os.lchown(p, uid, gid)
+                except OSError:
+                    pass
+
+
+def _redis_read_line(buf: bytearray, sock: socket.socket) -> bytes:
+    while b"\r\n" not in buf:
+        chunk = sock.recv(65536)
+        if not chunk:
+            raise OSError("unexpected EOF from native Redis")
+        buf.extend(chunk)
+    idx = buf.index(b"\r\n")
+    line = bytes(buf[:idx])
+    del buf[:idx + 2]
+    return line
+
+
+def _send_resp_batch(socket_path: Path, payload: bytes, count: int, timeout: float = 30.0) -> int:
+    if not payload or count <= 0:
+        return 0
+    ok = 0
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+        sock.settimeout(timeout)
+        sock.connect(str(socket_path))
+        sock.sendall(payload)
+        buf = bytearray()
+        for _ in range(count):
+            reply = _redis_read_line(buf, sock)
+            if reply.startswith(b"+OK"):
+                ok += 1
+    return ok
+
+
+def migrate_sessions_to_native(socket_path: Path = dep.AUTHELIA_REDIS_SOCKET) -> tuple[int, str]:
+    """Best-effort live session migration from Docker's loam-authelia-redis
+    container into native Redis over its Unix socket. Never fails migration."""
+    try:
+        chk = run([*DOCKER, "inspect", "-f", "{{.State.Running}}", dep.AUTHELIA_REDIS])
+        if chk.returncode != 0 or chk.stdout.strip().lower() != "true":
+            return 0, "no running legacy Redis container; sessions will start fresh"
+        cursor = "0"
+        copied = 0
+        while True:
+            proc = subprocess.run(
+                [*DOCKER, "exec", "-i", dep.AUTHELIA_REDIS,
+                 "redis-cli", "--raw", "EVAL", _REDIS_EXPORT_LUA, "0", cursor],
+                capture_output=True, check=False, timeout=30,
+            )
+            if proc.returncode != 0:
+                err = (proc.stderr or b"").decode("utf-8", "replace").strip()[:200]
+                return copied, f"session copy stopped early ({err}); sign-in once more if needed"
+            raw = proc.stdout
+            if raw.endswith(b"\n"):
+                raw = raw[:-1]
+            nl = raw.find(b"\n")
+            if nl < 0:
+                break
+            cursor = raw[:nl].decode("ascii", "replace").strip()
+            payload = raw[nl + 1:]
+            batch_n = payload.count(b"*5\r\n$3\r\nSET\r\n") + payload.count(b"*3\r\n$3\r\nSET\r\n")
+            if batch_n:
+                copied += _send_resp_batch(socket_path, payload, batch_n)
+            if cursor == "0":
+                break
+        if copied > 0:
+            # Flush migrated sessions to dump.rdb immediately.
+            _send_resp_batch(socket_path, b"*1\r\n$4\r\nSAVE\r\n", 1, timeout=30.0)
+        return copied, f"copied {copied} live session key(s) to native Redis"
+    except Exception as exc:  # noqa: BLE001
+        return 0, f"could not copy live sessions ({exc}); sign-in once more if needed"
+
+
+def legacy_container_login_present() -> bool:
+    """True when this box still has a legacy Docker login (compose file,
+    mid-migration backup, legacy containers, or claimed secrets with no native
+    users file yet). Never wakes Docker on an already-native install."""
+    if dep.AUTHELIA_COMPOSE.exists() or dep.AUTHELIA_CONFIG_BACKUP.exists():
+        return True
+    if not shutil.which(DOCKER[0]):
+        return False
+    if dep.docker_active():
+        for cname in (dep.AUTHELIA_PROJECT, dep.AUTHELIA_REDIS):
+            res = run([*DOCKER, "ps", "-aq", "--filter", f"name=^{cname}$"])
+            if res.returncode == 0 and res.stdout.strip():
+                return True
+    if (not dep.unclaimed() and dep.AUTHELIA_SECRETS.exists()
+            and not (dep.authelia_data_dir() / "users_database.yml").is_file()):
+        if not dep.docker_active():
+            run(["systemctl", "start", "docker.service"])
+        import loam_data_disk as dd  # noqa: PLC0415
+        if dd.docker_volume_path("authelia-data", docker=DOCKER[0], run=run) is not None:
+            return True
+    return False
+
+
+def _legacy_container_images() -> list[str]:
+    images: list[str] = []
+    for cname in (dep.AUTHELIA_PROJECT, dep.AUTHELIA_REDIS):
+        res = run([*DOCKER, "inspect", "-f", "{{.Config.Image}}", cname])
+        if res.returncode == 0 and res.stdout.strip():
+            images.append(res.stdout.strip())
+    for img in (dep.AUTHELIA_IMAGE, dep.AUTHELIA_REDIS_IMAGE):
+        if img not in images:
+            images.append(img)
+    return images
+
+
+def cleanup_legacy_login_docker() -> None:
+    """Remove old Docker login containers, network, volumes, images, and
+    compose.yaml. Called ONLY AFTER the native login service is proven healthy."""
+    dep.AUTHELIA_CONFIG_BACKUP.unlink(missing_ok=True)
+    if shutil.which(DOCKER[0]) and dep.docker_active():
+        images = _legacy_container_images()
+        if dep.AUTHELIA_COMPOSE.exists():
+            compose(dep.AUTHELIA_COMPOSE, "down", "--remove-orphans")
+        for cname in (dep.AUTHELIA_PROJECT, dep.AUTHELIA_REDIS):
+            run([*DOCKER, "rm", "-f", cname])
+        run([*DOCKER, "network", "rm", f"{dep.AUTHELIA_PROJECT}_default"])
+        for vol in ("authelia-data", "authelia-sessions"):
+            run([*DOCKER, "volume", "rm", vol])
+        for img in images:
+            run([*DOCKER, "image", "rm", img])
+    dep.AUTHELIA_COMPOSE.unlink(missing_ok=True)
+    print("  authelia cleanup: removed legacy Docker login containers, volumes, images and compose.yaml")
+
+
+def _rollback_failed_migration(same_dir: bool, target_dir: Path, reason: str) -> None:
+    """Put the legacy Docker login containers back up after a failed native cutover."""
+    jlog = run(["journalctl", "-u", dep.AUTHELIA_SERVICE_NAME, "-u", dep.AUTHELIA_REDIS_SERVICE_NAME,
+                "-n", "25", "--no-pager"]).stdout.strip()
+    run(["systemctl", "disable", "--now", dep.AUTHELIA_SERVICE_NAME, dep.AUTHELIA_REDIS_SERVICE_NAME])
+    dep.AUTHELIA_UNIT.unlink(missing_ok=True)
+    dep.AUTHELIA_REDIS_UNIT.unlink(missing_ok=True)
+    run(["systemctl", "daemon-reload"])
+    if dep.AUTHELIA_CONFIG_BACKUP.exists():
+        write_root(dep.AUTHELIA_CONFIG, dep.AUTHELIA_CONFIG_BACKUP.read_text(encoding="utf-8"), 0o644)
+    if same_dir:
+        duid, dgid = dep.docker_root_owner()
+        os.chown(target_dir, duid, dgid)
+        for top, dirs, files in os.walk(target_dir, followlinks=False):
+            for name in dirs + files:
+                try:
+                    os.lchown(os.path.join(top, name), duid, dgid)
+                except OSError:
+                    pass
+    if not dep.docker_active():
+        run(["systemctl", "start", "docker.service"])
+    if dep.AUTHELIA_COMPOSE.exists():
+        res = compose(dep.AUTHELIA_COMPOSE, "up", "-d", "--force-recreate")
+    else:
+        res = run([*DOCKER, "start", dep.AUTHELIA_REDIS, dep.AUTHELIA_PROJECT])
+    # Wait for the restored container login to answer /api/health.
+    restored = False
+    deadline = time.monotonic() + 30.0
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{dep.AUTHELIA_PORT}/api/health", timeout=2) as r:
+                if r.status == 200:
+                    restored = True
+                    break
+        except OSError:
+            pass
+        time.sleep(0.5)
+    if restored:
+        dep.AUTHELIA_CONFIG_BACKUP.unlink(missing_ok=True)
+        status_note = "old Docker login containers are back up and healthy"
+    else:
+        status_note = f"WARNING: restoring Docker login containers exited {res.returncode} ({res.stderr.strip()[:200]})"
+    tail = f"\nRecent service journal:\n{jlog[-1200:]}" if jlog else ""
+    die(f"native login cutover failed ({reason}); {status_note}.{tail}")
+
+
+def migrate_container_login(new_config: str) -> None:
+    """Move a claimed box from Docker Authelia+Redis to native systemd services,
+    keeping every user, password, passkey, TOTP secret, and live session.
+    Safe to interrupt and automatically reverts to Docker if the native service
+    does not become healthy."""
+    target_dir = dep.authelia_data_dir()
+    uid, gid = _authelia_ids()
+
+    # Recovery from a crash after cutover succeeded but before Docker cleanup ran.
+    if (run(["systemctl", "is-active", "--quiet", dep.AUTHELIA_SERVICE_NAME]).returncode == 0
+            and (target_dir / "users_database.yml").is_file()
+            and dep.login_health_ok(timeout=3.0)[0]):
+        print("  authelia: native service already healthy; finishing legacy Docker cleanup")
+        if not dep.docker_active() and shutil.which(DOCKER[0]):
+            run(["systemctl", "start", "docker.service"])
+        cleanup_legacy_login_docker()
+        return
+
+    # 1. Save a durable backup of the container config before changing anything.
+    if not dep.AUTHELIA_CONFIG_BACKUP.exists() and dep.AUTHELIA_CONFIG.exists():
+        old_cfg = dep.AUTHELIA_CONFIG.read_text(encoding="utf-8")
+        if "/data/users_database.yml" in old_cfg or "host: redis" in old_cfg:
+            write_root(dep.AUTHELIA_CONFIG_BACKUP, old_cfg, 0o644)
+
+    # 2. Ensure Docker is up and locate the existing authelia-data volume.
+    if not dep.docker_active():
+        run(["systemctl", "start", "docker.service"])
+    import loam_data_disk as dd  # noqa: PLC0415
+    vol_dir = dd.docker_volume_path("authelia-data", docker=DOCKER[0], run=run)
+    src_dir: Path | None = None
+    if vol_dir is not None and (vol_dir / "users_database.yml").is_file():
+        src_dir = vol_dir
+    elif (target_dir / "users_database.yml").is_file():
+        src_dir = target_dir
+    if src_dir is None:
+        dep.AUTHELIA_UNIT.unlink(missing_ok=True)
+        dep.AUTHELIA_REDIS_UNIT.unlink(missing_ok=True)
+        dep.AUTHELIA_CONFIG_BACKUP.unlink(missing_ok=True)
+        run(["systemctl", "daemon-reload"])
+        die("cannot migrate login: neither Docker volume authelia-data nor "
+            f"{target_dir} holds users_database.yml; legacy containers left untouched")
+
+    # 3. Start native Redis FIRST while the old Docker login still serves traffic.
+    res = run(["systemctl", "enable", "--now", dep.AUTHELIA_REDIS_SERVICE_NAME])
+    redis_ok = res.returncode == 0
+    if redis_ok:
+        deadline = time.monotonic() + 15.0
+        redis_ok = False
+        while time.monotonic() < deadline:
+            if dep.redis_ping():
+                redis_ok = True
+                break
+            time.sleep(0.2)
+    if not redis_ok:
+        run(["systemctl", "disable", "--now", dep.AUTHELIA_REDIS_SERVICE_NAME])
+        dep.AUTHELIA_UNIT.unlink(missing_ok=True)
+        dep.AUTHELIA_REDIS_UNIT.unlink(missing_ok=True)
+        dep.AUTHELIA_CONFIG_BACKUP.unlink(missing_ok=True)
+        run(["systemctl", "daemon-reload"])
+        die(f"{dep.AUTHELIA_REDIS_SERVICE_NAME} failed to start; legacy Docker login untouched")
+
+    # 4. Bulk-copy live sessions while the old Docker login is still serving.
+    copied, sess_note = migrate_sessions_to_native()
+    print(f"  authelia sessions: {sess_note}")
+
+    # 5. Cutover: stop container Authelia, copy data, write native config, start native service.
+    same_dir = src_dir.resolve() == target_dir.resolve()
+    try:
+        run([*DOCKER, "stop", "-t", "10", dep.AUTHELIA_PROJECT])
+        if copied < 2000:
+            # Quick delta pass to catch any session created during bulk copy.
+            copied2, _ = migrate_sessions_to_native()
+            if copied2 != copied:
+                print(f"  authelia sessions: synced {copied2} key(s) at cutover")
+        run([*DOCKER, "stop", "-t", "10", dep.AUTHELIA_REDIS])
+
+        copy_login_data(src_dir, target_dir, uid, gid)
+        if not (target_dir / "users_database.yml").is_file() or (target_dir / "users_database.yml").stat().st_size == 0:
+            raise RuntimeError(f"{target_dir / 'users_database.yml'} is missing or empty after copy")
+
+        write_root(dep.AUTHELIA_CONFIG, new_config, 0o644)
+        res = run(["systemctl", "enable", dep.AUTHELIA_SERVICE_NAME])
+        if res.returncode != 0:
+            raise RuntimeError(f"systemctl enable {dep.AUTHELIA_SERVICE_NAME} failed: {res.stderr.strip()}")
+        res = run(["systemctl", "restart", dep.AUTHELIA_SERVICE_NAME])
+        if res.returncode != 0:
+            raise RuntimeError(f"systemctl restart {dep.AUTHELIA_SERVICE_NAME} failed: {res.stderr.strip()}")
+
+        ok, detail = check_native_login_ready(30.0)
+        if not ok:
+            raise RuntimeError(detail)
+    except Exception as exc:  # noqa: BLE001
+        _rollback_failed_migration(same_dir, target_dir, str(exc))
+        return
+
+    print(f"  authelia: migrated to native {dep.AUTHELIA_SERVICE_NAME} (healthy)")
+    # 6. Only after the native login is proven healthy: remove legacy Docker state.
+    cleanup_legacy_login_docker()
+
+
+def _ensure_legacy_docker_volume() -> Path:
+    """Create Docker's `authelia-data` volume (bind-backed on --data-dir
+    installs, plain volume otherwise) for rolling back to a pre-service release."""
+    import loam_data_disk as dd  # noqa: PLC0415
+    target = dep.login_data_dir()
+    if target is None:
+        res = run([*DOCKER, "volume", "create", "authelia-data"])
+        if res.returncode != 0:
+            die(f"could not create authelia-data volume: {res.stderr.strip()[:300]}")
+    else:
+        info = dd.docker_volume_info("authelia-data", docker=DOCKER[0], run=run)
+        if info is None:
+            res = run([*DOCKER, "volume", "create", "--driver", "local",
+                       "--opt", "type=none", "--opt", "o=bind",
+                       "--opt", f"device={target}", "authelia-data"])
+            if res.returncode != 0:
+                die(f"could not create bind-backed authelia-data volume: {res.stderr.strip()[:300]}")
+    vol_dir = dd.docker_volume_path("authelia-data", docker=DOCKER[0], run=run)
+    if vol_dir is None:
+        die("could not resolve Docker volume authelia-data path")
+    return vol_dir
+
+
+def restore_container_login() -> int:
+    """Hand a native login back to Docker containers (used by `loam update`
+    when rolling back to a release that predates native login services).
+    Preserves every user, password, passkey and TOTP secret."""
+    if not dep.AUTHELIA_UNIT.exists() and not dep.AUTHELIA_REDIS_UNIT.exists():
+        print("  authelia: no native login units installed; nothing to hand back")
+        return 0
+    if not shutil.which(DOCKER[0]):
+        die("Docker is not installed; cannot restore container login")
+    if not dep.docker_active():
+        res = run(["systemctl", "start", "docker.service"])
+        if res.returncode != 0:
+            die(f"could not start docker.service: {res.stderr.strip()}")
+
+    # Pre-pull images WHILE native login is still serving so an offline box
+    # fails safely before stopping the live login.
+    for img in (dep.AUTHELIA_IMAGE, dep.AUTHELIA_REDIS_IMAGE):
+        if run([*DOCKER, "image", "inspect", img]).returncode != 0:
+            print(f"  pulling {img} for rollback…")
+            pull = run([*DOCKER, "pull", img], timeout=600)
+            if pull.returncode != 0:
+                die(f"could not pull {img} for container rollback; native login left running: "
+                    f"{pull.stderr.strip()[:300]}")
+
+    vol_dir = _ensure_legacy_docker_volume()
+    duid, dgid = dep.docker_root_owner()
+    native_dir = dep.authelia_data_dir()
+
+    run(["systemctl", "stop", dep.AUTHELIA_SERVICE_NAME, dep.AUTHELIA_REDIS_SERVICE_NAME])
+    if (native_dir / "users_database.yml").is_file():
+        copy_login_data(native_dir, vol_dir, duid, dgid)
+    else:
+        os.chown(vol_dir, duid, dgid)
+        os.chmod(vol_dir, 0o700)
+
+    run(["systemctl", "disable", dep.AUTHELIA_SERVICE_NAME, dep.AUTHELIA_REDIS_SERVICE_NAME])
+    dep.AUTHELIA_UNIT.unlink(missing_ok=True)
+    dep.AUTHELIA_REDIS_UNIT.unlink(missing_ok=True)
+    run(["systemctl", "daemon-reload"])
+    if dep.AUTHELIA_CONFIG_BACKUP.exists():
+        write_root(dep.AUTHELIA_CONFIG, dep.AUTHELIA_CONFIG_BACKUP.read_text(encoding="utf-8"), 0o644)
+        dep.AUTHELIA_CONFIG_BACKUP.unlink(missing_ok=True)
+    print(f"  authelia: handed login data back to Docker volume authelia-data ({vol_dir})")
+    return 0
+
+
+def _claim_is_ancestor() -> bool:
+    """True if this process was launched by loam-claim.service (so gen-deploy
+    must not restart loam-claim.service and kill itself mid-claim)."""
+    res = run(["systemctl", "show", "-p", "MainPID", "--value", "loam-claim.service"])
+    try:
+        claim_pid = int((res.stdout or "").strip())
+    except ValueError:
+        return False
+    if claim_pid <= 1:
+        return False
+    pid = os.getpid()
+    seen: set[int] = set()
+    while pid > 1 and pid not in seen:
+        if pid == claim_pid:
+            return True
+        seen.add(pid)
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+            ppid = int(stat[stat.rfind(")") + 2:].split()[1])
+        except (OSError, ValueError, IndexError):
+            break
+        pid = ppid
+    return False
+
+
+def start_login_services(config_changed: bool, unit_changed: bool,
+                         redis_unit_changed: bool, binary_changed: bool,
+                         switching_claim: bool) -> None:
+    """Ensure the native login services are enabled, running and healthy."""
+    ensure_login_data_dir(dry=False)
+    redis_active = run(["systemctl", "is-active", "--quiet", dep.AUTHELIA_REDIS_SERVICE_NAME]).returncode == 0
+    run(["systemctl", "enable", dep.AUTHELIA_REDIS_SERVICE_NAME])
+    if redis_unit_changed or not redis_active:
+        res = run(["systemctl", "restart", dep.AUTHELIA_REDIS_SERVICE_NAME])
+        print(f"  authelia redis: {'restarted' if redis_active else 'started'} (exit {res.returncode})")
+        if res.returncode:
+            if switching_claim:
+                die(f"{dep.AUTHELIA_REDIS_SERVICE_NAME} could not start: {res.stderr.strip()}")
+            die(f"{dep.AUTHELIA_REDIS_SERVICE_NAME} failed: {res.stderr.strip()}")
+    else:
+        print("  authelia redis: running (unchanged)")
+
+    auth_active = run(["systemctl", "is-active", "--quiet", dep.AUTHELIA_SERVICE_NAME]).returncode == 0
+    run(["systemctl", "enable", dep.AUTHELIA_SERVICE_NAME])
+    if unit_changed or config_changed or binary_changed or not auth_active:
+        res = run(["systemctl", "restart", dep.AUTHELIA_SERVICE_NAME])
+        print(f"  authelia: {'restarted' if auth_active else 'started'} (exit {res.returncode})")
+        if res.returncode:
+            if switching_claim:
+                die(f"{dep.AUTHELIA_SERVICE_NAME} could not start: {res.stderr.strip()}")
+            die(f"{dep.AUTHELIA_SERVICE_NAME} failed: {res.stderr.strip()}")
+    else:
+        print("  authelia: running (unchanged)")
+
+
 def generate(dry: bool) -> int:
+    ensure_authelia_user(dry)
+    binary_changed = ensure_authelia_binary(dry)
+    ensure_redis_server(dry)
     files = dep.generated()
     ensure_access_log_dir(dry)
     validate_caddyfile(files[dep.CADDYFILE])
@@ -294,6 +1016,7 @@ def generate(dry: bool) -> int:
     validate_authelia(files[dep.AUTHELIA_CONFIG])
     ensure_static_roots(dry)
     ensure_browser_output_dir(dry)
+    ensure_login_data_dir(dry)
     warn_unresolved()
     caddy = files[dep.CADDYFILE]
     switching_claim = (dep.CADDYFILE.exists()
@@ -301,6 +1024,8 @@ def generate(dry: bool) -> int:
                             dep.CLAIM_MARKER in dep.CADDYFILE.read_text(encoding="utf-8"))
                        and dep.CLAIM_MARKER not in caddy
                        and dep.edge_ready() and not dep.unclaimed())
+    migrating = (not dep.unclaimed() and dep.AUTHELIA_SECRETS.exists()
+                 and legacy_container_login_present())
     changed: list[Path] = []
     for path, content in files.items():
         d = diff(path, content)
@@ -312,11 +1037,16 @@ def generate(dry: bool) -> int:
         if dry:
             print("\n".join("    " + line for line in d.splitlines()))
     if dry:
+        if migrating:
+            print("  would migrate login from Docker containers to loam-authelia.service + loam-authelia-redis.service")
         print("  [dry-run] nothing written, nothing reloaded")
         return 0
     for path in changed:
-        if path != dep.CADDYFILE or not switching_claim:
-            write_root(path, files[path], dep.MODES.get(path, 0o644))
+        if path == dep.CADDYFILE and switching_claim:
+            continue
+        if path == dep.AUTHELIA_CONFIG and migrating:
+            continue
+        write_root(path, files[path], dep.MODES.get(path, 0o644))
 
     # Apply. Each of these is idempotent and each says what it did.
     # Before Caddy: the previews' listener binds an address docker may not
@@ -336,7 +1066,8 @@ def generate(dry: bool) -> int:
     # what restarts an app, and it says what it did.
     need_daemon_reload = any(
         u in changed for u in (
-            dep.SERVICE_UNIT, dep.BROWSER_PROXY_SOCKET, dep.BROWSER_PROXY_UNIT,
+            dep.SERVICE_UNIT, dep.AUTHELIA_UNIT, dep.AUTHELIA_REDIS_UNIT,
+            dep.BROWSER_PROXY_SOCKET, dep.BROWSER_PROXY_UNIT,
             dep.DOCKER_IDLE_UNIT, dep.SIGHT_FIREWALL_UNIT, dep.INBOUND_FIREWALL_UNIT,
         )
     )
@@ -355,21 +1086,32 @@ def generate(dry: bool) -> int:
         print("  daemon.json changed. NOT restarting docker from here: "
               "`systemctl restart docker` applies it (live-restore keeps "
               "containers up); do it on a brief and say so.")
+
     if dep.unclaimed():
         print(f"  authelia: not started; this install is unclaimed (no "
               f"{dep.CLAIMED_FILE}), so the login has no user. The claim starts it.")
+        if dep.AUTHELIA_COMPOSE.exists():
+            # Upgraded while unclaimed: drop unused legacy compose file/volumes.
+            if not dep.docker_active() and shutil.which(DOCKER[0]):
+                run(["systemctl", "start", "docker.service"])
+            cleanup_legacy_login_docker()
     elif dep.AUTHELIA_SECRETS.exists():
-        if os.geteuid() == 0 and not dep.docker_active():
-            run(["systemctl", "start", "docker.service"])
-        args = ["up", "-d", "--remove-orphans"]
-        if dep.AUTHELIA_CONFIG in changed:
-            args.append("--force-recreate")   # Authelia does not reload its config
-        res = compose(dep.AUTHELIA_COMPOSE, *args)
-        print(f"  authelia: compose up (exit {res.returncode})")
-        if res.returncode:
+        if migrating:
+            migrate_container_login(files[dep.AUTHELIA_CONFIG])
+        else:
+            start_login_services(
+                config_changed=dep.AUTHELIA_CONFIG in changed,
+                unit_changed=dep.AUTHELIA_UNIT in changed,
+                redis_unit_changed=dep.AUTHELIA_REDIS_UNIT in changed,
+                binary_changed=binary_changed,
+                switching_claim=switching_claim,
+            )
             if switching_claim:
-                die(f"authelia could not start: {res.stderr.strip()}")
-            print(res.stderr.strip())
+                wait_for_login()
+            else:
+                ok, reason = check_native_login_ready(30.0)
+                if not ok:
+                    die(f"authelia did not become healthy after apply ({reason})")
     elif switching_claim:
         die("authelia has no secrets. The claim page is still up.")
     else:
@@ -377,7 +1119,6 @@ def generate(dry: bool) -> int:
               f"<user> first. The gate still holds: forward_auth to a dead "
               f"upstream answers 502, not the app.")
     if switching_claim:
-        wait_for_login()
         switch_claim_edge(caddy)
 
     # Keep installed system units (loam-claim.service, loam-broker-firewall.service)
@@ -401,6 +1142,13 @@ def generate(dry: bool) -> int:
             run(["systemctl", "daemon-reload"])
             for unit_name in re_enable_system:
                 run(["systemctl", "enable", unit_name])
+        # Refresh running loam-claim.service so its login-code relay reads from
+        # the native data directory instead of an older in-memory Docker path.
+        if (not switching_claim and not dep.unclaimed()
+                and run(["systemctl", "is-active", "--quiet", "loam-claim.service"]).returncode == 0
+                and not _claim_is_ancestor()):
+            res = run(["systemctl", "try-restart", "loam-claim.service"])
+            print(f"  loam-claim.service: restarted (exit {res.returncode})")
 
     # Agents' browser: created stopped on BROWSER_BACKEND_PORT, woken on first
     # browser tool call by loam-browser-proxy.socket on BROWSER_PORT (8931).
@@ -472,13 +1220,12 @@ def generate(dry: bool) -> int:
     status = dep.inbound_wall_status()
     print(f"  inbound wall: {status or 'not raised'} (exit {res.returncode})"
           f"{': ' + res.stderr.strip() if res.returncode and res.stderr.strip() else ''}")
-    # If Docker was started solely to prepare loam-browser and no other
-    # container needs it, put Docker and containerd back to sleep.
+    # If Docker was started solely to prepare loam-browser or migrate the login
+    # and no other container needs it, put Docker and containerd back to sleep.
     if os.geteuid() == 0 and dep.BROWSER_PROXY_UNIT in files:
-        import loam_browser_proxy  # noqa: PLC0415
         slept = loam_browser_proxy.DockerController().sleep_docker_if_unused()
         if slept.get("stopped_docker"):
-            print("  docker: asleep (no other container needs Docker)")
+            print("  docker: asleep (no container needs Docker)")
     # Older updaters (<= 0.2.33) do not re-exec into the new release or know
     # about the `swap` step; ensure tiered swap here when the host has none yet.
     if os.geteuid() == 0:
@@ -496,7 +1243,9 @@ def generate(dry: bool) -> int:
 def show(name: str) -> int:
     renders = {
         "caddyfile": dep.caddyfile, "daemon": dep.daemon_json,
-        "authelia": dep.authelia_config, "authelia-compose": dep.authelia_compose,
+        "authelia": dep.authelia_config,
+        "authelia-unit": dep.authelia_unit,
+        "authelia-redis-unit": dep.authelia_redis_unit,
         "browser": dep.browser_compose,
         "browser-proxy-socket": dep.browser_proxy_socket,
         "browser-proxy-unit": dep.browser_proxy_unit,
@@ -513,74 +1262,22 @@ def show(name: str) -> int:
     return 0
 
 
-def wait_healthy(container: str, seconds: int = 90) -> str:
-    deadline = time.time() + seconds
-    state = "?"
-    while time.time() < deadline:
-        res = run([*DOCKER, "inspect", "-f", "{{.State.Health.Status}}", container])
-        state = res.stdout.strip()
-        if state == "healthy":
-            return state
-        time.sleep(3)
-    return state
-
-
-def ensure_login_volume() -> None:
-    """Ensure the `authelia-data` Docker volume exists. On a `--data-dir`
-    install it is a `local` bind volume pointing at `<data_dir>/login/authelia-data`,
-    owned by this server's remapped container root (`dockremap`). Without
-    `storage.data_dir`, it is a plain Docker-managed volume as before."""
-    target = dep.login_data_dir()
-    if target is None:
-        res = run([*DOCKER, "volume", "create", "authelia-data"])
-        if res.returncode:
-            die(f"could not create the authelia-data volume: {res.stderr.strip()[:300]}")
-        print("  authelia-data volume present")
-        return
-    uid, gid = dep.docker_root_owner()
-    target.parent.mkdir(parents=True, mode=0o755, exist_ok=True)
-    os.chmod(target.parent, 0o755)
-    target.mkdir(mode=0o700, exist_ok=True)
-    os.chmod(target, 0o700)
-    os.chown(target, uid, gid)
-    for top, dirs, files in os.walk(target, followlinks=False):
-        for name in dirs + files:
-            p = os.path.join(top, name)
-            try:
-                os.lchown(p, uid, gid)
-            except OSError:
-                pass
-    import loam_data_disk as dd  # noqa: PLC0415
-    info = dd.docker_volume_info("authelia-data", docker=DOCKER[0], run=run)
-    if info is not None:
-        dev = ((info.get("Options") or {}).get("device") or "").strip()
-        if dev and Path(dev).resolve() == target.resolve():
-            print(f"  authelia-data volume present ({target})")
-            return
-        die(f"docker volume authelia-data already exists with device {dev or '(none)'!r}, "
-            f"expected {target}")
-    res = run([*DOCKER, "volume", "create", "--driver", "local",
-               "--opt", "type=none", "--opt", "o=bind",
-               "--opt", f"device={target}", "authelia-data"])
-    if res.returncode:
-        die(f"could not create the authelia-data volume at {target}: {res.stderr.strip()[:300]}")
-    print(f"  authelia-data volume present ({target})")
-
-
 def init_secrets() -> int:
     """An install's login, before anyone has claimed it (first release L12):
-    Authelia's three secrets and its data volume, and no user. The claim
-    (bin/loam-claim) writes the user; the old --init-login is the first install's
-    history and an operator's alternative."""
+    system user, pinned Authelia binary, native Redis, three secrets, and data
+    directory, with no user account yet (bin/loam-claim writes the account)."""
     for d, mode in ((dep.ETC, 0o755), (dep.AUTHELIA_DIR, 0o755), (dep.SHARE_DIR, 0o700)):
         d.mkdir(parents=True, exist_ok=True)
         os.chmod(d, mode)
+    ensure_authelia_user(dry=False)
+    ensure_authelia_binary(dry=False)
+    ensure_redis_server(dry=False)
     if dep.AUTHELIA_SECRETS.exists():
         print(f"  {dep.AUTHELIA_SECRETS} exists; kept")
     else:
         write_root(dep.AUTHELIA_SECRETS, _secrets_env(), 0o600)
         print(f"  wrote {dep.AUTHELIA_SECRETS} (0600 root, three secrets)")
-    ensure_login_volume()
+    ensure_login_data_dir(dry=False)
     return 0
 
 
@@ -598,68 +1295,69 @@ def init_login(user: str) -> int:
         die(f"username {user!r}: lowercase, digits, - and _")
     if dep.AUTHELIA_SECRETS.exists():
         die(f"{dep.AUTHELIA_SECRETS} exists; the login is already initialised. "
-            f"Remove it and the authelia-data volume by hand to start over.")
+            f"Remove it and {dep.authelia_data_dir()} by hand to start over.")
     dom = dep.domain()
     for d, mode in ((dep.ETC, 0o755), (dep.AUTHELIA_DIR, 0o755), (dep.SHARE_DIR, 0o700)):
         d.mkdir(parents=True, exist_ok=True)
         os.chmod(d, mode)
 
-    # 1. The three secrets, root-only, environment form (Authelia accepts
-    #    either; a file per secret would have to be readable by the
-    #    container's remapped root, which is exactly what root-only forbids).
-    env = "\n".join(
-        f"{k}={secrets.token_hex(32)}" for k in (
-            "AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET",
-            "AUTHELIA_SESSION_SECRET",
-            "AUTHELIA_STORAGE_ENCRYPTION_KEY",
-        )) + "\n"
-    write_root(dep.AUTHELIA_SECRETS, env, 0o600)
+    ensure_authelia_user(dry=False)
+    ensure_authelia_binary(dry=False)
+    ensure_redis_server(dry=False)
+
+    # 1. The three secrets, root-only, environment form.
+    write_root(dep.AUTHELIA_SECRETS, _secrets_env(), 0o600)
     print(f"  wrote {dep.AUTHELIA_SECRETS} (0600 root, three secrets)")
 
-    ensure_login_volume()
+    ensure_login_data_dir(dry=False)
+    data_dir = dep.authelia_data_dir()
+    uid, gid = _authelia_ids()
 
     # 2. The user, with a generated first password hashed by Authelia's own
-    #    CLI. The password is passed to the child's argv and never printed.
+    #    native CLI over a PTY (never in argv, env or disk).
     password = secrets.token_urlsafe(18)
-    res = run([*DOCKER, "run", "--rm", dep.AUTHELIA_IMAGE, "authelia", "crypto",
-               "hash", "generate", "argon2", "--password", password])
-    m = re.search(r"Digest:\s*(\S+)", res.stdout)
-    if res.returncode or not m:
-        die(f"hash generation failed: {res.stderr.strip()[:300]}")
+    try:
+        digest = dep.hash_password(password)
+    except Exception as exc:  # noqa: BLE001
+        die(f"hash generation failed: {exc}")
     users = (
         "# Authelia's users. Written once by gen-deploy --init-login; Authelia\n"
-        "# rewrites it when the password changes. Lives in the authelia-data\n"
-        "# volume, never in a repo.\n"
+        "# rewrites it when the password changes. Lives outside every repo.\n"
         "users:\n"
         f"  {user}:\n"
         "    disabled: false\n"
         f"    displayname: '{user.capitalize()}'\n"
-        f"    password: '{m.group(1)}'\n"
+        f"    password: '{digest}'\n"
         f"    email: '{user}@{dom}'\n"
         "    groups:\n"
         "      - 'admins'\n"
     )
-    res = run([*DOCKER, "run", "--rm", "-i", "-v", "authelia-data:/data",
-               "--entrypoint", "sh", dep.AUTHELIA_IMAGE, "-c",
-               "cat > /data/users_database.yml && chmod 600 /data/users_database.yml"],
-              input=users)
-    if res.returncode:
-        die(f"seeding the users file failed: {res.stderr.strip()[:300]}")
-    print("  seeded users_database.yml in the authelia-data volume")
+    users_path = data_dir / "users_database.yml"
+    tmp_users = users_path.with_name(".users_database.yml.init")
+    tmp_users.write_text(users, encoding="utf-8")
+    os.chown(tmp_users, uid, gid)
+    os.chmod(tmp_users, 0o600)
+    os.replace(tmp_users, users_path)
+    print(f"  seeded {users_path}")
 
-    # 3. Config and container.
-    write_root(dep.AUTHELIA_CONFIG, dep.authelia_config())
-    write_root(dep.AUTHELIA_COMPOSE, dep.authelia_compose())
-    res = compose(dep.AUTHELIA_COMPOSE, "up", "-d")
-    if res.returncode:
-        die(f"authelia would not start: {res.stderr.strip()[:500]}")
-    print(f"  authelia: {wait_healthy('loam-authelia')}")
+    # 3. Config and native systemd services.
+    write_root(dep.AUTHELIA_CONFIG, dep.authelia_config(), 0o644)
+    write_root(dep.AUTHELIA_REDIS_UNIT, dep.authelia_redis_unit(), 0o644)
+    write_root(dep.AUTHELIA_UNIT, dep.authelia_unit(), 0o644)
+    run(["systemctl", "daemon-reload"])
+    start_login_services(config_changed=True, unit_changed=True,
+                         redis_unit_changed=True, binary_changed=False,
+                         switching_claim=False)
+    ok, reason = check_native_login_ready(30.0)
+    if not ok:
+        die(f"authelia would not start ({reason})")
+    print("  authelia: healthy")
 
-    # 4. A TOTP device, so the first session can be two-factor and therefore
-    #    elevated without a one-time code this box cannot mail.
-    res = compose(dep.AUTHELIA_COMPOSE, "exec", "-T", "authelia", "authelia",
-                  "storage", "user", "totp", "generate", user, "--issuer", dom,
-                  "--force", "--config", "/config/configuration.yml")
+    # 4. A TOTP device, run as loam-authelia so SQLite never leaves root-owned sidecars.
+    env = {**os.environ, **dep.read_env_file(dep.AUTHELIA_SECRETS)}
+    res = run([str(dep.AUTHELIA_BIN), "storage", "user", "totp", "generate", user,
+               "--issuer", dom, "--force", "--config", str(dep.AUTHELIA_CONFIG)],
+              user=uid, group=gid, extra_groups=[], env=env)
     url = re.search(r"(otpauth://\S+)", res.stdout)
     if res.returncode or not url:
         die(f"TOTP generation failed: {(res.stderr or res.stdout).strip()[:300]}")
@@ -738,7 +1436,8 @@ def unshare(app_name: str) -> int:
 # through to a live render, which wrote the Caddyfile, reloaded Caddy and ran
 # `compose up` (caused 2026-11-17).
 FLAGS = {"--dry-run": False, "--show": True, "--init-login": True,
-         "--init-secrets": False, "--share": True, "--unshare": True, "--link": True}
+         "--init-secrets": False, "--restore-container-login": False,
+         "--share": True, "--unshare": True, "--link": True}
 
 
 def check_args(argv: list[str]) -> int | None:
@@ -775,6 +1474,8 @@ def main() -> int:
         return init_login(argv[argv.index("--init-login") + 1])
     if "--init-secrets" in argv:
         return init_secrets()
+    if "--restore-container-login" in argv:
+        return restore_container_login()
     if "--share" in argv:
         return share(argv[argv.index("--share") + 1])
     if "--unshare" in argv:

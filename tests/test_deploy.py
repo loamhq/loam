@@ -198,7 +198,6 @@ try:
     apps = dep.records()
     clean = {"alpha": ("alpha_default", "loam-broker"),
              "beta": ("beta_default",),
-             "loam-authelia": ("loam-authelia_default",),
              "loam-browser": (dep.SIGHT_NETWORK,)}
     check("live state matching the records is no finding",
           dep.network_findings(apps, clean) == [], str(dep.network_findings(apps, clean)))
@@ -559,8 +558,9 @@ try:
     record("gamma", 'exposure = "shared"\n[share]\nexpires = 2026-09-01\n', COMPOSE_OK.format(name="gamma", port=8103))
     record("pages", f'exposure = "private"\nstatic_root = "{root}/www"\nhide = [".git", "private/notes"]\n')
 
-    check("generated() covers the broker wall, fifteen other live paths and the sign-in page's four", set(dep.generated(today)) == {
-        dep.loam_broker.FIREWALL_SCRIPT, dep.CADDYFILE, dep.DAEMON_JSON, dep.AUTHELIA_CONFIG, dep.AUTHELIA_COMPOSE,
+    check("generated() covers the broker wall, sixteen other live paths and the sign-in page's four", set(dep.generated(today)) == {
+        dep.loam_broker.FIREWALL_SCRIPT, dep.CADDYFILE, dep.DAEMON_JSON, dep.AUTHELIA_CONFIG,
+        dep.AUTHELIA_UNIT, dep.AUTHELIA_REDIS_UNIT,
         dep.BROWSER_COMPOSE, dep.BROWSER_PROXY_SOCKET, dep.BROWSER_PROXY_UNIT, dep.DOCKER_IDLE_UNIT,
         dep.SIGHT_FIREWALL_SCRIPT, dep.SIGHT_FIREWALL_UNIT,
         dep.INBOUND_FIREWALL_SCRIPT, dep.INBOUND_FIREWALL_UNIT, dep.SUDOERS,

@@ -416,6 +416,49 @@ def run_docker_controller_tests() -> None:
               and any(c[:2] == ["docker", "stop"] for c in calls_b)
               and not any(c[:2] == ["systemctl", "stop"] for c in calls_b),
               (out_b, calls_b))
+
+        # Case C: claimed native-login box (secrets exist, NO legacy compose.yaml, no app containers)
+        # -> sleep() stops loam-browser AND puts Docker + containerd to sleep!
+        orig_secrets, orig_compose = dep.AUTHELIA_SECRETS, dep.AUTHELIA_COMPOSE
+        try:
+            fake_secrets = tmp / "secrets.env"
+            fake_secrets.write_text("AUTHELIA_JWT_SECRET=x\n", encoding="utf-8")
+            fake_compose = tmp / "nonexistent-compose.yaml"
+            dep.AUTHELIA_SECRETS = fake_secrets
+            dep.AUTHELIA_COMPOSE = fake_compose
+            dep.unclaimed = lambda: False
+
+            calls_c: list[list[str]] = []
+            docker_up_c = [True]
+
+            def runner_c(argv, timeout=120):
+                calls_c.append(argv)
+                if argv[:3] == ["systemctl", "is-active", "--quiet"]:
+                    return type("R", (), {"returncode": 0 if docker_up_c[0] else 3, "stdout": "", "stderr": ""})()
+                if argv[:2] == ["docker", "inspect"] and "{{.State.Running}}" in argv:
+                    return type("R", (), {"returncode": 0, "stdout": "true\n", "stderr": ""})()
+                if argv == ["docker", "ps", "-aq"]:
+                    return type("R", (), {"returncode": 0, "stdout": "abc123\n", "stderr": ""})()
+                if argv[:2] == ["docker", "inspect"] and "RestartPolicy" in argv[3]:
+                    return type("R", (), {"returncode": 0, "stdout": "/loam-browser\tfalse\tno\n", "stderr": ""})()
+                if argv[:2] == ["systemctl", "stop"] and "docker.service" in argv:
+                    docker_up_c[0] = False
+                return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+            ctrl_c = bp.DockerController(lock_path=tmp / "c.lock", state_path=tmp / "c.json", runner=runner_c)
+            out_c = ctrl_c.sleep()
+            check("claimed native-login box: sleep() stops loam-browser AND docker+containerd",
+                  out_c["stopped_docker"] is True
+                  and any(c == ["systemctl", "stop", "docker.service", "containerd.service"] for c in calls_c),
+                  (out_c, calls_c))
+
+            # And legacy compose.yaml still keeps Docker awake when claimed.
+            fake_compose.write_text("services:\n  authelia: {}\n", encoding="utf-8")
+            check("claimed legacy-compose box: other_containers_need_docker() stays True",
+                  ctrl_c.other_containers_need_docker() is True,
+                  calls_c)
+        finally:
+            dep.AUTHELIA_SECRETS, dep.AUTHELIA_COMPOSE = orig_secrets, orig_compose
     finally:
         dep.unclaimed = orig_unclaimed
 

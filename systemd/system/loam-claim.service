@@ -4,7 +4,7 @@ Description=Loam claim page and login-code relay (loopback 8934)
 # the install has no owner, and the login's one-time codes relayed to the
 # signed-in owner after. Caddy reaches it on two paths of the app's host and
 # on nothing else; see bin/loam-claim and docs/install.md. Root, because both
-# halves touch the login's own files in its Docker volume.
+# halves touch the login's own files (owned by loam-authelia) and run gen-deploy.
 After=network-online.target
 
 [Service]
@@ -13,11 +13,8 @@ Environment=PYTHONPYCACHEPREFIX=@PYCACHE@
 ExecStart=/usr/bin/python3 @ROOT@/bin/loam-claim
 Restart=always
 RestartSec=3s
-# No PrivateTmp: gen-deploy, which the claim runs, validates Authelia's
-# configuration by bind-mounting a file from /tmp into a container, and the
-# Docker daemon sees the box's /tmp, not a private one. With PrivateTmp the
-# validator read an empty file and every post-claim render was refused
-# (found in the first rehearsal, 2026-11-14).
+# No PrivateTmp: gen-deploy may run Docker helpers on legacy/rollback paths
+# where paths under /tmp must be visible to the host daemon.
 
 [Install]
 WantedBy=multi-user.target
