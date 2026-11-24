@@ -1725,10 +1725,46 @@ def restore_container_login_if_older(target: str) -> None:
         )
 
 
+def _target_has_docker_idle_watch(target: str) -> bool:
+    text = show(target, prefix() + "lib/loam_deploy.py") or ""
+    return "def docker_idle_watch_timer(" in text
+
+
+def remove_docker_idle_watch_if_older(target: str) -> None:
+    """Called under the live lock before moving back to a release whose
+    browser-proxy predates --after-idle (0.2.36 and older): disables and removes
+    loam-docker-idle-watch.{timer,service} before git reset and re-exec, because
+    older releases (0.2.35+) support --resume-rollback and re-exec before Box.deploy()."""
+    timer, unit = loam_deploy.DOCKER_IDLE_WATCH_TIMER, loam_deploy.DOCKER_IDLE_WATCH_UNIT
+    if not timer.exists() and not unit.exists():
+        return
+    if not lc.is_install_config() and str(timer).startswith("/etc/systemd/"):
+        return
+    if not (runtime() / "bin" / "gen-deploy").is_file():
+        return
+    if show(target, prefix() + "lib/loam_deploy.py") is None or _target_has_docker_idle_watch(target):
+        return
+    subprocess.run(
+        ["sudo", "-n", "systemctl", "disable", "--now",
+         loam_deploy.DOCKER_IDLE_WATCH_TIMER_NAME,
+         loam_deploy.DOCKER_IDLE_WATCH_SERVICE_NAME],
+        capture_output=True, text=True, check=False,
+    )
+    subprocess.run(
+        ["sudo", "-n", "rm", "-f", str(timer), str(unit)],
+        capture_output=True, text=True, check=False,
+    )
+    subprocess.run(
+        ["sudo", "-n", "systemctl", "daemon-reload"],
+        capture_output=True, text=True, check=False,
+    )
+
+
 def reset_to(commit: str) -> str:
     with loam_lock.live("Loam", "update"):
         combine_if_older(commit)
         restore_container_login_if_older(commit)
+        remove_docker_idle_watch_if_older(commit)
         git("merge", "--abort", check=False)
         git("reset", "--quiet", "--hard", commit)
     return f"the checkout is at {commit[:12]} again"
