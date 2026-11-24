@@ -320,7 +320,10 @@ class TestDockerLoginVolumeAndDrift(unittest.TestCase):
         })
         fake.write_text(f"#!/bin/sh\nprintf '%s\\n' '{payload}'\n")
         fake.chmod(0o755)
-        with patch.object(lh.shutil, "which", return_value=str(fake)):
+        with patch.object(lh.shutil, "which", return_value=str(fake)), \
+                patch.object(lh, "LOGIN_NATIVE_DIR", str(self.base / "no-native-login")), \
+                patch.object(lh, "LOGIN_SERVICE_UNIT", str(self.base / "no-native.service")), \
+                patch.object(lh, "LOGIN_LEGACY_COMPOSE", str(self.base / "no-compose.yaml")):
             folder, note = lh.find_login()
         self.assertEqual(folder, str(login_dir), note)
 
