@@ -390,11 +390,11 @@ In Files, this folder is **Your files**, each agent’s own workspace is in
 | File or folder | What it is for |
 |---|---|
 | `{ABOUT_ME}` | What your agents know about you. They add to it as they learn; read or edit it anytime. |
-| `{projects}/` | Your projects and notes. New installs start with a short guide at `{projects}/Loam/{START_HERE}`. |
+| `{projects}/` | Your projects and notes. |
 | `{f['conversations']}/` | **Loam files** — saved records of your chats, written automatically. Read-only. |
 | `{f['attachments']}/` | **Loam files** — images and files you attach in chats. |
 | `{boards}/` | **Loam files** — chat boards, when you use the Boards plugin. |
-| `{system}/` | **Loam files** — shared skills, dictation terms, and Loam’s own settings and docs. |
+| `{system}/` | **Loam files** — shared skills and Loam’s own settings and docs. |
 | `{system}/{LOAM_DIR}/` | Loam’s built-in docs and skills, refreshed on each update. |
 | `{system}/{OWN_DIR}/` | Shared skills for all your agents. Updates never touch it. |
 
