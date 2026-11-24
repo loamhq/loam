@@ -86,20 +86,24 @@ try:
         except (IndexError, ValueError):
             return {"code": None, "result": {}, "_stderr": out.stderr[-800:]}
 
+    def _bus_missing(msg: str) -> bool:
+        return ("No medium found" in msg
+                or "$DBUS_SESSION_BUS_ADDRESS and $XDG_RUNTIME_DIR not defined" in msg)
+
     fixed = run("default")
     text = fixed["result"].get("receipt_text", "")
     check("bare env: the launch reached systemd-run (stand-in's code)",
           "systemd-run exited 97" in text, True)
     check("bare env: systemd-run was handed /run/user/<uid>",
           f"XDG_RUNTIME_DIR=/run/user/{os.getuid()}" in text, True)
-    check("bare env: no 'No medium found'", "No medium found" in text, False)
+    check("bare env: no user-bus missing error", _bus_missing(text), False)
 
     control = run("skip")
     text = control["result"].get("receipt_text", "")
     check("control, default off: the stand-in got no runtime dir",
           "XDG_RUNTIME_DIR=unset" in text, True)
-    check("control, default off: 'No medium found', as from Codex",
-          "No medium found" in text, True)
+    check("control, default off: user-bus missing error, as from Codex",
+          _bus_missing(text), True)
 
     # The caller's own value wins: the default is for an absent variable.
     out = subprocess.run(

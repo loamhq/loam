@@ -290,14 +290,23 @@ async def listen(host, path: Path):
         os.chmod(path, 0o600)
         sock.listen()
         sock.setblocking(False)
+        server = await asyncio.start_unix_server(endpoint.handle, sock=sock, limit=FRAME_LIMIT)
         try:
-            server = await asyncio.start_unix_server(endpoint.handle, sock=sock, limit=FRAME_LIMIT)
-            async with server:
-                yield
+            yield
         finally:
+            # Close the listener and cancel open RPC streams before waiting for
+            # client transports to close (Python 3.13+ `wait_closed()` waits on them).
+            server.close()
             for task in tuple(endpoint.connections):
                 task.cancel()
             await asyncio.gather(*endpoint.connections, return_exceptions=True)
+            if hasattr(server, "close_clients"):
+                server.close_clients()
+            try:
+                await asyncio.wait_for(server.wait_closed(), timeout=2.0)
+            except (asyncio.TimeoutError, OSError):
+                if hasattr(server, "abort_clients"):
+                    server.abort_clients()
             path.unlink(missing_ok=True)
     finally:
         sock.close()

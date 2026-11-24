@@ -3788,8 +3788,13 @@ async def serve(addr: str, port: int, remote_path=None) -> int:
           f"(admission by memory: reserve {cfg.MEMORY_RESERVE_MB} MB, "
           f"{cfg.SESSION_START_MB} MB a start; backstop {cfg.MAX_SESSIONS} "
           f"sessions)", file=sys.stderr, flush=True)
-    async with tcp:
+    try:
         await stop.wait()
+    finally:
+        # Stop accepting new connections before draining open SSE streams;
+        # in Python 3.13+, `async with tcp` calls `wait_closed()` first, which
+        # blocks on open client streams until `shutdown()` closes them.
+        tcp.close()
     syncthing_stop.set()
     usage_push_stop.set()
     usage_record_task.cancel()
@@ -3809,6 +3814,13 @@ async def serve(addr: str, port: int, remote_path=None) -> int:
         broker.close_record_streams()
     else:
         await shutdown(broker, server)
+    if hasattr(tcp, "close_clients"):
+        tcp.close_clients()
+    try:
+        await asyncio.wait_for(tcp.wait_closed(), timeout=2.0)
+    except (asyncio.TimeoutError, OSError):
+        if hasattr(tcp, "abort_clients"):
+            tcp.abort_clients()
     return 0
 
 

@@ -60,7 +60,9 @@ class Scratch(unittest.TestCase):
         self.h = base / "history"
         (self.etc / "caddy").mkdir(parents=True)
         (self.units / "timers.target.wants").mkdir(parents=True)
-        (self.etc / "app.toml").write_text('name = "ada"\n')
+        app = self.etc / "app.toml"
+        app.write_text('name = "ada"\n')
+        app.chmod(0o644)
         (self.etc / "caddy" / "site.conf").write_text("good line\n")
         key = self.etc / "secrets.env"
         key.write_text("TOKEN=s3cr3t-value\n")
@@ -216,7 +218,9 @@ class TestRestore(Scratch):
     def test_refuses_a_failing_state_unless_forced(self):
         (self.etc / "app.toml").write_text("name = \n")
         bad = self.snap()["commit"]
-        (self.etc / "app.toml").write_text('name = "ada"\n')
+        app = self.etc / "app.toml"
+        app.write_text('name = "ada"\n')
+        app.chmod(0o644)
         code, said = self.restore(bad)
         self.assertEqual(code, 3, said)
         self.assertIn("does not pass its own checks", said)

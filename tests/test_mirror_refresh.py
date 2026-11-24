@@ -91,7 +91,7 @@ def start(project: eng.Project, job_id: str) -> dict:
 
 
 def remote_branches(tree: Path) -> list[str]:
-    return git(tree, "branch", "-r", "--format=%(refname:short)").split()
+    return git(tree, "branch", "-r", "--format=%(refname:lstrip=2)").split()
 
 
 try:

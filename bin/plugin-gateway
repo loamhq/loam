@@ -785,10 +785,18 @@ async def main() -> None:
         await _SUPERVISOR.close_all()
         server.close()
         door_server.close()
+        for srv in (server, door_server):
+            if hasattr(srv, "close_clients"):
+                srv.close_clients()
         try:
-            await asyncio.gather(server.wait_closed(), door_server.wait_closed())
+            await asyncio.wait_for(
+                asyncio.gather(server.wait_closed(), door_server.wait_closed()),
+                timeout=2.0,
+            )
         except Exception:
-            pass
+            for srv in (server, door_server):
+                if hasattr(srv, "abort_clients"):
+                    srv.abort_clients()
         try:
             if pid_path.read_text(encoding="utf-8").strip() == str(os.getpid()):
                 pid_path.unlink(missing_ok=True)

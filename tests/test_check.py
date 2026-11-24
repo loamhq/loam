@@ -240,9 +240,18 @@ def drift_false():
 forced("check-drift finding drift", drift_false, "drift:installed unit loam-x.timer")
 DRIFT["facts"] = [ck.fact("drift", True, "in step")]
 
-ck.DISK_FREE_GB = 10 ** 6
+real_disk_usage = ck.shutil.disk_usage
+
+
+def _disk_full_root(where):
+    if Path(where) == Path("/"):
+        return ck.shutil._ntuple_diskusage(100 * 10**9, 99 * 10**9, 1 * 10**9)
+    return ck.shutil._ntuple_diskusage(100 * 10**9, 10 * 10**9, 90 * 10**9)
+
+
+ck.shutil.disk_usage = _disk_full_root
 forced("a disk nearly full", lambda: None, f"disk:{ck._mount_of(Path('/'))}")
-ck.DISK_FREE_GB = 4
+ck.shutil.disk_usage = real_disk_usage
 
 real_persona = la.persona
 la.persona = lambda: None
