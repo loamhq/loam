@@ -9,6 +9,11 @@ Usage:
   plugin-servers status [<id>]    every server plugin's state, or one with its log
   plugin-servers restart <id>     a fresh start of that one unit
   plugin-servers ports            the port table bin/plugin-gateway routes by
+  plugin-servers gateway-state    refresh gateway.json and print it
+  plugin-servers ensure-gateway [--reconcile]
+                                  restart loam-plugins-gateway.service if active
+                                  and running stale code (re-rendering its unit
+                                  first if needed)
 
 Turning a plugin on or off is `bin/settings` (plugin.on) or the app: this
 only reads and brings units into line, the same calls the broker makes.
@@ -59,6 +64,10 @@ def main(argv: list[str]) -> int:
         doc = servers.refresh_gateway_state()
         print(json.dumps(doc, sort_keys=True, default=str))
         return 0
+    if cmd == "ensure-gateway":
+        out = servers.ensure_gateway_current(reconcile_after="--reconcile" in rest)
+        print(json.dumps(out, sort_keys=True))
+        return 1 if out.get("action") == "failed" else 0
     print(__doc__, file=sys.stderr)
     return 2
 

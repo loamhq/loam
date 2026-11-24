@@ -1223,7 +1223,42 @@ def land_job(project: eng.Project, job_id: str, record: dict, title: str,
                                    "reconcile", "--eager-api"], capture_output=True, text=True)
             result["session_services"] = (proc.stdout + proc.stderr).strip()[-1200:] or f"exit {proc.returncode}"
             landing_say(p)(result["session_services"])
+        _reconcile_runtime_daemons(result, landing_say(p))
     return result
+
+
+def _reconcile_runtime_daemons(result: dict, say) -> None:
+    """After a platform landing, restart long-running runtime daemons whose code
+    on disk changed (plugin-gateway, active browser-proxy) so a landing never
+    leaves a stale process in front of sleeping servers."""
+    for key, argv, timeout in (
+        ("plugin_gateway", [str(AGENTS / "bin/plugin-servers"), "ensure-gateway", "--reconcile"], 30),
+        ("browser_proxy", [str(AGENTS / "bin/browser-proxy"), "--reconcile"], 15),
+    ):
+        if not Path(argv[0]).is_file():
+            continue
+        try:
+            proc = subprocess.run(
+                [sys.executable, *argv],
+                capture_output=True, text=True, check=False, timeout=timeout,
+            )
+            raw = (proc.stdout or proc.stderr or "").strip()
+            action = None
+            try:
+                parsed = json.loads(raw) if raw.startswith("{") else None
+                if isinstance(parsed, dict):
+                    action = parsed.get("action")
+            except ValueError:
+                pass
+            if action in ("current", "inactive", "unmanaged"):
+                continue
+            summary = raw[-1200:] or f"exit {proc.returncode}"
+            result[key] = summary
+            say(f"{key.replace('_', '-')}: {summary}")
+        except (OSError, subprocess.SubprocessError) as exc:
+            msg = f"reconcile failed: {exc}"
+            result[key] = msg
+            say(f"{key.replace('_', '-')}: {msg}")
 
 
 def cancelled_landing(record: dict, cancelled: dict) -> dict:

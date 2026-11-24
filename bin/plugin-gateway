@@ -84,8 +84,8 @@ def _load_gateway_state(*, force_refresh: bool = False) -> dict:
     return doc
 
 
-def _wanted_from_state() -> dict[str, dict]:
-    doc = _load_gateway_state()
+def _wanted_from_state(*, force_refresh: bool = False) -> dict[str, dict]:
+    doc = _load_gateway_state(force_refresh=force_refresh)
     wanted = doc.get("wanted")
     return dict(wanted) if isinstance(wanted, dict) else {}
 
@@ -208,7 +208,7 @@ class GatewaySupervisor:
         except Exception:
             return False
 
-    async def sync(self, *, bind_direct: bool = True) -> None:
+    async def sync(self, *, bind_direct: bool = True, force_refresh: bool = False) -> None:
         """Align slot metadata and direct front-port listeners with wanted_servers()."""
         async with self._sync_lock:
             self._last_sync = time.monotonic()
@@ -230,7 +230,10 @@ class GatewaySupervisor:
                 return
 
             try:
-                want = await asyncio.to_thread(self._wanted_fn)
+                if force_refresh and self._wanted_fn is _wanted_from_state:
+                    want = await asyncio.to_thread(_wanted_from_state, force_refresh=True)
+                else:
+                    want = await asyncio.to_thread(self._wanted_fn)
             except Exception as exc:
                 print(f"plugin-gateway sync wanted: {exc!r}", file=sys.stderr, flush=True)
                 return
@@ -737,6 +740,7 @@ async def _housekeep(sup: GatewaySupervisor, wake_sync: asyncio.Event, stop: asy
 async def main() -> None:
     port = int(sys.argv[1]) if len(sys.argv) > 1 else servers.GATEWAY_PORT
     door_port = int(sys.argv[2]) if len(sys.argv) > 2 else servers.DOOR_PORT
+    startup_fp = servers.gateway_code_fingerprint()
     pid_path = servers.gateway_pid_path()
     try:
         pid_path.parent.mkdir(parents=True, exist_ok=True)
@@ -757,9 +761,13 @@ async def main() -> None:
         except (NotImplementedError, OSError):
             pass
 
-    await _SUPERVISOR.sync(bind_direct=True)
+    await _SUPERVISOR.sync(bind_direct=True, force_refresh=True)
     server = await asyncio.start_server(handle, "127.0.0.1", port, limit=HEAD_MAX)
     door_server = await asyncio.start_server(door, "127.0.0.1", door_port, limit=HEAD_MAX)
+    try:
+        servers.write_gateway_running(pid=os.getpid(), fingerprint=startup_fp)
+    except OSError:
+        pass
     task = asyncio.create_task(_housekeep(_SUPERVISOR, wake_sync, stop))
     print(json.dumps({
         "listening": f"127.0.0.1:{port}",
@@ -784,6 +792,12 @@ async def main() -> None:
         try:
             if pid_path.read_text(encoding="utf-8").strip() == str(os.getpid()):
                 pid_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        try:
+            rec = servers.read_gateway_running()
+            if rec and rec.get("pid") == os.getpid():
+                servers.gateway_running_path().unlink(missing_ok=True)
         except OSError:
             pass
 
