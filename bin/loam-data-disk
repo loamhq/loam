@@ -1,0 +1,186 @@
+#!/usr/bin/env python3
+"""Verify and manage Loam's separate data disk mounts and boot ordering.
+
+Runs directly from the server's local disk (`/var/lib/loam/local/loam/bin/loam-data-disk`)
+during early boot — before `/etc/loam` and `/home/<user>` are guaranteed mounted —
+so it uses only Python's standard library and `lib/loam_data_disk.py`.
+
+Usage:
+  loam-data-disk ready --data-dir DIR --home HOME [--etc ETC] [--local-base DIR] [--wait S]
+  loam-data-disk status [--data-dir DIR --home HOME --etc ETC] [--json]
+  loam-data-disk install        (root; install/refresh loam-data-disk.service + drop-ins)
+  loam-data-disk up             (root; bring up data-disk gate + Loam services after late mount)
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import pwd
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_data_disk as dd  # noqa: E402
+
+
+def _read_config(etc: Path) -> dict:
+    cfg = etc / "loam.toml"
+    if not cfg.is_file():
+        return {}
+    try:
+        return tomllib.loads(cfg.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+
+
+def _resolve_params(args) -> tuple[Path | None, Path, Path, Path, int | None]:
+    etc = Path(args.etc)
+    raw = _read_config(etc)
+    data_str = args.data_dir or (raw.get("storage") or {}).get("data_dir")
+    data_dir = Path(data_str) if data_str else None
+    user = raw.get("user") or "loam"
+    home_str = args.home or (raw.get("paths") or {}).get("home") or f"/home/{user}"
+    home = Path(home_str)
+    local_base = Path(args.local_base)
+    uid: int | None = None
+    try:
+        uid = pwd.getpwnam(user).pw_uid
+    except KeyError:
+        pass
+    return data_dir, home, etc, local_base, uid
+
+
+def cmd_ready(args) -> int:
+    data_dir, home, etc, local_base, _uid = _resolve_params(args)
+    if data_dir is None:
+        print("loam-data-disk ready: --data-dir is required", file=sys.stderr)
+        return 2
+    ok, msg = dd.ensure_ready(
+        data_dir, home, etc=etc, local_base=local_base, wait_seconds=args.wait)
+    if ok:
+        print(f"loam-data-disk: {msg}")
+        return 0
+    print(f"loam-data-disk: {msg}", file=sys.stderr)
+    return 1
+
+
+def cmd_status(args) -> int:
+    data_dir, home, etc, local_base, uid = _resolve_params(args)
+    if data_dir is None:
+        payload = {"configured": False, "ok": True, "message": "single-disk install (storage.data_dir unset)"}
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(payload["message"])
+        return 0
+    findings = dd.drift_findings(
+        data_dir, home, etc=etc, local_base=local_base, uid=uid)
+    payload = {
+        "configured": True,
+        "data_dir": str(data_dir),
+        "separate_mount": dd.is_separate_mount(data_dir),
+        "persistent_mount": dd.has_persistent_mount(data_dir),
+        "ok": not findings,
+        "findings": [{"label": lbl, "where": w, "detail": d} for lbl, w, d in findings],
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    elif not findings:
+        print(f"Data disk OK: {data_dir} mounted separately with all bind mounts and boot ordering intact.")
+    else:
+        print(f"Data disk problems ({len(findings)}):")
+        for lbl, w, d in findings:
+            print(f"  - {lbl} ({w}): {d}")
+    return 0 if not findings else 1
+
+
+def cmd_install(args) -> int:
+    if os.geteuid() != 0:
+        print("loam-data-disk install requires root (run with sudo)", file=sys.stderr)
+        return 2
+    data_dir, home, etc, local_base, uid = _resolve_params(args)
+    if data_dir is None:
+        print("loam-data-disk install: storage.data_dir is not configured; nothing to do.")
+        return 0
+    changed = dd.install_boot_ordering(
+        data_dir, home, uid=uid, etc=etc, local_base=local_base)
+    if changed:
+        print(f"loam-data-disk: installed/updated {len(changed)} boot-ordering file(s) and enabled {dd.GATE_UNIT_NAME}.")
+    else:
+        print(f"loam-data-disk: boot-ordering units already up to date ({dd.GATE_UNIT_NAME} enabled).")
+    return 0
+
+
+def cmd_up(args) -> int:
+    """Bring up Loam after a late post-boot volume attach & mount."""
+    if os.geteuid() != 0:
+        print("loam-data-disk up requires root (run with sudo)", file=sys.stderr)
+        return 2
+    res = subprocess.run(["systemctl", "start", dd.GATE_UNIT_NAME],
+                         capture_output=True, text=True, check=False)
+    if res.returncode != 0:
+        err = (res.stderr or res.stdout or "").strip()
+        print(f"loam-data-disk up: {dd.GATE_UNIT_NAME} failed: {err}", file=sys.stderr)
+        return 1
+    data_dir, _home, etc, _local_base, _uid = _resolve_params(args)
+    raw = _read_config(etc)
+    app_name = (raw.get("edge") or {}).get("app") or "loam-ui"
+    units = [
+        "loam-swap.service",
+        "loam-inbound-firewall.service",
+        "docker.service",
+        "caddy.service",
+        f"loam-app@{app_name}.service",
+        "loam-claim.service",
+        "loam-user-manager.service",
+        "loam-docker-idle.service",
+    ]
+    failed: list[str] = []
+    for unit in units:
+        en = subprocess.run(["systemctl", "is-enabled", unit],
+                            capture_output=True, text=True, check=False)
+        if en.returncode != 0:
+            continue
+        st = subprocess.run(["systemctl", "start", unit],
+                            capture_output=True, text=True, check=False)
+        if st.returncode != 0:
+            failed.append(f"{unit}: {(st.stderr or st.stdout).strip()}")
+    if failed:
+        print("loam-data-disk up: some services failed to start:\n  " + "\n  ".join(failed),
+              file=sys.stderr)
+        return 1
+    print(f"loam-data-disk up: data disk {data_dir} ready and Loam services started.")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(prog="loam-data-disk")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    for name in ("ready", "status", "install", "up"):
+        sp = sub.add_parser(name)
+        sp.add_argument("--data-dir", default=None)
+        sp.add_argument("--home", default=None)
+        sp.add_argument("--etc", default="/etc/loam")
+        sp.add_argument("--local-base", default=str(dd.LOCAL_BASE))
+        if name == "ready":
+            sp.add_argument("--wait", type=float, default=0.0)
+        if name == "status":
+            sp.add_argument("--json", action="store_true")
+
+    args = p.parse_args(argv)
+    return {
+        "ready": cmd_ready,
+        "status": cmd_status,
+        "install": cmd_install,
+        "up": cmd_up,
+    }[args.cmd](args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

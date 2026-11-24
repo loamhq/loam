@@ -202,9 +202,44 @@ No `--domain`, `--name`, `--owner` or `--timezone` is needed:
 
 `loam update`, `bin/check-drift`, `loam status`, autocommit and Git backup all
 work without writing person data to the server's root disk. `bin/check-drift`
-and `loam status` also check that the data disk is mounted separately, all nine
-bind mounts and the `/etc/fstab` block match, and `authelia-data` points at
+and `loam status` also check that the data disk is mounted separately, has a
+persistent mount entry in `/etc/fstab` (or a systemd `.mount` unit), all nine
+bind mounts and the `/etc/fstab` block match, `loam-data-disk.service` and its
+ordering drop-ins match, and `authelia-data` points at
 `DIR/login/authelia-data`.
+
+### Boot mount ordering and missing volumes
+
+Cloud block volumes (Hetzner, DigitalOcean, etc.) and Loam's nine bind mounts
+carry `nofail` in `/etc/fstab` so a detached volume never drops the server into
+an unreachable emergency shell without SSH. Because `nofail` removes
+`Before=local-fs.target`, services started at boot would otherwise race ahead
+of the volume and bind mounts — or start against empty rootfs directories when
+the volume is detached.
+
+To prevent both without any cloud-specific code, a `--data-dir` install installs
+`/etc/systemd/system/loam-data-disk.service` (running
+`/var/lib/loam/local/loam/bin/loam-data-disk ready` from the local root disk
+with `RequiresMountsFor=` covering `DIR` and all nine bind targets) plus
+`10-loam-data-disk.conf` drop-ins (`Requires=loam-data-disk.service` and
+`After=loam-data-disk.service`) on `docker.service`, `caddy.service`,
+`loam-app@.service`, `loam-claim.service`, `loam-user-manager.service`,
+`user@<uid>.service`, `loam-swap.service`, `loam-browser-proxy.service`,
+`loam-docker-idle.service`, `loam-await-dns.service` and
+`loam-host-history.service`. `loam-inbound-firewall.service` is likewise
+ordered after `loam-data-disk.service` and before Loam's listeners (omitting
+`Before=network-pre.target` so a detached volume never delays networking or
+SSH).
+
+- **Volume attached at boot:** `loam-data-disk.service` waits for the volume
+  and all nine bind mounts, verifies `DIR` is a separate filesystem with a
+  valid `loam-data.json`, and releases Loam's services in order.
+- **Volume detached at boot:** SSH comes up immediately; `loam-data-disk.service`
+  fails cleanly and holds every Loam service (including Docker/Authelia and
+  `user@<uid>.service`) back so nothing writes beneath empty `/etc/loam` or
+  `/home/<user>` on the root disk. Once the volume is attached later, run
+  `sudo /var/lib/loam/local/loam/bin/loam-data-disk up` to mount and bring Loam
+  up.
 
 ### Limits to keep in mind
 
