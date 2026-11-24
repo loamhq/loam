@@ -3,6 +3,7 @@
 Find each release's notes in `docs/releases/<version>.md`. Loam gives the
 notes to the person's agent, who decides what is worth sharing with them.
 
+- [0.2.34](docs/releases/0.2.34.md), 2026-11-23: Open phone chats recover live progress after backgrounding; browser, Docker, and plugin servers sleep until first use with memory headroom and swap scaled to the server; `loam market share` creates missing GitHub repositories automatically; no vault-root README on new installs (untouched stock copies removed on update); engineer files and schedule moved into Loam files; refreshed agent docs and multi-provider renamed-agent instructions.
 - [0.2.33](docs/releases/0.2.33.md), 2026-11-23: New plugin places (`rail.action`, `thread.list.action`), switch settings, and conditional agent prompts; readable portrait image sizing in chat; optional separate data disk (`--data-dir`) in the installer; agent instruction display-name updates on rename; and bounded Git backup pack memory.
 - [0.2.32](docs/releases/0.2.32.md), 2026-11-22: Sharing any file and Comments & suggestions as two built-in plugins, Files home polish and Recent fixes, browser-tool screenshots kept in threads, wiki-links in chats fixed, and plugin timer stability.
 - [0.2.31](docs/releases/0.2.31.md), 2026-11-22: permanent non-colliding theme face slots for agents across all themes, Files home redesign (Your files, Agent files, Loam files, Recent, Quick actions), and thread turn stability across board-folder migration.
