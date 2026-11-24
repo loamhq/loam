@@ -36,6 +36,11 @@ export const DEFAULT_PING_MS = 15000
 // is for a slow link, not for a dead one.
 export const STALE_MARGIN_MS = 10000
 
+// A fetch that never delivers response headers (a black-holed connection or
+// stale Wi-Fi interface) counts as stalled after this long and is aborted so
+// the retry loop can open a fresh socket.
+export const CONNECT_TIMEOUT_MS = 15000
+
 // How much of a conversation a chat opens with, in **turns** — the host's unit,
 // not the page's: a turn runs from a person's message through the turn's
 // result, and ten turns is not ten events. A chat with a year in it used to
@@ -101,6 +106,16 @@ export function createLink({
   lastTurns = TURNS_AT_OPEN,
   onEvent,
   onPhase = () => {},
+  // A 404 on a retired session stream is terminal; on a thread stream it can
+  // reflect a transient rewrite and must keep retrying until removal is
+  // confirmed elsewhere.
+  stopOn404 = true,
+  // Arm a per-connection watchdog timer so a silently stalled stream or hung
+  // connect is noticed as soon as its deadline expires, even without an
+  // external heartbeat tick.
+  watchdog = false,
+  staleMarginMs = STALE_MARGIN_MS,
+  connectTimeoutMs = CONNECT_TIMEOUT_MS,
   base = '', // the page speaks to its own origin; a test names one
   fetchImpl = (...args) => authenticatedFetch(...args),
   now = () => Date.now(),
@@ -112,34 +127,63 @@ export function createLink({
   let attempt = 0
   let pingMs = DEFAULT_PING_MS
   let lastHeard = now()
+  let attemptStarted = now()
   let waiting = null // { resolve, handle } — the pause between attempts
+  let watchHandle = null
   let dropped = false // this end hung up because the stream had gone quiet
+  let resyncing = false // this end hung up to resync immediately on return/online
   let phase = 'connecting'
   let detail = ''
 
-  function setPhase(next, why = '') {
+  function setPhase(next, why = '', info) {
     phase = next
     detail = why
-    onPhase(next, why)
+    if (info) onPhase(next, why, info)
+    else onPhase(next, why)
+  }
+
+  function clearWatch() {
+    if (watchHandle !== null) {
+      timers.clear(watchHandle)
+      watchHandle = null
+    }
+  }
+
+  function armWatch() {
+    clearWatch()
+    if (!watchdog || stopped || waiting) return
+    let deadline
+    if (open) deadline = lastHeard + pingMs + staleMarginMs
+    else if (phase === 'connecting' && connection) deadline = attemptStarted + connectTimeoutMs
+    else return
+    const wait = Math.max(1, deadline - now() + 1)
+    watchHandle = timers.set(() => {
+      watchHandle = null
+      if (stopped) return
+      if (!wake()) armWatch()
+    }, wait)
   }
 
   // Anything at all from the other end, including an unfinished frame.
   function heard() {
     lastHeard = now()
     attempt = 0
+    armWatch()
   }
 
   function comment(text) {
-    heard()
     const announced = /(?:^|\s)ping=(\d+)/.exec(text)
     if (announced) pingMs = Number(announced[1])
+    heard()
   }
 
   function stale() {
-    return open && now() - lastHeard > pingMs + STALE_MARGIN_MS
+    if (open) return now() - lastHeard > pingMs + staleMarginMs
+    return phase === 'connecting' && connection !== null && now() - attemptStarted > connectTimeoutMs
   }
 
   function pause(ms) {
+    clearWatch()
     return new Promise((resolve) => {
       const handle = timers.set(() => {
         waiting = null
@@ -150,11 +194,13 @@ export function createLink({
   }
 
   // The page is back, or the network is. Reconnect now if there is nothing to
-  // reconnect to, and leave a healthy stream alone. Answers whether it acted,
-  // which is what the tests read.
-  function wake() {
+  // reconnect to, and leave a healthy stream alone unless `force` asks for an
+  // immediate resync (after hide->show, bfcache restore, or returning online).
+  // Answers whether it acted, which is what the tests read.
+  function wake({ force = false, backoff = true } = {}) {
     if (stopped) return false
     if (waiting) {
+      if (!backoff) return false
       // Between attempts: stop waiting and go.
       const pending = waiting
       waiting = null
@@ -163,11 +209,19 @@ export function createLink({
       pending.resolve()
       return true
     }
+    if (force && connection) {
+      resyncing = true
+      attempt = 0
+      clearWatch()
+      connection.abort()
+      return true
+    }
     if (stale()) {
       // A connection the browser still believes in, which has said nothing for
       // longer than it promised. Hang up; the loop reconnects immediately.
       dropped = true
-      attempt = 0
+      if (open) attempt = 0
+      clearWatch()
       connection?.abort()
       return true
     }
@@ -178,7 +232,9 @@ export function createLink({
     while (!stopped) {
       connection = new AbortController()
       open = false
+      attemptStarted = now()
       setPhase('connecting')
+      armWatch()
       try {
         // Every attempt asks the transcript where it has read to. On the first
         // one that is nothing — nothing has been read — and a chat opens at its
@@ -196,11 +252,12 @@ export function createLink({
           headers: { accept: 'text/event-stream' },
           signal: connection.signal,
         })
-        if (authFailure(res)) { expireAuth(); stopped = true; setPhase('stopped', 'Sign in again'); return }
+        if (authFailure(res)) { clearWatch(); expireAuth(); stopped = true; setPhase('stopped', 'Sign in again'); return }
         if (!res.ok) {
           const words = await refusal(res)
           // A session the broker does not have is not a session to retry at.
-          if (res.status === 404) {
+          if (res.status === 404 && stopOn404) {
+            clearWatch()
             stopped = true
             setPhase('stopped', words)
             return
@@ -208,6 +265,7 @@ export function createLink({
           throw new Error(words)
         }
         open = true
+        resyncing = false
         heard()
         setPhase('open')
         for await (const event of readEvents(res, { onComment: comment, onBytes: heard })) {
@@ -216,19 +274,30 @@ export function createLink({
           onEvent(event)
         }
         open = false
+        clearWatch()
         if (stopped) return
-        if (settled()) {
+        if (resyncing) {
+          resyncing = false
+          continue
+        }
+        if (!dropped && settled()) {
           // The log ended and the session is not running. This is not a drop.
           stopped = true
           setPhase('stopped', '')
           return
         }
-        setPhase('retrying', 'the stream ended')
+        setPhase('retrying', dropped ? 'the stream went quiet' : 'the stream ended', { attempt: attempt + 1, dropped })
       } catch (err) {
         open = false
+        clearWatch()
         if (stopped) return
+        if (resyncing && connection.signal.aborted) {
+          resyncing = false
+          continue
+        }
+        resyncing = false
         if (authExpired() || err?.status === 401) { stopped = true; setPhase('stopped', 'Sign in again'); return }
-        setPhase('retrying', dropped ? 'the stream went quiet' : String(err?.message ?? err))
+        setPhase('retrying', dropped ? 'the stream went quiet' : String(err?.message ?? err), { attempt: attempt + 1, dropped })
       }
       dropped = false
       const delay = backoffFor(attempt)
@@ -260,11 +329,14 @@ export function createLink({
       stopped = false
       attempt = 0
       dropped = false
+      resyncing = false
       run().catch(() => {})
       return true
     },
     stop() {
       stopped = true
+      resyncing = false
+      clearWatch()
       connection?.abort()
       if (waiting) {
         timers.clear(waiting.handle)
