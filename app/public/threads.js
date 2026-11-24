@@ -690,12 +690,13 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     redraw()
     setTimeout(() => {
       if (st.open !== o) return
+      const field = compose.field()
       if (o.focusDraftEnd) {
+        if (field && 'isConnected' in field && !field.isConnected) return
         o.focusDraftEnd = false
         compose.changed?.()
         draft.focus()
         draft.setSelectionRange(draft.value.length)
-        const field = compose.field()
         if (field && 'scrollTop' in field && 'scrollHeight' in field) field.scrollTop = field.scrollHeight
       } else if (!options.draft) {
         draft.focus()
