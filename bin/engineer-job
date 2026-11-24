@@ -1215,7 +1215,7 @@ def land_job(project: eng.Project, job_id: str, record: dict, title: str,
     result = wt.land(project, record, message, keep_tree=keep_tree,
                      say=landing_say(p), release=release,
                      cancelled=landing_cancel(p), **extra)
-    if project.platform and result.get("state") == "landed":
+    if project.platform and result.get("state") == "landed" and not result.get("notes_only"):
         import loam_units
         if loam_units.split_marker().exists():
             # Outside the merge lock. The controller locks again and compares

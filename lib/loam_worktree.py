@@ -1642,6 +1642,20 @@ def branch_changes(tree: Path, main_sha: str, tip: str) -> list[str]:
                            f"{main_sha}...{tip}", check=False).stdout.split("\n") if p]
 
 
+def diff_paths(tree: Path, base: str, target: str) -> list[str]:
+    """The paths that differ between two commits (`base` -> `target`)."""
+    return [p for p in git(tree, "diff", "--name-only", "--no-renames",
+                           base, target, check=False).stdout.split("\n") if p]
+
+
+def is_notes_only(project: eng.Project, tree: Path, main_sha: str,
+                  tip: str, merged: str) -> bool:
+    """True when both the branch and its merge into `main` touch nothing
+    outside the engineer's own memory folder."""
+    return (only_memory(project, branch_changes(tree, main_sha, tip))
+            and only_memory(project, diff_paths(tree, main_sha, merged)))
+
+
 def commit_memory(project: eng.Project, tree: Path, say) -> bool:
     """Commit the tree's uncommitted changes when they are the memory file
     alone. True when it did."""
@@ -1885,7 +1899,8 @@ def _land_once(project: eng.Project, record: dict, message: str, *,
                 finish()
         else:
             _land_tested(project, repo, tree, branch, message, keep_tree,
-                         result, say, record, cancelled, lock, finish)
+                         result, say, record, cancelled, lock, finish,
+                         require_tests=bool(release))
         rel = result.get("release") or {}
         if project.platform and rel.get("state") == "pushed" and rel.get("sha"):
             pin = _sync_marketplace_pin(repo, rel["tag"], rel["sha"], say=say)
@@ -2229,12 +2244,13 @@ def canonical_ready(repo: Path, result: dict) -> bool:
 
 
 def _prepare(project, repo, tree, branch, message, result, say, record, want,
-             locked=False):
+             locked=False, *, require_tests: bool = False):
     """Merge the branch into `main` as it stands now and test the merged
     tree, touching nothing but the job's tree. Returns ``(main_sha, tip,
     merged)``: ``merged`` is None when the branch has nothing `main` lacks,
     and the whole return is None when the result is final (refused, a
     conflict, failing tests)."""
+    result.pop("notes_only", None)
     refresh_main(repo, tree)
     main_sha = rev(repo, MAIN)
     replay = replay_if_rewritten(repo, tree, branch, record, main_sha, say)
@@ -2300,6 +2316,14 @@ def _prepare(project, repo, tree, branch, message, result, say, record, want,
                 "; ".join(held[:5])
                 + (f"; and {len(held) - 5} more" if len(held) > 5 else "")))
             return None
+    if not require_tests and is_notes_only(project, tree, main_sha, tip, merged):
+        say(f"landing: skipping tests for {merged[:7]} "
+            f"(changes only {memory_prefix(project)})")
+        result["notes_only"] = True
+        result["test"] = None
+        git(tree, "update-ref", TESTED_REF, merged)
+        back_to_branch(tree, branch, merged, result)
+        return main_sha, tip, merged
     step = "branch_tests" if which == "branch" else "merge_tests"
     say(f"landing: testing the {which} ({merged[:7]})"
         + ("" if locked else ", outside the live lock"))
@@ -2413,7 +2437,8 @@ def _finish_landed(project, repo, tree, branch, keep_tree, result, say,
 
 
 def _land_tested(project, repo, tree, branch, message, keep_tree, result,
-                 say, record, cancelled, lock, finish) -> None:
+                 say, record, cancelled, lock, finish, *,
+                 require_tests: bool = False) -> None:
     """A `main`-merging landing; see the section above."""
     result["retests"] = 0
     result["tested_under_lock"] = False
@@ -2431,7 +2456,8 @@ def _land_tested(project, repo, tree, branch, message, keep_tree, result,
                         or not canonical_ready(repo, result):
                     return
                 ready = _prepare(project, repo, tree, branch, message, result,
-                                 say, record, want, locked=True)
+                                 say, record, want, locked=True,
+                                 require_tests=require_tests)
                 if ready is None:
                     return
                 main_sha, tip, merged = ready
@@ -2446,7 +2472,7 @@ def _land_tested(project, repo, tree, branch, message, keep_tree, result,
         if stop_for_cancel(cancelled, result, say):
             return
         ready = _prepare(project, repo, tree, branch, message, result, say,
-                         record, want)
+                         record, want, require_tests=require_tests)
         if ready is None:
             return
         main_sha, tip, merged = ready
@@ -2472,7 +2498,7 @@ def _land_tested(project, repo, tree, branch, message, keep_tree, result,
         moved = (f"main moved ({main_sha[:7]} -> {(now or '?')[:7]})"
                  if now != main_sha else
                  f"the branch moved ({tip[:7]} -> {(tip_now or '?')[:7]})")
-        if merged is not None:
+        if merged is not None and not result.get("notes_only"):
             result["retests"] += 1
         say(f"landing: {moved} while it was tested; merging again")
 
@@ -2747,7 +2773,9 @@ def receipt_section(project: eng.Project, job_id: str, result: dict | None) -> s
     tested = (f" Tested with `{test['command']}` on the "
               f"{'merged tree' if test.get('tree') == 'merge' else 'branch'}, "
               f"which is the merge when `main` had not moved."
-              if test.get("command") and test.get("passed") else "")
+              if test.get("command") and test.get("passed") else
+              f" Test suite skipped (changes only `{memory_prefix(project)}`)."
+              if result.get("notes_only") else "")
     if state == "landed":
         pushed = result.get("pushed")
         push = ("Kept on this install: its `main` is its own, so nothing is "

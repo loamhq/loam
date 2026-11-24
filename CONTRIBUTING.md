@@ -18,11 +18,12 @@ See [Git attribution](docs/attribution.md).
 Before any push to this repository, the landing's push gate checks every
 commit the repository does not have yet. Its author and committer must
 match the resolved identity. The gate scans added lines, paths and commit
-messages against the install's deny list of private names. The landing
-holds a commit that fails (`push_gate` in `lib/loam_worktree.py`). A hold that
-names only the engineer's memory note or a commit's message is not the
-work's: the change lands as one commit without them, and the note is kept
-beside the job (`land` in the same file).
+messages against the install's deny list of private names. The landing holds a commit that fails (`push_gate` in `lib/loam_worktree.py`).
+A branch that changes only the engineer's memory folder still goes through merge
+and the push gate, and skips the project's test suite unless a release tag is
+requested. A hold that names only the engineer's memory note or a commit's
+message is not the work's: the change lands as one commit without them, and the
+note is kept beside the job (`land` in the same file).
 
 ## Reports from installs
 

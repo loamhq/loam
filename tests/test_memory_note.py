@@ -95,7 +95,7 @@ def shown(project, ref="main") -> str:
 
 
 try:
-    # -- The work lands mid-job; the note after it meets failing tests.
+    # -- The work lands mid-job; the note after it skips the test suite and lands.
     proj, origin = make("plain")
     r = start(proj, "20261119-100000-00000001")
     commit(r, "work.txt", "the work\n")
@@ -106,27 +106,72 @@ try:
     FAIL.write_text("x")
     runs()
     result, text = land(proj, r)
-    check("note alone, failing tests: the result is what landed before",
-          (result["state"], result["sha"], result.get("reason")),
-          ("landed_earlier", work_sha, None))
-    check("...the run was tried once more (two runs)", runs(), 2)
-    patch = proj.jobs / r["job"] / wt.MEMORY_PATCH
-    check("...the note is kept as a patch in the job's folder",
-          patch.is_file() and "+A note." in patch.read_text(), True)
-    check("...the receipt says the note did not land, and where it is",
-          "memory note did not land" in text and str(patch) in text
-          and "no continuation" in text, True)
-    check("...main is where the work left it", git(proj.root, "rev-parse", "main"), work_sha)
+    check("note alone after mid-job land: skips tests and lands",
+          (result["state"], result.get("notes_only"), "A note." in shown(proj)),
+          ("landed", True, True))
+    check("...the test suite did not run (zero runs)", runs(), 0)
+    check("...the receipt says tests were skipped for memory only",
+          "Test suite skipped (changes only `memory/`)" in text, True)
+    check("...main moved past the mid-job commit",
+          git(proj.root, "rev-parse", "main") != work_sha, True)
+
+    # -- Fresh job with only a memory note (e.g. plugin work outside the repo):
+    #    skips tests and lands immediately even when the test suite would fail.
+    r = start(proj, "20261119-100000-00000004")
+    commit(r, "memory/MEMORY.md", "# Memory\n\nA note.\n\nPlugin note.\n", "Engineer memory")
+    runs()
+    result, text = land(proj, r)
+    check("note-only job: skips tests and lands",
+          (result["state"], result.get("notes_only"), "Plugin note." in shown(proj)),
+          ("landed", True, True))
+    check("...zero test runs", runs(), 0)
+
+    # -- Note-only job when main moved concurrently: merges and still skips tests.
+    r = start(proj, "20261119-100000-00000005")
+    commit(r, "memory/MEMORY.md", "# Memory\n\nA note.\n\nPlugin note.\n\nConcurrent note.\n",
+           "Engineer memory")
+    (proj.root / "side.txt").write_text("main moved\n")
+    git(proj.root, "add", "side.txt")
+    git(proj.root, "commit", "-qm", "main advances")
+    git(proj.root, "push", "-q", "origin", "main")
+    runs()
+    result, text = land(proj, r)
+    check("note-only job after main moved: merges, skips tests, and lands",
+          (result["state"], result.get("notes_only"), "Concurrent note." in shown(proj)),
+          ("landed", True, True))
+    check("...zero test runs on merge", runs(), 0)
+
+    # -- Uncommitted note alone: landing commits it, skips tests, and lands.
+    r = start(proj, "20261119-100000-00000006")
+    write(r, "memory/MEMORY.md",
+          "# Memory\n\nA note.\n\nPlugin note.\n\nConcurrent note.\n\nUncommitted alone.\n")
+    runs()
+    result, text = land(proj, r)
+    check("uncommitted note alone: commits, skips tests, and lands",
+          (result["state"], result.get("memory_committed"), result.get("notes_only"),
+           "Uncommitted alone." in shown(proj)),
+          ("landed", True, True, True))
+    check("...zero test runs for uncommitted note alone", runs(), 0)
+
+    # -- A release tag on a note-only branch STILL requires tests (never skips).
+    r = start(proj, "20261119-100000-00000007")
+    commit(r, "memory/MEMORY.md", "# Memory\n\nRelease note.\n")
+    runs()
+    rel_res = wt.land(proj, r, f"Land {r['branch']}", release="0.1.0")
+    check("release tag requested: note-only still runs tests (and fails)",
+          (rel_res["state"], runs() >= 1), ("nothing", True))
     FAIL.unlink()
 
-    # -- Uncommitted memory alone: the landing commits it.
+    # -- Uncommitted memory alongside real work: commits memory AND runs tests.
     r = start(proj, "20261119-100000-00000002")
     commit(r, "more.txt", "more work\n")
     write(r, "memory/MEMORY.md", "# Memory\n\nAn uncommitted note.\n")
+    runs()
     result, text = land(proj, r)
-    check("uncommitted note: the landing commits it and lands",
-          (result["state"], result.get("memory_committed"), "uncommitted note" in shown(proj)),
-          ("landed", True, True))
+    check("uncommitted note with work: commits, runs tests, and lands",
+          (result["state"], result.get("memory_committed"), bool(result.get("notes_only")),
+           runs(), "uncommitted note" in shown(proj)),
+          ("landed", True, False, 1, True))
     check("...and the receipt says so", "the landing committed it" in text, True)
 
     # -- Failing tests with work on the branch: still refused.
@@ -142,6 +187,27 @@ try:
     check("...and no note is set aside", "memory_held" in result, False)
     FAIL.unlink()
     runs()
+
+    # -- Non-test failure on a note-only branch after mid-job work: note is still held as patch.
+    r = start(proj, "20261119-100000-00000008")
+    commit(r, "early.txt", "early work\n")
+    mid2, _ = land(proj, r, keep_tree=True)
+    work_sha2 = mid2["sha"]
+    commit(r, "memory/MEMORY.md", "# Memory\n\nHeld note.\n", "Engineer memory")
+    git(proj.root, "checkout", "-q", "-b", "other")
+    runs()
+    result, text = land(proj, r)
+    git(proj.root, "checkout", "-q", "main")
+    git(proj.root, "branch", "-qD", "other")
+    check("note alone, non-test landing failure: reports landed_earlier",
+          (result["state"], result["sha"], result.get("reason"), runs()),
+          ("landed_earlier", work_sha2, None, 0))
+    patch = proj.jobs / r["job"] / wt.MEMORY_PATCH
+    check("...the note is kept as a patch in the job's folder",
+          patch.is_file() and "+Held note." in patch.read_text(), True)
+    check("...the receipt says the note did not land, and where it is",
+          "memory note did not land" in text and str(patch) in text
+          and "no continuation" in text, True)
 
     # -- The push gate.
     proj, origin = make("gated")
@@ -190,11 +256,58 @@ try:
     r = start(proj, "20261119-100000-00000014")
     commit(r, "memory/MEMORY.md", "# Memory\n\nSecretname, a note alone.\n")
     before = git(proj.root, "rev-parse", "main")
+    runs()
     result, text = land(proj, r)
-    check("gate, a note alone names it: nothing lands, the note is kept",
+    check("gate, a note alone names it: nothing lands, the note is kept (0 tests)",
           (result["state"], result.get("memory_held", {}).get("reason"),
-           git(proj.root, "rev-parse", "main"), "nothing landed" in text),
-          ("nothing", "gate", before, True))
+           git(proj.root, "rev-parse", "main"), "nothing landed" in text, runs()),
+          ("nothing", "gate", before, True, 0))
+
+    # -- Platform project (engineer/memory/) on a release install (loam.localMain):
+    #    note alone skips the suite; any file outside engineer/memory/ still runs it.
+    plat_origin = root / "plat.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(plat_origin)], check=True)
+    plat_repo = root / "plat"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(plat_repo)], check=True)
+    git(plat_repo, "config", "user.name", NAME)
+    git(plat_repo, "config", "user.email", EMAIL)
+    git(plat_repo, "config", wt.LOCAL_MAIN_KEY, "true")
+    (plat_repo / "engineer" / "memory").mkdir(parents=True)
+    (plat_repo / "engineer" / "memory" / "MEMORY.md").write_text("# Memory\n")
+    (plat_repo / "engineer" / "role.md").write_text("# Role\n")
+    git(plat_repo, "add", "-A")
+    git(plat_repo, "commit", "-qm", "start")
+    git(plat_repo, "remote", "add", "origin", str(plat_origin))
+    git(plat_repo, "push", "-q", "origin", "main")
+    plat = eng.Project("Loam", plat_repo / "engineer", root / "plat-jobs", platform=True,
+                       record={"name": "Loam", "checkout": str(plat_repo)})
+    plat.jobs.mkdir()
+    plat_calls = []
+    real_run_tests = wt.run_tests
+    def fake_run_tests(project, tree):
+        plat_calls.append(project.name)
+        return False, "python3 tests/run-all", "simulated failure"
+    wt.run_tests = fake_run_tests
+    try:
+        r = start(plat, "20261124-072426-00000021")
+        commit(r, "engineer/memory/MEMORY.md", "# Memory\n\nPlugin built.\n", "Engineer memory")
+        result, text = land(plat, r)
+        check("platform release install, note alone: skips suite and lands locally",
+              (result["state"], result.get("notes_only"), result.get("local_only"),
+               len(plat_calls), "Plugin built." in git(plat_repo, "show", "main:engineer/memory/MEMORY.md")),
+              ("landed", True, True, 0, True))
+        check("...receipt names engineer/memory/",
+              "Test suite skipped (changes only `engineer/memory/`)" in text, True)
+
+        r = start(plat, "20261124-072426-00000022")
+        commit(r, "engineer/memory/MEMORY.md", "# Memory\n\nPlugin built.\n\nRole change.\n")
+        commit(r, "engineer/role.md", "# Role\n\nChanged.\n")
+        result, text = land(plat, r)
+        check("platform release install, non-memory file touched: runs suite and refuses",
+              (result["state"], result.get("reason"), len(plat_calls)),
+              ("not_landed", "branch_tests", 1))
+    finally:
+        wt.run_tests = real_run_tests
 finally:
     wt.WORKTREES, loam_lock.LOCK_DIR = saved
     shutil.rmtree(root, ignore_errors=True)
