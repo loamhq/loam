@@ -1417,7 +1417,7 @@ class Run:
         return self.rec
 
 
-def backup_library(run_id: str) -> str | None:
+def backup_library(run_id: str, keep: str | None = None) -> str | None:
     src = sk.loam_dir()
     if not src.is_dir():
         return None
@@ -1426,9 +1426,17 @@ def backup_library(run_id: str) -> str | None:
     # Not the kept folder: it is never restored from a backup (restore_library).
     shutil.copytree(src, dst, symlinks=True,
                     ignore=lambda d, names: [sk.KEPT_DIR] if Path(d) == src else [])
+    protected = {dst.parent.resolve()}
+    if keep:
+        protected.add(Path(keep).parent.resolve())
+    for meta_name in ("last.json", "pending.json"):
+        meta = read_json(meta_name) or {}
+        if meta.get("backup"):
+            protected.add(Path(meta["backup"]).parent.resolve())
     folders = sorted(p for p in _path("backups").iterdir() if p.is_dir())
     for old in folders[:-KEEP_BACKUPS]:
-        shutil.rmtree(old, ignore_errors=True)
+        if old.resolve() not in protected:
+            shutil.rmtree(old, ignore_errors=True)
     return str(dst)
 
 
@@ -1705,7 +1713,7 @@ def _rollback(box, run_id, by) -> dict:
                    from_commit=last["to_commit"], to_commit=last["from_commit"])
     run.save()
     try:
-        here = run.step("backup", backup_library, run.rec["id"])
+        here = run.step("backup", backup_library, run.rec["id"], last.get("backup"))
         run.rec["backup"] = here
         run.step("back", reset_to, last["from_commit"])
         run.step("verify", verify, last["from_version"])
