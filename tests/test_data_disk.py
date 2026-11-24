@@ -607,5 +607,30 @@ class TestInstallerAdoptionGuards(unittest.TestCase):
         self.assertIn("--data-dir", res_py.stdout)
 
 
+class TestCustomRootRel(unittest.TestCase):
+    def test_root_rel_for(self):
+        self.assertEqual(dd.root_rel_for(Path("/home/loam/loam"), Path("/home/loam")), "loam")
+        self.assertEqual(dd.root_rel_for(Path("/home/operator/agents"), Path("/home/operator")), "agents")
+        self.assertEqual(dd.root_rel_for(Path("/opt/loam"), Path("/home/operator")), "loam")
+        self.assertEqual(dd.root_rel_for(None, Path("/home/operator")), "loam")
+
+    def test_custom_root_rel_mounts_and_gate_unit(self):
+        data_dir = Path("/mnt/loam-data")
+        home = Path("/home/operator")
+        specs = dd.mount_specs(data_dir, home, root_rel="agents")
+        by_target = {s.target: s.source for s in specs}
+        self.assertEqual(by_target[home / "agents"], dd.LOCAL_BASE / "agents")
+        self.assertNotIn(home / "loam", by_target)
+
+        unit = dd.render_gate_unit(data_dir, home, root_rel="agents")
+        self.assertIn("/var/lib/loam/local/agents/bin/loam-data-disk ready", unit)
+        self.assertIn("--root-rel agents", unit)
+        self.assertIn("/home/operator/agents", unit)
+
+        default_unit = dd.render_gate_unit(data_dir, Path("/home/loam"))
+        self.assertIn("/var/lib/loam/local/loam/bin/loam-data-disk ready", default_unit)
+        self.assertNotIn("--root-rel", default_unit)
+
+
 if __name__ == "__main__":
     unittest.main()

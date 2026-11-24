@@ -38,30 +38,33 @@ def _read_config(etc: Path) -> dict:
         return {}
 
 
-def _resolve_params(args) -> tuple[Path | None, Path, Path, Path, int | None]:
+def _resolve_params(args) -> tuple[Path | None, Path, Path, Path, int | None, str]:
     etc = Path(args.etc)
     raw = _read_config(etc)
     data_str = args.data_dir or (raw.get("storage") or {}).get("data_dir")
     data_dir = Path(data_str) if data_str else None
     user = raw.get("user") or "loam"
-    home_str = args.home or (raw.get("paths") or {}).get("home") or f"/home/{user}"
+    paths = raw.get("paths") or {}
+    home_str = args.home or paths.get("home") or f"/home/{user}"
     home = Path(home_str)
     local_base = Path(args.local_base)
+    root_rel = getattr(args, "root_rel", None) or dd.root_rel_for(paths.get("root"), home)
     uid: int | None = None
     try:
         uid = pwd.getpwnam(user).pw_uid
     except KeyError:
         pass
-    return data_dir, home, etc, local_base, uid
+    return data_dir, home, etc, local_base, uid, root_rel
 
 
 def cmd_ready(args) -> int:
-    data_dir, home, etc, local_base, _uid = _resolve_params(args)
+    data_dir, home, etc, local_base, _uid, root_rel = _resolve_params(args)
     if data_dir is None:
         print("loam-data-disk ready: --data-dir is required", file=sys.stderr)
         return 2
     ok, msg = dd.ensure_ready(
-        data_dir, home, etc=etc, local_base=local_base, wait_seconds=args.wait)
+        data_dir, home, etc=etc, local_base=local_base, root_rel=root_rel,
+        wait_seconds=args.wait)
     if ok:
         print(f"loam-data-disk: {msg}")
         return 0
@@ -70,7 +73,7 @@ def cmd_ready(args) -> int:
 
 
 def cmd_status(args) -> int:
-    data_dir, home, etc, local_base, uid = _resolve_params(args)
+    data_dir, home, etc, local_base, uid, root_rel = _resolve_params(args)
     if data_dir is None:
         payload = {"configured": False, "ok": True, "message": "single-disk install (storage.data_dir unset)"}
         if args.json:
@@ -79,7 +82,7 @@ def cmd_status(args) -> int:
             print(payload["message"])
         return 0
     findings = dd.drift_findings(
-        data_dir, home, etc=etc, local_base=local_base, uid=uid)
+        data_dir, home, etc=etc, local_base=local_base, root_rel=root_rel, uid=uid)
     payload = {
         "configured": True,
         "data_dir": str(data_dir),
@@ -103,12 +106,12 @@ def cmd_install(args) -> int:
     if os.geteuid() != 0:
         print("loam-data-disk install requires root (run with sudo)", file=sys.stderr)
         return 2
-    data_dir, home, etc, local_base, uid = _resolve_params(args)
+    data_dir, home, etc, local_base, uid, root_rel = _resolve_params(args)
     if data_dir is None:
         print("loam-data-disk install: storage.data_dir is not configured; nothing to do.")
         return 0
     changed = dd.install_boot_ordering(
-        data_dir, home, uid=uid, etc=etc, local_base=local_base)
+        data_dir, home, uid=uid, etc=etc, local_base=local_base, root_rel=root_rel)
     if changed:
         print(f"loam-data-disk: installed/updated {len(changed)} boot-ordering file(s) and enabled {dd.GATE_UNIT_NAME}.")
     else:
@@ -127,7 +130,7 @@ def cmd_up(args) -> int:
         err = (res.stderr or res.stdout or "").strip()
         print(f"loam-data-disk up: {dd.GATE_UNIT_NAME} failed: {err}", file=sys.stderr)
         return 1
-    data_dir, _home, etc, _local_base, _uid = _resolve_params(args)
+    data_dir, _home, etc, _local_base, _uid, _root_rel = _resolve_params(args)
     raw = _read_config(etc)
     app_name = (raw.get("edge") or {}).get("app") or "loam-ui"
     units = [
@@ -168,6 +171,7 @@ def main(argv: list[str] | None = None) -> int:
         sp.add_argument("--home", default=None)
         sp.add_argument("--etc", default="/etc/loam")
         sp.add_argument("--local-base", default=str(dd.LOCAL_BASE))
+        sp.add_argument("--root-rel", default=None)
         if name == "ready":
             sp.add_argument("--wait", type=float, default=0.0)
         if name == "status":

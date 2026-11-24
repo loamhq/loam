@@ -1059,7 +1059,8 @@ def generate(dry: bool) -> int:
     if dep.lc.DATA_DIR is not None and os.geteuid() == 0:
         import loam_data_disk as dd  # noqa: PLC0415
         dd_changed = dd.install_boot_ordering(
-            dep.lc.DATA_DIR, dep.lc.HOME, uid=dep.lc.UID, etc=dep.ETC)
+            dep.lc.DATA_DIR, dep.lc.HOME, uid=dep.lc.UID, etc=dep.ETC,
+            root_rel=dd.root_rel_for(dep.lc.ROOT, dep.lc.HOME))
         if dd_changed:
             print(f"  data-disk: updated {len(dd_changed)} boot-ordering unit file(s)")
     # Loam's own app's unit template (2026-11-16). A changed template is

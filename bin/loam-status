@@ -126,7 +126,8 @@ def gather() -> dict:
         import shutil  # noqa: PLC0415
         import loam_data_disk as dd  # noqa: PLC0415
         issues = dd.drift_findings(
-            lc.DATA_DIR, lc.HOME, etc=lc.CONFIG_FILE.parent, uid=lc.UID)
+            lc.DATA_DIR, lc.HOME, etc=lc.CONFIG_FILE.parent,
+            root_rel=dd.root_rel_for(lc.ROOT, lc.HOME), uid=lc.UID)
         if issues:
             part("data-disk", "Data disk", BAD, f"{issues[0][0]}: {issues[0][2]}",
                  "check `findmnt` and `/etc/fstab`, or run `sudo " + str(lc.ROOT / "bin" / "check-drift") + "`")
