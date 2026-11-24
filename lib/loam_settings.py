@@ -822,6 +822,7 @@ PAGE_RELAY: dict[str, list[str] | str] = {
     "rest === '/health'": "a read",
     "rest === '/agent-availability'": "a read",
     "rest === '/limits'": "a read",
+    "rest === '/usage/status'": "a read: whether box usage data stays local or is sent to a collector",
     "/^\\/files\\/(roots|list|stat|read|resolve|recent)$/": "a read",
     "rest === '/files/config'": "a read",
     "rest === '/files/link'": "a read",

@@ -20,7 +20,7 @@ The settings sections are declared in `public/app-shape.js`:
 | Connections | One page, three groups: AI providers (plan, usage, sign-in), Services (GitHub and any a plugin adds, then each service's accounts), API keys (by provider, entered once) |
 | Plugins | Themes and extensions; plugin preferences while on; who made it, version and View source in detail; the Market |
 | Files | File folders and preferences, shortcut removal; links remain on Files home |
-| About Loam | The version and Update, and this server (address, processors, memory, storage) |
+| About Loam | The version and Update, and this server (address, processors, memory, storage, usage data status) |
 
 Seven since 2026-11-18 (the owner: "love it", to this structure). On a phone
 Activity stays Settings' first row and the seven follow in this order. **The

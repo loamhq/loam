@@ -166,7 +166,8 @@
       ],
       "routes": [
         "/v1/update",
-        "/api/server"
+        "/api/server",
+        "/v1/usage/status"
       ],
       "fields": [],
       "note": "Was Update (update) until 2026-11-18."

@@ -2463,6 +2463,7 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .about-facts { display:grid; grid-template-columns:max-content minmax(0,1fr); column-gap:var(--space-xl); row-gap:var(--space-md); margin:0; }
 .about-facts dt { color:var(--paper-ink-2); font-size:14px; }
 .about-facts dd { margin:0; font-size:15px; overflow-wrap:anywhere; font-variant-numeric:tabular-nums; }
+.about-fact-note { margin-top:2px; }
 .settings-section > .sheet-head { margin-top:0; }
 .settings-section > .kicker { margin:0; }
 .plugin-row { cursor:pointer; }

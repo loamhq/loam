@@ -28,6 +28,16 @@ const upFor = seconds => {
   const days = Math.floor(seconds / 86400), hours = Math.floor(seconds / 3600), minutes = Math.max(1, Math.floor(seconds / 60))
   return days >= 1 ? `${days} ${days === 1 ? 'day' : 'days'}` : hours >= 1 ? `${hours} ${hours === 1 ? 'hour' : 'hours'}` : `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`
 }
+export function usageStatusLine(usage) {
+  if (!usage || typeof usage !== 'object') return null
+  if (usage.sending) {
+    const where = typeof usage.collector_host === 'string' && usage.collector_host.trim()
+      ? usage.collector_host.trim()
+      : null
+    return where ? `Sent to ${where}` : 'Sent to configured collector'
+  }
+  return 'Kept on this server only'
+}
 export function serverRows(facts, address = globalThis.location?.host ?? '') {
   if (!facts) return []
   return [
@@ -38,6 +48,7 @@ export function serverRows(facts, address = globalThis.location?.host ?? '') {
     ['Memory', Number.isFinite(facts.memory?.total) ? `${size(facts.memory.total)}${Number.isFinite(facts.memory.free) ? ` · ${size(facts.memory.free)} free` : ''}` : null],
     ['Storage', Number.isFinite(facts.storage?.total) ? `${size(facts.storage.free)} free of ${size(facts.storage.total)}` : null],
     ['Running for', Number.isFinite(facts.up_seconds) ? upFor(facts.up_seconds) : null],
+    ['Usage data', usageStatusLine(facts.usage)],
   ].filter(([, value]) => value)
 }
 // Mounted once. Cross-module state and operations are explicit host services.
@@ -103,7 +114,14 @@ function settingsAbout({ back = true } = {}) {
     updates.view(),
     h('section', { class: 'card about-server', 'aria-labelledby': 'about-server' },
       h('h3', { class: 'kicker', id: 'about-server', text: 'This server' }),
-      rows.length ? h('dl', { class: 'about-facts' }, ...rows.flatMap(([label, value]) => [h('dt', { text: label }), h('dd', { text: value })]))
+      rows.length ? h('dl', { class: 'about-facts' }, ...rows.flatMap(([label, value]) => [
+        h('dt', { text: label }),
+        label === 'Usage data'
+          ? h('dd', {},
+              h('div', { text: value }),
+              h('div', { class: 'note about-fact-note', text: 'Resource counts only — never messages, files or agent names.' }))
+          : h('dd', { text: value }),
+      ]))
         : h('p', { class: 'note', role: 'status', text: server.failed ? 'This server’s details couldn’t be read.' : 'Reading this server…' }))]
 }
 

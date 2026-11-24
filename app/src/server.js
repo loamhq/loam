@@ -499,7 +499,25 @@ export function createApp({
     }
     if (rest === '/server') {
       if (method !== 'GET') return sendJson(res, 405, { error: 'The server is read only.' })
-      return sendJson(res, 200, serverFacts())
+      const facts = serverFacts()
+      try {
+        const out = await broker.json('GET', '/v1/usage/status', undefined, { signal: AbortSignal.timeout(2000) })
+        if (out.status === 200) {
+          const parsed = safeJson(out.body)
+          if (parsed && typeof parsed === 'object' && typeof parsed.sending === 'boolean') {
+            facts.usage = {
+              recording: parsed.recording !== false,
+              sending: parsed.sending,
+              collector_host: typeof parsed.collector_host === 'string' && parsed.collector_host ? parsed.collector_host : null,
+            }
+          }
+        }
+      } catch {}
+      return sendJson(res, 200, facts)
+    }
+    if (rest === '/usage/status') {
+      if (method !== 'GET') return sendJson(res, 405, { error: 'Usage status is read only.' })
+      return await relayJson(res, 'GET', '/v1/usage/status', undefined, { signal: AbortSignal.timeout(5000) })
     }
     if (rest === '/owner/used-controls' && method === 'POST') {
       return await relayJson(res, method, '/v1/owner/used-controls', await readBody(req))

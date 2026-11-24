@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""Show this server's local usage record status and whether anything is sent off-box.
+
+  loam usage [status] [--json]   recording & off-box sending status
+  loam usage tail [-n N] [--json] recent samples and events (default: 10)
+  loam usage sample [--json]     take one sample now
+  loam usage push [--force] [--json] push pending batches now (if configured)
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import loam_usage_recorder as ur  # noqa: E402
+
+
+def _fmt_bytes(n: int) -> str:
+    if n >= 1048576:
+        return f"{n / 1048576:.2f} MiB"
+    if n >= 1024:
+        return f"{n / 1024:.1f} KiB"
+    return f"{n} B"
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        prog="loam usage",
+        description="Inspect local box usage recording and optional off-box sending.",
+    )
+    sub = p.add_subparsers(dest="cmd")
+
+    p_status = sub.add_parser("status", help="Show recording and sending status")
+    p_status.add_argument("--json", action="store_true", help="Print JSON output")
+
+    p_tail = sub.add_parser("tail", help="Show recent samples and events")
+    p_tail.add_argument("-n", "--limit", type=int, default=10, help="Rows to show (default: 10)")
+    p_tail.add_argument("--json", action="store_true", help="Print JSON output")
+
+    p_sample = sub.add_parser("sample", help="Record one sample right now")
+    p_sample.add_argument("--json", action="store_true", help="Print JSON output")
+
+    p_push = sub.add_parser("push", help="Push pending batches now if configured")
+    p_push.add_argument("--force", action="store_true", help="Ignore backoff timer")
+    p_push.add_argument("--json", action="store_true", help="Print JSON output")
+
+    p.add_argument("--json", action="store_true", help="Print JSON output")
+    return p.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+    cmd = args.cmd or "status"
+
+    if cmd == "status":
+        data = ur.status_summary()
+        if args.json:
+            print(json.dumps(data, indent=2))
+            return 0
+        if data["sending"]:
+            dest = data.get("collector_host") or data.get("destination")
+            print(f"Usage data: sent to {dest}")
+            print(f"  pending:   {data['pending']} record(s)")
+            print(f"  last push: {data.get('last_push_at') or 'never'}")
+            if data.get("last_error"):
+                print(f"  last err:  {data['last_error']}")
+        else:
+            print("Usage data: kept on this server only (nothing sent off-box)")
+        print(f"Local store: {data['dir']} ({_fmt_bytes(data['total_bytes'])}, "
+              f"{data['archive_files']} archive(s), last seq {data['last_seq']})")
+        latest = data.get("latest")
+        if latest:
+            print(f"Latest row:  {json.dumps(latest, separators=(',', ':'))}")
+        return 0
+
+    if cmd == "tail":
+        rows = ur.UsageStore().read_tail(max(0, args.limit))
+        if args.json:
+            print(json.dumps(rows, indent=2))
+        else:
+            for r in rows:
+                print(json.dumps(r, separators=(",", ":")))
+        return 0
+
+    if cmd == "sample":
+        written = ur.UsageRecorder().tick()
+        if args.json:
+            print(json.dumps(written, indent=2))
+        else:
+            for r in written:
+                print(json.dumps(r, separators=(",", ":")))
+        return 0
+
+    if cmd == "push":
+        res = ur.UsagePusher().push_once(force=args.force)
+        if args.json:
+            print(json.dumps(res, indent=2))
+        else:
+            print(f"push: {res['status']} (sent {res['sent']} record(s) in {res['batches']} batch(es))"
+                  + (f" — {res['error']}" if res.get("error") else ""))
+        return 0 if res["status"] != "error" else 1
+
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

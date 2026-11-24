@@ -3221,3 +3221,39 @@ listener for immediate notification in an open page.
   stale `signCount` latches `clone_warning = 1` permanently in Authelia's
   `webauthn_credentials` table, which `POST /api/firstfactor/passkey` rejects on
   all subsequent attempts even with higher counters.
+
+## 2026-11-24 — Per-minute numbers-only box usage recorder (`loam-usage/1`)
+
+- **Carried inside `bin/session-broker` with zero extra always-on process.**
+  `lib/loam_usage_recorder.py` runs two isolated background loops in
+  `bin/session-broker`: a 60 s sampler (`record_box_usage`, reading live/busy
+  chat counts directly off broker memory and doing `/proc`, `/sys/fs/cgroup`,
+  `statvfs` and file I/O off the event loop via `asyncio.to_thread`) and a
+  separate dedicated daemon thread (`start_usage_pusher`) for optional
+  outbound batch pushes (5 min beat, 10 s timeout, never sharing the event loop
+  or default executor pool with chats). Marginal footprint inside the broker
+  import environment: `+704 KiB` RSS after 60 ticks and `~1.3 ms` CPU per
+  minute sample.
+- **Bounded local store & strict privacy allowlist.** Records live under
+  `<state>/usage/usage.jsonl` with gzip-compressed daily/2 MiB segments under
+  `archive/<YYYY-MM-DD>-<first_seq>-<last_seq>.jsonl.gz`, 90-day retention and
+  a 16 MiB hard disk ceiling. `validate_record()` enforces closed key/enum
+  allowlists on every write; limit events from `<state>/limits/events.jsonl`
+  are passively projected with `subject`, `heaviest`, `for_agent`, `lane`, and
+  all IDs stripped (zero changes to admission control), kernel OOM kills are
+  read from `/proc/vmstat` (`oom_kill` delta), and service restarts for
+  `broker`, `session_host` and `app` are detected from `(btime, pid, starttime)`.
+- **Off by default, read-only visibility in Settings › About Loam.** Core ships
+  no collector address. Outbound pushing activates only when `/etc/loam/loam.toml`
+  sets both `usage.collector_url` (HTTPS; loopback HTTP allowed in tests) and a
+  readable non-empty `usage.token_file` (never put secrets in `loam.toml`).
+  `GET /v1/usage/status` (surfaced through `GET /api/server` into Settings ›
+  About Loam › This server) shows either `Kept on this server only` or
+  `Sent to <host>`. Wire format (`loam-usage/1`) is specified in `docs/usage.md`.
+- **Host-isolation fix in `tests/test_data_disk.py`.** Once native login
+  (`/etc/systemd/system/loam-authelia.service`, `/var/lib/loam-authelia`) is
+  active on the host, `test_loam_host_find_login_supports_bind_volume_json`
+  found the live host's native directory instead of exercising the mocked
+  Docker fallback; patching `LOGIN_NATIVE_DIR`, `LOGIN_SERVICE_UNIT` and
+  `LOGIN_LEGACY_COMPOSE` (matching `tests/test_host_history.py`) keeps the test
+  isolated on native-login hosts.

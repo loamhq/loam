@@ -393,6 +393,16 @@ def expand(text: str) -> str:
     return text
 
 
+# Optional outbound usage collector (docs/usage.md). Off by default on every
+# install: both collector_url and token_file must be configured for anything to
+# leave the box. token_file is a path to a restricted file, never a secret value.
+USAGE_COLLECTOR_URL: str | None = get("usage.collector_url")
+_usage_token_file = get("usage.token_file")
+USAGE_TOKEN_FILE: Path | None = Path(_usage_token_file).expanduser() if _usage_token_file else None
+USAGE_BOX_ID: str | None = get("usage.box_id")
+USAGE_PLAN: str | None = get("usage.plan")
+
+
 # Every key this module answers for, for ``bin/loam-config`` and the docs.
 def as_dict() -> dict:
     return {
@@ -406,6 +416,10 @@ def as_dict() -> dict:
         "paths.pycache": str(PYCACHE),
         "paths.reviewer_state": str(REVIEWER_STATE),
         "storage.data_dir": str(DATA_DIR) if DATA_DIR else "",
+        "usage.collector_url": str(USAGE_COLLECTOR_URL) if USAGE_COLLECTOR_URL else "",
+        "usage.token_file": str(USAGE_TOKEN_FILE) if USAGE_TOKEN_FILE else "",
+        "usage.box_id": str(USAGE_BOX_ID) if USAGE_BOX_ID else "",
+        "usage.plan": str(USAGE_PLAN) if USAGE_PLAN else "",
         "bin.claude": str(CLAUDE_BIN), "bin.codex": str(CODEX_BIN),
         "bin.agy": str(AGY_BIN), "bin.uv": str(UV_BIN),
         "owner.id": OWNER_ID, "owner.name": OWNER_NAME,

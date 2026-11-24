@@ -1254,6 +1254,14 @@ class Server:
             await writer.drain()
             return
 
+        if parts == ["v1", "usage", "status"] and method == "GET":
+            import loam_usage_recorder as usage_rec  # noqa: PLC0415
+            nocache = "Cache-Control: no-store\r\n"
+            body = await asyncio.to_thread(usage_rec.public_status)
+            writer.write(response(200, body, nocache))
+            await writer.drain()
+            return
+
         # Return the configured owner ID and the aliases recognized in existing records.
         if parts == ["v1", "owner"] and method == "GET":
             owner = lc.owner()
@@ -3757,14 +3765,20 @@ async def serve(addr: str, port: int, remote_path=None) -> int:
     # Watch local Syncthing ItemFinished events on a daemon thread for positive
     # owner attribution of synced device edits (silent no-op without Syncthing).
     syncthing_stop = start_syncthing_recent_watcher()
+    # One-minute numbers-only box usage recorder + optional off-box batch pusher
+    # (lib/loam_usage_recorder.py, docs/usage.md). Off-box sending stays silent
+    # unless [usage] in loam.toml names both a collector_url and token_file.
+    usage_push_stop = start_usage_pusher()
     tcp = await asyncio.start_server(server.handle, addr, port)
     stop = asyncio.Event()
+    usage_record_task = asyncio.create_task(record_box_usage(broker, server, stop))
     loop = asyncio.get_running_loop()
     watch = ShutdownWatch(broker, loop)
 
     def on_signal(sig: signal.Signals) -> None:
         broker.stopping = True
         syncthing_stop.set()
+        usage_push_stop.set()
         watch.arm(sig.name)
         stop.set()
 
@@ -3777,6 +3791,9 @@ async def serve(addr: str, port: int, remote_path=None) -> int:
     async with tcp:
         await stop.wait()
     syncthing_stop.set()
+    usage_push_stop.set()
+    usage_record_task.cancel()
+    await asyncio.gather(usage_record_task, return_exceptions=True)
     await server.threads.handoffs.close()
     if remote_path:
         # Cancel the workers before closing readers. Cancellation preserves
@@ -3818,6 +3835,92 @@ def start_syncthing_recent_watcher():
                 stop_ev.wait(60.0)
 
     threading.Thread(target=_run, name="syncthing-recent", daemon=True).start()
+    return stop_ev
+
+
+def _usage_interval(env_name: str, default_s: float) -> float:
+    raw = os.environ.get(env_name)
+    if not raw:
+        return default_s
+    try:
+        val = float(raw)
+        return max(0.05, val)
+    except ValueError:
+        return default_s
+
+
+async def record_box_usage(broker, server, stop: asyncio.Event) -> None:
+    """Append one numbers-only resource + activity sample every minute (plus
+    events as they happen). Reads live chat counts off the broker in memory,
+    then does all /proc and file I/O off the event loop."""
+    try:
+        import loam_usage_recorder as ur  # noqa: PLC0415
+    except Exception as exc:  # noqa: BLE001 - never the reason a broker is down
+        print(f"box-usage: unavailable ({exc!r})", file=sys.stderr, flush=True)
+        return
+    interval = _usage_interval("LOAM_USAGE_INTERVAL_S", float(ur.SAMPLE_INTERVAL_S))
+    recorder = ur.UsageRecorder()
+    # Brief settle before the first sample so short-lived test brokers exit cleanly
+    # and split-mode host_pid is populated.
+    try:
+        await asyncio.wait_for(stop.wait(), timeout=min(2.0, interval))
+        return
+    except asyncio.TimeoutError:
+        pass
+    while not stop.is_set():
+        try:
+            live = list(broker.live())
+            busy_sessions = sum(1 for s in live if s.busy() is not None)
+            engine = server.threads
+            turns_active = len(engine.turns) + sum(
+                1 for k, q in list(engine.queues.items())
+                if k not in engine.turns and not q.empty()
+            )
+            chats_live = len(live)
+            chats_busy = max(busy_sessions, turns_active)
+            host_pid = getattr(broker, "host_pid", None)
+            await asyncio.to_thread(
+                recorder.tick,
+                chats_live=chats_live,
+                chats_busy=chats_busy,
+                broker_pid=os.getpid(),
+                host_pid=host_pid if isinstance(host_pid, int) else None,
+            )
+        except Exception as exc:  # noqa: BLE001 - never break the broker loop
+            print(f"box-usage: sample failed ({exc!r})", file=sys.stderr, flush=True)
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+            return
+        except asyncio.TimeoutError:
+            pass
+
+
+def start_usage_pusher():
+    """Push unsent local usage records to a configured collector on a dedicated
+    daemon thread. Completely silent when no collector is configured, and never
+    shares the asyncio loop or default executor with chat handling."""
+    import threading  # noqa: PLC0415
+
+    stop_ev = threading.Event()
+
+    def _run() -> None:
+        try:
+            import loam_usage_recorder as ur  # noqa: PLC0415
+        except Exception:  # noqa: BLE001
+            return
+        interval = _usage_interval("LOAM_USAGE_PUSH_INTERVAL_S", float(ur.PUSH_INTERVAL_S))
+        pusher = ur.UsagePusher()
+        if stop_ev.wait(min(30.0, interval)):
+            return
+        while not stop_ev.is_set():
+            try:
+                pusher.push_once()
+            except Exception as exc:  # noqa: BLE001
+                print(f"box-usage: push failed ({exc!r})", file=sys.stderr, flush=True)
+            if stop_ev.wait(interval):
+                return
+
+    threading.Thread(target=_run, name="box-usage-push", daemon=True).start()
     return stop_ev
 
 
