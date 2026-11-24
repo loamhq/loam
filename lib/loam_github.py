@@ -48,8 +48,14 @@ API_VERSION = "2022-11-28"
 class GitHubError(Exception):
     """GitHub refused, with its own words. Never carries the token."""
 
+    def __init__(self, message: str, status: int | None = None,
+                 payload: dict | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+        self.payload = payload
 
-def token() -> str:
+
+def token(force_refresh: bool = False) -> str:
     """The owner's user token from the GitHub integration (lib/loam_github_app.py),
     refreshed there if it is near its expiry. The only credential: the
     personal-token fallback went on 2026-10-01, once a throwaway provision had
@@ -57,13 +63,21 @@ def token() -> str:
     import loam_github_app as app  # noqa: PLC0415
     try:
         if app.status() == "authorized":
-            return app.user_token()
+            return app.user_token(force_refresh=force_refresh)
         raise GitHubError(
             f"GitHub is not connected (the integration is {app.status()}); "
-            f"connect it, or refresh the connection, from the app's "
-            f"Integrations screen.")
+            f"connect it, or refresh the connection, from Settings › "
+            f"Connections › GitHub.")
     except app.IntegrationError as exc:
         raise GitHubError(f"the GitHub integration could not give a token: {exc}") from None
+
+
+def _can_refresh_user_token() -> bool:
+    import loam_github_app as app  # noqa: PLC0415
+    try:
+        return bool((app.load().get("user") or {}).get("refresh_token"))
+    except app.IntegrationError:
+        return False
 
 
 def call(method: str, path: str, body: dict | None = None,
@@ -71,34 +85,40 @@ def call(method: str, path: str, body: dict | None = None,
     """(status, json body or {}, response headers). Raises on anything not in ok."""
     loam_offline.guard_url(API + path, f"GitHub {method} {path.split('?')[0]}")
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(
-        API + path, data=data, method=method,
-        headers={
-            "Authorization": f"Bearer {token()}",
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": API_VERSION,
-            "Content-Type": "application/json",
-        })
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            raw = resp.read()
-            payload = json.loads(raw) if raw else {}
-            return resp.status, payload, dict(resp.headers)
-    except urllib.error.HTTPError as exc:
-        raw = exc.read().decode("utf-8", "replace")
+    for attempt in range(2):
+        tok = token(force_refresh=attempt > 0)
+        req = urllib.request.Request(
+            API + path, data=data, method=method,
+            headers={
+                "Authorization": f"Bearer {tok}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": API_VERSION,
+                "Content-Type": "application/json",
+            })
         try:
-            payload = json.loads(raw)
-        except ValueError:
-            payload = {"message": raw[:500]}
-        if exc.code in ok:
-            return exc.code, payload, dict(exc.headers)
-        raise GitHubError(
-            f"GitHub returned {exc.code} for {method} {path}: "
-            f"{payload.get('message', raw[:300])}"
-            + (f" — {payload['errors']}" if payload.get("errors") else "")
-        ) from None
-    except urllib.error.URLError as exc:
-        raise GitHubError(f"could not reach api.github.com: {exc.reason}") from None
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                raw = resp.read()
+                payload = json.loads(raw) if raw else {}
+                return resp.status, payload, dict(resp.headers)
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", "replace")
+            try:
+                payload = json.loads(raw)
+            except ValueError:
+                payload = {"message": raw[:500]}
+            if exc.code in ok:
+                return exc.code, payload, dict(exc.headers)
+            if exc.code == 401 and attempt == 0 and _can_refresh_user_token():
+                continue
+            raise GitHubError(
+                f"GitHub returned {exc.code} for {method} {path}: "
+                f"{payload.get('message', raw[:300])}"
+                + (f" — {payload['errors']}" if payload.get("errors") else ""),
+                status=exc.code, payload=payload,
+            ) from None
+        except urllib.error.URLError as exc:
+            raise GitHubError(f"could not reach api.github.com: {exc.reason}") from None
+    raise AssertionError("unreachable")
 
 
 def whoami() -> dict:
@@ -150,6 +170,29 @@ def create_private_repo(name: str, description: str = "") -> dict:
         "has_projects": False,
     })
     if not repo.get("private"):
+        raise GitHubError(
+            f"created {repo.get('full_name')} but GitHub reports private="
+            f"{repo.get('private')!r}. Refusing to continue with a repository "
+            f"that is not private; delete it by hand.")
+    return repo
+
+
+def create_repo(owner: str, name: str, description: str = "", *,
+                private: bool = True) -> dict:
+    """Create a repository on the connected user's account (POST /user/repos)
+    or an organization (POST /orgs/<owner>/repos). Private by default; pass
+    ``private=False`` only on the owner's direct yes."""
+    me = whoami().get("login") or ""
+    path = "/user/repos" if owner.lower() == me.lower() else f"/orgs/{owner}/repos"
+    _, repo, _ = call("POST", path, {
+        "name": name,
+        "description": description,
+        "private": bool(private),
+        "auto_init": False,
+        "has_wiki": False,
+        "has_projects": False,
+    })
+    if private and not repo.get("private"):
         raise GitHubError(
             f"created {repo.get('full_name')} but GitHub reports private="
             f"{repo.get('private')!r}. Refusing to continue with a repository "

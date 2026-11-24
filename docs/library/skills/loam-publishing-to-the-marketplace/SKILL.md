@@ -22,24 +22,37 @@ one that proves itself can later become part of Loam, and then the Market
 copy steps aside for the built-in one on the update that brings it, and its
 listing is withdrawn.
 
-What the owner needs: a GitHub account, connected in Settings › Connections
-(that is how you push for them), and a repository they made for it.
+What the owner needs: a GitHub account connected in
+**Settings › Connections › GitHub** (that is how Loam creates the repository
+and pushes for them).
 
 ## Share it by link
 
 1. **The plugin is ready.** It is in the owner's plugins folder, its
    `PLUGIN.md` is right (`loam-building-a-plugin`), it is listed as not
    broken, and its `version` is the one to share.
-2. **The owner makes the repository** on github.com (New repository, e.g.
-   `loam-dusk`), on the account GitHub is connected with, with nothing in
-   it. Public or private is their choice and, for public, their direct yes:
-   a public repository is on the open web. Ask; do not assume.
-3. **Push it:**
+2. **Confirm visibility and the repository name.** Creating a new repository is
+   **private by default**. Making a repository **public** puts it on the open
+   web and needs the owner's direct yes — ask first, do not assume. (Private
+   works for keeping a personal copy on GitHub; sharing with others or asking
+   for a Market listing needs public.) Pick a repository name on the connected
+   account (e.g. `<owner>/loam-<plugin id>`). Do not ask the owner to create an
+   empty repository on github.com first.
+3. **Create and push it:**
    ```
    loam market share <plugin id> <owner>/<repository>
    ```
-   It puts the folder in the repository as `<id>/`, tags it `v<version>`,
-   and answers the link: `https://github.com/<owner>/<repository>/tree/v1.0.0/<id>`.
+   Add `--public` only after the owner has given their direct yes to making
+   the repository public.
+   If `<owner>/<repository>` does not exist yet on the connected GitHub
+   account, `loam market share` creates it itself (private by default, or
+   public with `--public`), puts the folder in the repository as `<id>/`, tags
+   it `v<version>`, attaches the release file, and answers the link:
+   `https://github.com/<owner>/<repository>/tree/v1.0.0/<id>`.
+   If the command refuses because GitHub is not connected, needs refreshing or
+   reconnecting, or an older connection lacks permission to create
+   repositories, tell the owner in plain words what to do in
+   **Settings › Connections › GitHub** — not on github.com.
    A new version is a higher `version` in `PLUGIN.md` and the same command.
    One repository per plugin, on its maker's account, is how everything in
    the Market is kept, Loam's own makers' plugins included. (A repository

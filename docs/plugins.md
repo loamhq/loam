@@ -1614,14 +1614,21 @@ does not have is drawn as its words, plain. The rules are
 
 ### Sharing by link: `loam market share`
 
-`loam market share <id> <owner>/<name>` pushes a plugin from the owner's
-plugins folder to a repository the owner made on github.com, as `<id>/` at
-the tag `v<version>`, through the owner's connected GitHub (an installation
-token per push, from `bin/git-credential-loam`; never written down). It
-answers the install link, and says when the repository is still private.
-Only that folder changes in the repository; a tag that exists is refused, so
-a new share is a new version. Making the repository public is the owner's
-direct yes on github.com; nothing here changes a repository's visibility.
+`loam market share <id> <owner>/<name> [--public]` pushes a plugin from the
+owner's plugins folder to `<owner>/<name>` as `<id>/` at the tag `v<version>`,
+through the owner's connected GitHub. When the repository does not exist yet on
+the connected account, Loam creates it first through the integration's user
+token (refreshed automatically when near or past its 8-hour expiry) and adds it
+to the GitHub App installation: **private by default**, or public only when
+`--public` is passed on the owner's direct yes. The push itself uses a
+short-lived installation token per push (`bin/git-credential-loam`; never
+written down). It answers the install link, and says when the repository is
+private. Only that folder changes in the repository; a tag that exists with
+different files is refused, so a new share is a new version. `--public` applies
+only when creating a missing repository; nothing here changes an existing
+repository's visibility. When GitHub is not connected, needs refreshing or
+reconnecting, or an older connection lacks repository-creation permission, the
+command refuses in plain words pointing to **Settings › Connections › GitHub**.
 
 ## Activity summaries and the Chats line
 
