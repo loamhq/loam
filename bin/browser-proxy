@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+"""Agents' browser lazy-wake proxy and Docker idle helper (lib/loam_browser_proxy.py).
+
+Listens on 127.0.0.1:8931 (socket-activated by loam-browser-proxy.socket) so
+Claude Code, Codex, and Antigravity can connect and list browser tools without
+waking Chromium or Docker. Starts `loam-browser` (and Docker/containerd when
+asleep) on the first `tools/call`, keeps open browser sessions alive, and puts
+the browser (and Docker when unused) back to sleep after a quiet period.
+
+  browser-proxy                   run the MCP proxy (adopts systemd fd 3 if present)
+  browser-proxy --sleep-if-idle   stop Docker + containerd when no container needs them
+  browser-proxy --status          print browser/Docker state without waking Docker
+  browser-proxy --wake            start Docker (if needed) and loam-browser now
+  browser-proxy --sleep           stop loam-browser (and Docker if unused) now
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+
+import loam_browser_proxy  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(loam_browser_proxy.run_cli())

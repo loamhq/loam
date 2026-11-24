@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import sys
 import threading
 import traceback
@@ -30,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 import backup_core as core  # noqa: E402
 
 RUNNING: set[str] = set()
+THREADS: set[threading.Thread] = set()
 GUARD = threading.Lock()
 
 
@@ -50,7 +52,11 @@ def push_beside(trees: list[str]) -> list[str]:
             finally:
                 with GUARD:
                     RUNNING.discard(t)
-        threading.Thread(target=go, daemon=True).start()
+                    THREADS.discard(threading.current_thread())
+        th = threading.Thread(target=go, daemon=False)
+        with GUARD:
+            THREADS.add(th)
+        th.start()
     return started
 
 
@@ -135,8 +141,19 @@ def main() -> int:
     port = int(os.environ.get("PORT") or os.environ.get("LOAM_PLUGIN_PORT") or 9199)
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     server.daemon_threads = True
+
+    def _stop(_sig, _frame):
+        threading.Thread(target=server.shutdown, daemon=True).start()
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, _stop)
     print(f"git-backup: listening on 127.0.0.1:{port}", flush=True)
     server.serve_forever()
+    server.server_close()
+    with GUARD:
+        pending = list(THREADS)
+    for th in pending:
+        th.join()
     return 0
 
 

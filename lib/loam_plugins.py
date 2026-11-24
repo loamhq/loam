@@ -982,22 +982,36 @@ def words_of(data: dict, kind: list[str], folder: Path | None,
 
 
 def server_of(value, warnings: list[str]) -> dict | None:
-    """The manifest's ``server``: ``{run: "<command>"}``, the one way a
-    plugin says how its server starts. ``None`` when absent."""
+    """The manifest's ``server``: ``{run: "<command>", always_on: false}``.
+    ``always_on: true`` keeps the server running instead of sleeping when idle
+    (default: false — starts on first request and sleeps after a quiet period).
+    ``always_on`` may be given without ``run`` when a default server entry
+    point (server/main.py or server/main.js) exists. ``None`` when absent."""
     if value is None:
         return None
     if isinstance(value, str):
         value = {"run": value}
     if not isinstance(value, dict):
         raise ManifestError('`server` is a mapping: {run: "python3 server/main.py"}')
+    out: dict = {}
+    if "always_on" in value:
+        if not isinstance(value["always_on"], bool):
+            raise ManifestError("`server.always_on` is true or false")
+        out["always_on"] = value["always_on"]
     run = value.get("run")
-    if not isinstance(run, str) or not run.strip() or "\n" in run.strip():
+    if run is not None:
+        if not isinstance(run, str) or not run.strip() or "\n" in run.strip():
+            raise ManifestError("`server.run` is the one line that starts its server, "
+                                "run in the plugin's folder (python3 server/main.py)")
+        out["run"] = run.strip()
+    elif "always_on" not in value:
         raise ManifestError("`server.run` is the one line that starts its server, "
                             "run in the plugin's folder (python3 server/main.py)")
-    for k in value:
-        if k != "run":
-            warnings.append(f"server.{k} is not a server field (run); kept as given")
-    return {"run": run.strip(), **{k: v for k, v in value.items() if k != "run"}}
+    for k, v in value.items():
+        if k not in ("run", "always_on"):
+            warnings.append(f"server.{k} is not a server field (run, always_on); kept as given")
+            out[k] = v
+    return out
 
 
 def _icon_ok(icon, folder: Path | None, warnings: list[str]) -> bool:
@@ -1036,20 +1050,29 @@ def carried_memory(folder: Path) -> list[str]:
     return sorted(found)
 
 
+def _default_always_on(row: dict) -> bool:
+    """Plugins declaring an external box.listener receive traffic outside the
+    plugin gateway, so they stay always-on unless they opt into sleeping."""
+    contribs = row.get("contributes") or {}
+    return bool(contribs.get("box.listener"))
+
+
 def server_spec(row: dict) -> dict | None:
-    """What a row would run: ``{"run", "default"}``, or ``None`` when it has
-    no ``server/`` or nothing to start it with. An agent or skill package
-    runs nothing."""
+    """What a row would run: ``{"run", "default", "always_on"}``, or ``None``
+    when it has no ``server/`` or nothing to start it with. An agent or skill
+    package runs nothing."""
     if row.get("broken") or not (row.get("has") or {}).get("server"):
         return None
     if any(k in LISTED_ONLY for k in row.get("kind") or []):
         return None
-    if row.get("server"):
-        return {"run": row["server"]["run"], "default": False}
+    srv = row.get("server") if isinstance(row.get("server"), dict) else {}
+    always_on = srv["always_on"] if "always_on" in srv else _default_always_on(row)
+    if srv.get("run"):
+        return {"run": srv["run"], "default": False, "always_on": bool(always_on)}
     folder = Path(row["folder"])
     for rel, run in SERVER_DEFAULTS:
         if (folder / rel).is_file():
-            return {"run": run, "default": True}
+            return {"run": run, "default": True, "always_on": bool(always_on)}
     return None
 
 
@@ -1844,16 +1867,19 @@ CONTRIBUTIONS_FOLLOW = os.environ.get("LOAM_CONTRIBUTIONS_FOLLOW", "1") != "0"
 
 
 def _servers_follow(pid: str, restart: bool = False) -> dict | None:
-    """Bring one plugin's server to what it should be: started when wanted
-    (``restart`` makes it a fresh start even if it runs: an update), stopped
-    when not. Never raises: a server that cannot start is the row's status,
-    not the switch's failure."""
+    """Bring one plugin's server to what it should be: always-on servers start
+    immediately (``restart`` makes it a fresh start on update); on-demand
+    servers have their ports allocated and sleep until the first request
+    (``restart`` stops any running copy so the next request wakes the new code);
+    unwanted servers stop. Never raises."""
     try:
         want = wanted_servers().get(pid)
         srv = _servers()
         if want is None:
             return srv.stop(pid)
-        return srv.start(pid, want, fresh=restart)
+        if want.get("always_on"):
+            return srv.start(pid, want, fresh=restart)
+        return srv.prepare_on_demand(pid, want, reset=restart)
     except Exception as exc:  # noqa: BLE001 -- the switch is written; the unit is reported
         return {"error": f"its server could not be brought into line: {exc}"}
 

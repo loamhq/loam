@@ -559,9 +559,10 @@ try:
     record("gamma", 'exposure = "shared"\n[share]\nexpires = 2026-09-01\n', COMPOSE_OK.format(name="gamma", port=8103))
     record("pages", f'exposure = "private"\nstatic_root = "{root}/www"\nhide = [".git", "private/notes"]\n')
 
-    check("generated() covers the broker wall, twelve other live paths and the sign-in page's four", set(dep.generated(today)) == {
+    check("generated() covers the broker wall, fifteen other live paths and the sign-in page's four", set(dep.generated(today)) == {
         dep.loam_broker.FIREWALL_SCRIPT, dep.CADDYFILE, dep.DAEMON_JSON, dep.AUTHELIA_CONFIG, dep.AUTHELIA_COMPOSE,
-        dep.BROWSER_COMPOSE, dep.SIGHT_FIREWALL_SCRIPT, dep.SIGHT_FIREWALL_UNIT,
+        dep.BROWSER_COMPOSE, dep.BROWSER_PROXY_SOCKET, dep.BROWSER_PROXY_UNIT, dep.DOCKER_IDLE_UNIT,
+        dep.SIGHT_FIREWALL_SCRIPT, dep.SIGHT_FIREWALL_UNIT,
         dep.INBOUND_FIREWALL_SCRIPT, dep.INBOUND_FIREWALL_UNIT, dep.SUDOERS,
         dep.PREVIEW_SYSCTL, dep.SERVICE_UNIT,
         *(dep.LOGIN_DIR / n for n in ("index.html", "login.css", "login.js", "icon.svg"))})
