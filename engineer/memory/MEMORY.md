@@ -3096,3 +3096,25 @@ listener for immediate notification in an open page.
   stops pre-sleep front-port servers while `loam-plugins-gateway.service` is
   stale (restarting it first outside `loam update`, or deferring while
   `run.lock` is held unless `LOAM_UPDATE_GATEWAY_STEP=1`).
+
+## 2026-11-23 — `loam market share` creates missing GitHub repositories
+
+- **No manual repository creation on github.com.** `lib/loam_marketplace.py:share`
+  (`bin/loam-market share <id> <owner>/<name> [--public]`) checks whether
+  `<owner>/<name>` exists through the connected GitHub account and creates it
+  when missing (`lib/loam_github.py:create_repo`, private by default; `--public`
+  only on the owner's direct yes), then calls `loam_github.add_to_installation`
+  so both `all` and `selected` repository installations can immediately mint
+  the push token. `create_private_repo` stays strictly private-only for project
+  provisioning.
+- **8-hour user token expiry and 401 retry.** `loam_github.token()` delegates
+  to `loam_github_app.user_token()`, which proactively refreshes the user token
+  whenever it is expired or within `USER_REFRESH_MARGIN_S` (1 hour) of expiry;
+  `loam_github.call()` also retries once with `force_refresh=True` on HTTP 401
+  when a refresh token is stored.
+- **Selected-repositories trap and permission refusals.** A GitHub App user
+  token gets 404 on `GET /repos/<owner>/<name>` for an existing private repo
+  outside a `selected`-repositories installation, then 422 (`name already
+  exists`) on `POST /user/repos`; `_ensure_share_repo` distinguishes that from
+  missing permissions (`administration: write` checked on the live installation
+  and on 403) and points every refusal to Settings › Connections › GitHub.

@@ -18,12 +18,14 @@
       it is on now, and `note` says so. The answer carries `card`, the line
       that shows an install card for it in a reply (a line of its own); a
       repository of several plugins answers each, with its own card.
-  loam market share <plugin id> <owner/name> [--json]
+  loam market share <plugin id> <owner/name> [--public] [--json]
       Share a plugin from the owner's plugins folder by link: its folder is
-      pushed to that GitHub repository (the owner makes it on github.com;
-      whether it is public is their yes) as <id>/ at the tag v<version>,
-      through the GitHub account connected in Settings › Connections. The
-      answer is the link anyone installs it by.
+      pushed to that GitHub repository as <id>/ at the tag v<version>, through
+      the GitHub account connected in Settings › Connections › GitHub. When
+      the repository does not exist yet, Loam creates it on the connected
+      account — private by default, or public with --public (only on the
+      owner's direct yes, since public is on the open web). The answer is the
+      link anyone installs it by.
   loam market request <link at a tag> --description "one sentence" [--json]
       The listing for the plugin at that link, read from the plugin itself,
       and a link to GitHub that proposes it to the marketplace as a pull
@@ -79,6 +81,8 @@ def main(argv: list[str]) -> int:
     sh = sub.add_parser("share")
     sh.add_argument("plugin")
     sh.add_argument("repository")
+    sh.add_argument("--public", action="store_true",
+                    help="create a missing repository as public (only on the owner's direct yes)")
     sh.add_argument("--json", action="store_true")
     rq = sub.add_parser("request")
     rq.add_argument("link")
@@ -173,19 +177,27 @@ def main(argv: list[str]) -> int:
 
     if args.verb == "share":
         try:
-            out = mk.share(args.plugin, args.repository)
+            out = mk.share(args.plugin, args.repository, public=args.public)
         except mk.ShareError as exc:
             print(f"loam market: {exc}", file=sys.stderr)
             return 2
         if args.json:
             print(json.dumps(out, indent=2))
             return 0
+        if out.get("created"):
+            vis = "public" if out["public"] else "private"
+            print(f"Created {vis} repository {out['repo']}.")
         print(f"Shared {out['id']} {out['version']} to {out['repo']} at {out['tag']}.")
         print(f"The link to install it by: {out['link']}")
         if out["public"] is False:
-            print("The repository is private, so the link works only for its owner. "
-                  "Making it public is the owner's direct yes (on github.com, the "
-                  "repository's Settings › Danger zone › Change visibility).")
+            if args.public and not out.get("created"):
+                print("The repository already existed as private, so its visibility was not "
+                      "changed. Making an existing repository public is the owner's direct yes "
+                      "(on github.com, the repository's Settings › Danger zone › Change visibility).")
+            else:
+                print("The repository is private, so the link works only for its owner. "
+                      "Making it public is the owner's direct yes (on github.com, the "
+                      "repository's Settings › Danger zone › Change visibility).")
         return 0
 
     try:

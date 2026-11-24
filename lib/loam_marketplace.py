@@ -19,8 +19,9 @@ rest are drawn. The answer is kept for ``TTL`` seconds in the process that
 asked (the broker), so opening Settings does not fetch every time.
 
 **Sharing by link** (``share``): the plugin's folder pushed from the owner's
-plugins folder to a repository the owner made, at the tag of its version,
-through their connected GitHub; the answer is the link to install it by.
+plugins folder to a repository on their connected GitHub (created when
+missing: private by default, or public only on the owner's explicit yes), at
+the tag of its version; the answer is the link to install it by.
 
 **Asking to be listed** (``listing_request``): the entry for a plugin at a
 tagged link, read from the plugin itself (the first, writing-nothing call of
@@ -1193,11 +1194,13 @@ def listing_request(link: str, description: str | None = None, by: str | None = 
 # goes into a GitHub repository of the owner's, at a tag named by its version,
 # as a folder named by its id: the link is then
 # https://github.com/<owner>/<name>/tree/v<version>/<id>, which anyone can
-# install (docs/plugins.md, "Install from a link"). The repository is the
-# owner's to make, on github.com, because whether it is public is their
-# direct yes; the push is the integration's (the owner's connected GitHub,
-# lib/loam_github.helper_env: an installation token minted per push, never
-# written down). Nothing else changes in the repository but that folder.
+# install (docs/plugins.md, "Install from a link"). When the repository does
+# not exist yet, Loam creates it on the connected GitHub account through the
+# owner's user token (refreshed automatically when near or past its 8-hour
+# expiry): private by default, or public only when ``public=True`` (the
+# owner's direct yes). The push uses the integration's installation token
+# (lib/loam_github.helper_env: minted per push, never written down). Nothing
+# else changes in the repository but that folder.
 
 class ShareError(Exception):
     pass
@@ -1215,7 +1218,8 @@ def _share_base() -> str:
 def is_public(repository: str) -> bool | None:
     """Whether GitHub shows the repository to a stranger: True, False, or
     None when GitHub could not be asked."""
-    req = urllib.request.Request(f"https://api.github.com/repos/{repository}",
+    import loam_github  # noqa: PLC0415
+    req = urllib.request.Request(f"{loam_github.API}/repos/{repository}",
                                  headers={"User-Agent": "loam-marketplace"})
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT):  # noqa: S310 -- a fixed https host
@@ -1226,10 +1230,159 @@ def is_public(repository: str) -> bool | None:
         return None
 
 
-def share(pid: str, repository: str) -> dict:
+def _repo_already_exists_error(exc: Exception) -> bool:
+    """Whether GitHub's 422 says a repository of this name already exists."""
+    if getattr(exc, "status", None) != 422:
+        return False
+    payload = getattr(exc, "payload", None) or {}
+    for err in payload.get("errors") or []:
+        if isinstance(err, dict) and "already exists" in str(err.get("message", "")).lower():
+            return True
+    return "already exists" in str(exc).lower()
+
+
+def _ensure_share_repo(repository: str, description: str = "", *,
+                       public: bool = False) -> tuple[dict | None, bool]:
+    """Ensure ``repository`` (owner/name) exists and is reachable through the
+    connected GitHub account. Creates it when missing (private unless
+    ``public=True``) and adds it to the app installation so the push succeeds.
+    Returns ``(repo_info, created)``. Raises ``ShareError`` in plain words
+    pointing to Settings › Connections › GitHub when the connection cannot
+    reach or create it."""
+    import loam_github  # noqa: PLC0415
+    import loam_github_app as gh_app  # noqa: PLC0415
+
+    owner, _, name = repository.partition("/")
+    try:
+        data = gh_app.load()
+    except gh_app.IntegrationError as exc:
+        raise ShareError(
+            f"GitHub's connection could not be read ({exc}): open Settings › "
+            f"Connections › GitHub to check it.") from None
+
+    if not data.get("app") and not gh_app.org_apps(data):
+        raise ShareError(
+            "GitHub is not connected on this install: open Settings › Connections › "
+            "GitHub and choose Add account, then try again.")
+
+    try:
+        slot, inst = gh_app.route(data, repository)
+    except gh_app.IntegrationError:
+        connected = [a["account"] for a in gh_app.accounts(data).get("accounts", [])
+                     if a.get("account") and a.get("installation")]
+        if connected:
+            who = ", ".join(connected)
+            raise ShareError(
+                f"GitHub is connected for {who}, not {owner}: open Settings › "
+                f"Connections › GitHub to add {owner}, or share to "
+                f"{connected[0]}/{name}.") from None
+        raise ShareError(
+            "GitHub is not finished connecting: open Settings › Connections › "
+            "GitHub and choose Finish connecting, then try again.") from None
+
+    slot_error = ((slot.get("health") or {}).get("last_error")
+                  or (inst.get("health") or {}).get("last_error"))
+    if slot_error:
+        raise ShareError(
+            f"GitHub's connection for {owner} needs attention ({slot_error}): "
+            f"open Settings › Connections › GitHub and choose Refresh or Reconnect, "
+            f"then try again.")
+
+    # An organization's own GitHub App has ORG_PERMISSIONS (no administration)
+    # and never creates repositories; existing repositories still push normally.
+    if slot.get("org"):
+        try:
+            gh_app.installation_token(repository)
+            return None, False
+        except gh_app.IntegrationError:
+            raise ShareError(
+                f"Loam's GitHub connection for {owner} cannot reach or create "
+                f"{repository} (organization GitHub Apps cannot create repositories): "
+                f"open Settings › Connections › GitHub to check {owner}'s connection, "
+                f"or share to your personal GitHub account.") from None
+
+    # Personal Loam app without user sign-in: can push to an existing reachable
+    # repo, but cannot create a missing one.
+    if not (slot.get("user") or {}).get("token"):
+        try:
+            gh_app.installation_token(repository)
+            return None, False
+        except gh_app.IntegrationError:
+            raise ShareError(
+                f"GitHub is connected without user sign-in, so Loam cannot create "
+                f"{repository}: open Settings › Connections › GitHub and choose "
+                f"Finish connecting, then try again.") from None
+
+    # Authorized personal connection: loam_github.get_repo uses user_token(),
+    # which refreshes an expired or near-expiry 8-hour token before use (and
+    # loam_github.call retries once with force_refresh on 401).
+    try:
+        existing = loam_github.get_repo(owner, name)
+    except loam_github.GitHubError as exc:
+        low = str(exc).lower()
+        if exc.status == 401 or any(w in low for w in ("authorization", "expired", "token")):
+            raise ShareError(
+                f"GitHub's saved sign-in could not be refreshed ({exc}): open "
+                f"Settings › Connections › GitHub and choose Reconnect, then try again."
+            ) from None
+        raise ShareError(f"Could not check {repository} on GitHub ({exc}).") from None
+
+    if existing is not None:
+        return existing, False
+
+    # Missing (or hidden private repo outside selected repositories): verify
+    # the live installation grants repository administration before creating.
+    try:
+        _, live = gh_app.api("GET", f"/app/installations/{inst['installation_id']}",
+                             gh_app._jwt(slot))
+    except gh_app.IntegrationError as exc:
+        raise ShareError(
+            f"Could not check GitHub permissions for {owner} ({exc}): open "
+            f"Settings › Connections › GitHub and choose Refresh or Reconnect, "
+            f"then try again.") from None
+    if (live.get("permissions") or {}).get("administration") != "write":
+        raise ShareError(
+            f"Loam's GitHub connection for {owner} does not have permission to "
+            f"create repositories: open Settings › Connections › GitHub, disconnect "
+            f"and add your GitHub account again, then try again.")
+
+    try:
+        created_repo = loam_github.create_repo(
+            owner, name, description=description, private=not public)
+    except loam_github.GitHubError as exc:
+        if exc.status == 403:
+            raise ShareError(
+                f"Loam's GitHub connection does not have permission to create "
+                f"{repository}: open Settings › Connections › GitHub, disconnect "
+                f"and add your GitHub account again, then try again.") from None
+        if _repo_already_exists_error(exc):
+            raise ShareError(
+                f"{repository} already exists on GitHub, but Loam's GitHub "
+                f"connection cannot reach it: open Settings › Connections › "
+                f"GitHub, open Connection details, and grant access to "
+                f"{repository} (or all repositories), then try again.") from None
+        if exc.status == 401:
+            raise ShareError(
+                f"GitHub rejected the saved sign-in: open Settings › Connections › "
+                f"GitHub and choose Reconnect, then try again.") from None
+        raise ShareError(f"Could not create {repository} on GitHub: {exc}") from None
+
+    try:
+        loam_github.add_to_installation(created_repo)
+    except loam_github.GitHubError as exc:
+        raise ShareError(
+            f"Created {repository} on GitHub, but Loam's GitHub connection could "
+            f"not reach it yet ({exc}): open Settings › Connections › GitHub, "
+            f"open Connection details, and check repository access, then retry sharing."
+        ) from None
+    return created_repo, True
+
+
+def share(pid: str, repository: str, public: bool = False) -> dict:
     """Push the plugin ``pid`` from the owner's plugins folder to
-    ``repository`` (owner/name, made by the owner) as ``<id>/`` at the tag
-    ``v<version>``, and answer its link."""
+    ``repository`` (owner/name) as ``<id>/`` at the tag ``v<version>``,
+    creating the repository when missing (private by default, or public only
+    when ``public=True``), and answer its link."""
     import loam_github  # noqa: PLC0415
     import loam_plugins  # noqa: PLC0415
     if not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", repository or ""):
@@ -1248,22 +1401,26 @@ def share(pid: str, repository: str) -> dict:
         raise ShareError(f"{pid} is not a plugin yet: {exc}") from None
     version = manifest["version"]
     tag = f"v{version}"
+    desc = " ".join((manifest.get("description") or "").split())[:300]
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
-    if not os.environ.get("LOAM_SHARE_GIT_BASE"):
+    repo_info, created = None, False
+    local_override = bool(os.environ.get("LOAM_SHARE_GIT_BASE"))
+    if not local_override:
+        repo_info, created = _ensure_share_repo(repository, description=desc, public=public)
         helper = loam_github.helper_env(repository)
         if not helper:
-            raise ShareError("GitHub is not connected on this install: the owner "
-                             "connects it in Settings › Connections, then this "
-                             "can push to a repository on their account")
+            raise ShareError("GitHub is not connected on this install: open Settings › "
+                             "Connections › GitHub and choose Add account, then try again.")
         env.update(helper)
     remote = f"{_share_base()}{repository}.git"
     work = Path(tempfile.mkdtemp(prefix="loam-share-"))
     try:
         got = _share_git(["clone", "--quiet", remote, str(work / "repo")], None, env)
         if got.returncode:
+            hint = ("" if local_override else
+                    " (check GitHub access in Settings › Connections › GitHub)")
             raise ShareError(f"{repository} could not be read: "
-                             f"{(got.stderr or got.stdout).strip()[-300:]} (make it on "
-                             f"github.com first, on the account GitHub is connected with)")
+                             f"{(got.stderr or got.stdout).strip()[-300:]}{hint}")
         repo = work / "repo"
         tags = _share_git(["ls-remote", "--tags", "origin", f"refs/tags/{tag}"], repo, env)
         exists = bool(tags.stdout.strip())
@@ -1300,7 +1457,7 @@ def share(pid: str, repository: str) -> dict:
                 raise ShareError(f"the push to {repository} failed: "
                                  f"{(pushed.stderr or pushed.stdout).strip()[-300:]}")
         commit = _share_git(["rev-parse", "HEAD"], repo, env).stdout.strip()
-        if not os.environ.get("LOAM_SHARE_GIT_BASE"):
+        if not local_override:
             import loam_market_asset
             import loam_github_app
             import http.client
@@ -1312,6 +1469,12 @@ def share(pid: str, repository: str) -> dict:
                                  f"file ({exc}).") from None
     finally:
         shutil.rmtree(work, ignore_errors=True)
-    public = None if os.environ.get("LOAM_SHARE_GIT_BASE") else is_public(repository)
+    if local_override:
+        repo_public = None
+    elif isinstance(repo_info, dict) and isinstance(repo_info.get("private"), bool):
+        repo_public = not repo_info["private"]
+    else:
+        repo_public = is_public(repository)
     return {"id": pid, "version": version, "repo": repository, "tag": tag, "commit": commit,
-            "link": f"https://github.com/{repository}/tree/{tag}/{pid}", "public": public}
+            "link": f"https://github.com/{repository}/tree/{tag}/{pid}", "public": repo_public,
+            "created": created}
