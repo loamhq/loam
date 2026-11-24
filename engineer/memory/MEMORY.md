@@ -3084,3 +3084,15 @@ listener for immediate notification in an open page.
   finds and SIGTERM/SIGKILLs remaining same-UID processes tagged with the job
   id (sparing ancestors and non-engineer `loam-*.service` units) on job exit,
   cancel, and `--recover` sweeps.
+- **Stale runtime daemons after landing or update (`lib/loam_plugin_servers.py`,
+  `bin/plugin-gateway`, `lib/loam_browser_proxy.py`, `bin/gen-deploy`,
+  `bin/engineer-job`, `lib/loam_update.py`).** Both `bin/plugin-gateway` and
+  `bin/browser-proxy` record their startup PID and content fingerprint
+  (`state/plugins/gateway.running.json` and `/run/loam-browser/running.json`).
+  `bin/engineer-job` reconciles both after every platform landing
+  (`bin/plugin-servers ensure-gateway --reconcile` and `bin/browser-proxy
+  --reconcile`), `bin/gen-deploy` restarts an active stale `browser-proxy` even
+  when its unit file did not change, and `loam_plugin_servers.reconcile()` never
+  stops pre-sleep front-port servers while `loam-plugins-gateway.service` is
+  stale (restarting it first outside `loam update`, or deferring while
+  `run.lock` is held unless `LOAM_UPDATE_GATEWAY_STEP=1`).

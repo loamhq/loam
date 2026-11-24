@@ -139,7 +139,8 @@ TRIGGERS = {
     "broker": {"script": "bin/session-broker", "also": ["bin/session-host"],
                "dirs": ["broker/", "plugins/", "lib/loam_pins.py", "systemd/session/",
                         "systemd/loam-session-broker.service"]},
-    "gateway": {"script": "bin/plugin-gateway", "also": ["bin/plugin-servers"], "dirs": []},
+    "gateway": {"script": "bin/plugin-gateway", "also": ["bin/plugin-servers"],
+                "dirs": ["systemd/loam-plugins-gateway.service", "plugins/"]},
     # Loam's own app runs from a release of this checkout (2026-11-16): the
     # deployment layer is re-rendered (its unit template among it), then the
     # app is unpacked at the new commit and restarted, and put back on its
@@ -1261,8 +1262,9 @@ class Box:
         # this stops pre-sleep units still holding front ports; on rollback
         # to an older release it starts always-on units back on those ports.
         if (runtime() / "bin" / "plugin-servers").is_file():
+            env = {**self.env, "LOAM_UPDATE_GATEWAY_STEP": "1"}
             subprocess.run([sys.executable, self.bin("plugin-servers"), "reconcile"],
-                           capture_output=True, text=True, check=False, env=self.env)
+                           capture_output=True, text=True, check=False, env=env)
         return "restarted"
 
     def _root(self, *argv: str, timeout: float | None = 3600) -> str:

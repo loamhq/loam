@@ -12,6 +12,7 @@ the browser (and Docker when unused) back to sleep after a quiet period.
   browser-proxy --status          print browser/Docker state without waking Docker
   browser-proxy --wake            start Docker (if needed) and loam-browser now
   browser-proxy --sleep           stop loam-browser (and Docker if unused) now
+  browser-proxy --reconcile       restart active proxy if code on disk changed
 """
 
 from __future__ import annotations

@@ -8,11 +8,14 @@ to its isolated environment.
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 import signal
 import socket
 import subprocess
+import sys
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -21,8 +24,20 @@ import loam_config as lc
 import loam_broker as cfg
 
 UNIT_PREFIX = "loam-plugin-"
+GATEWAY_UNIT = "loam-plugins-gateway.service"
 GATEWAY_PORT = 8933                 # bin/plugin-gateway, on 127.0.0.1
 DOOR_PORT = 8936                    # its share door, /s/*, without the login (2026-11-16)
+# Files whose content determines what the running plugin-gateway executes or reads.
+GATEWAY_CODE_FILES = (
+    "bin/plugin-gateway",
+    "bin/plugin-servers",
+    "lib/loam_plugin_servers.py",
+    "lib/loam_plugins.py",
+    "lib/loam_contributions.py",
+    "lib/loam_config.py",
+    "lib/loam_broker.py",
+    "systemd/loam-plugins-gateway.service",
+)
 PORTS = range(9100, 9300)           # front ports: stable across restarts (LOAM_PLUGIN_URL)
 BACKEND_PORTS = range(9300, 9500)   # backend ports for on-demand servers behind plugin-gateway
 BACKEND_PORT_OFFSET = 200
@@ -76,8 +91,53 @@ def gateway_pid_path() -> Path:
     return state_dir() / "gateway.pid"
 
 
+def gateway_running_path() -> Path:
+    return state_dir() / "gateway.running.json"
+
+
 def gateway_state_path() -> Path:
     return state_dir() / "gateway.json"
+
+
+def gateway_code_fingerprint(root: Path | None = None) -> str:
+    """Content digest of bin/plugin-gateway, its unit, and the modules that
+    build or read gateway.json, used to detect a stale running gateway."""
+    base = root or lc.ROOT
+    h = hashlib.sha256()
+    for rel in GATEWAY_CODE_FILES:
+        h.update(rel.encode("utf-8") + b"\0")
+        try:
+            h.update((base / rel).read_bytes())
+        except OSError:
+            h.update(b"<missing>")
+        h.update(b"\0")
+    return h.hexdigest()
+
+
+def write_gateway_running(
+    pid: int | None = None,
+    fingerprint: str | None = None,
+    root: Path | None = None,
+) -> dict:
+    d = state_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    doc = {
+        "pid": os.getpid() if pid is None else pid,
+        "fingerprint": gateway_code_fingerprint(root) if fingerprint is None else fingerprint,
+    }
+    path = gateway_running_path()
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(doc, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+    return doc
+
+
+def read_gateway_running() -> dict | None:
+    try:
+        data = json.loads(gateway_running_path().read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return None
 
 
 def write_gateway_state(want: dict[str, dict], door_owner: str | None) -> dict:
@@ -102,20 +162,156 @@ def read_gateway_state() -> dict | None:
 
 
 def gateway_state_stale() -> bool:
-    """True when gateway.json is absent or older than plugin switch/port files."""
+    """True when gateway.json is absent or older than plugin switch/port/manifest files."""
     path = gateway_state_path()
     try:
         gm = path.stat().st_mtime
     except OSError:
         return True
     yours = _yours_root()
-    for src in (ports_path(), yours, yours / "installed.json", lc.ROOT / "plugins"):
+    shipped = lc.ROOT / "plugins"
+    sources = [
+        ports_path(), yours, yours / "installed.json", shipped,
+        lc.ROOT / "bin" / "plugin-servers",
+        lc.ROOT / "lib" / "loam_plugin_servers.py",
+        lc.ROOT / "lib" / "loam_plugins.py",
+    ]
+    for folder in (yours, shipped):
+        try:
+            if folder.is_dir():
+                for child in folder.iterdir():
+                    if child.is_dir() and not child.name.startswith("_"):
+                        sources.append(child / "PLUGIN.md")
+        except OSError:
+            pass
+    for src in sources:
         try:
             if src.stat().st_mtime > gm:
                 return True
         except OSError:
             pass
     return False
+
+
+def _gateway_unit_needs_render(root: Path | None = None) -> bool:
+    base = root or lc.ROOT
+    installed = lc.USER_UNIT_DIR / GATEWAY_UNIT
+    template = base / "systemd" / GATEWAY_UNIT
+    if not installed.is_file() or not template.is_file():
+        return False
+    try:
+        import loam_units  # noqa: PLC0415
+        want = loam_units.render(template.read_text(encoding="utf-8"))
+        return installed.read_text(encoding="utf-8") != want
+    except OSError:
+        return False
+
+
+def gateway_unit_status(root: Path | None = None) -> dict:
+    """Report whether loam-plugins-gateway.service is inactive, current, or stale."""
+    done = run(["systemctl", "--user", "show", "--no-pager",
+                "-p", "ActiveState,MainPID", GATEWAY_UNIT])
+    props: dict[str, str] = {}
+    for line in (done.stdout or "").splitlines():
+        if "=" in line:
+            k, _, v = line.partition("=")
+            props[k] = v
+    active = props.get("ActiveState", "")
+    try:
+        pid = int(props.get("MainPID") or 0)
+    except ValueError:
+        pid = 0
+    if active != "active" or pid <= 0:
+        return {"state": "inactive", "active": active or "unknown", "pid": pid,
+                "reason": "not active", "unit_drift": False}
+    unit_drift = _gateway_unit_needs_render(root)
+    expected = gateway_code_fingerprint(root)
+    rec = read_gateway_running()
+    if not rec:
+        return {"state": "stale", "active": active, "pid": pid,
+                "reason": "running gateway predates fingerprint tracking",
+                "unit_drift": unit_drift}
+    if rec.get("pid") != pid:
+        return {"state": "stale", "active": active, "pid": pid,
+                "reason": f"gateway PID mismatch (unit {pid}, recorded {rec.get('pid')})",
+                "unit_drift": unit_drift}
+    if rec.get("fingerprint") != expected:
+        return {"state": "stale", "active": active, "pid": pid,
+                "reason": "gateway code on disk changed since the running process started",
+                "unit_drift": unit_drift}
+    if unit_drift:
+        return {"state": "stale", "active": active, "pid": pid,
+                "reason": f"{GATEWAY_UNIT} template changed since installed",
+                "unit_drift": True}
+    return {"state": "current", "active": active, "pid": pid,
+            "reason": "ok", "unit_drift": False}
+
+
+def wait_gateway_current(wait_s: float = 5.0, root: Path | None = None) -> dict:
+    deadline = time.monotonic() + max(0.0, wait_s)
+    info = gateway_unit_status(root)
+    while info["state"] != "current" and time.monotonic() < deadline:
+        time.sleep(0.05)
+        info = gateway_unit_status(root)
+    return info
+
+
+def _update_in_progress() -> bool:
+    """True while `loam update` holds its run.lock (non-blocking check)."""
+    lock_path = Path(os.environ.get("LOAM_UPDATE_STATE") or lc.STATE / "update") / "run.lock"
+    if not lock_path.exists():
+        return False
+    try:
+        with open(lock_path, "a+") as fh:
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            fcntl.flock(fh, fcntl.LOCK_UN)
+    except OSError:
+        return False
+    return False
+
+
+def ensure_gateway_current(
+    *,
+    wait_s: float = 5.0,
+    reconcile_after: bool = False,
+    root: Path | None = None,
+) -> dict:
+    """Restart loam-plugins-gateway.service if active and running stale code.
+    Re-renders the unit file via bin/gen-units first when its template drifted."""
+    if not managed():
+        return {"action": "unmanaged"}
+    info = gateway_unit_status(root)
+    if info["state"] == "inactive":
+        return {"action": "inactive", "active": info["active"]}
+    if info["state"] == "current":
+        return {"action": "current", "pid": info["pid"]}
+    base = root or lc.ROOT
+    if info.get("unit_drift"):
+        gen = base / "bin" / "gen-units"
+        if gen.is_file():
+            run([sys.executable, str(gen), GATEWAY_UNIT])
+    done = run(["systemctl", "--user", "try-restart", GATEWAY_UNIT])
+    if done.returncode != 0:
+        err = (done.stderr or done.stdout or "").strip() or f"exit {done.returncode}"
+        return {"action": "failed", "before_pid": info["pid"],
+                "reason": info["reason"], "error": err}
+    after = wait_gateway_current(wait_s=wait_s, root=root)
+    verified = after["state"] == "current"
+    out: dict = {
+        "action": "restarted" if verified else "failed",
+        "before_pid": info["pid"],
+        "pid": after["pid"],
+        "verified": verified,
+        "reason": info["reason"],
+    }
+    if not verified:
+        out["error"] = f"gateway did not verify current after restart ({after['reason']})"
+    elif reconcile_after:
+        out["reconcile"] = reconcile()
+    return out
 
 
 def refresh_gateway_state() -> dict:
@@ -547,8 +743,33 @@ def reconcile() -> dict:
         door_owner = loam_contributions.door_owner()
     except Exception:  # noqa: BLE001
         pass
-    loaded = set(loaded_units())
     started, stopped, asleep, moved, errors = [], [], [], [], {}
+    can_sleep_front = True
+    gateway_action: str | None = None
+    gw_info = gateway_unit_status()
+    if gw_info["state"] == "stale":
+        if os.environ.get("LOAM_UPDATE_GATEWAY_STEP") == "1":
+            # loam update's gateway step just restarted the gateway; wait for
+            # it to boot and write its fingerprint before touching front ports.
+            after = wait_gateway_current(wait_s=5.0)
+            if after["state"] == "current":
+                gateway_action = "current"
+            else:
+                can_sleep_front = False
+                gateway_action = "stale"
+                errors["gateway"] = f"restarted gateway did not verify current ({after['reason']})"
+        elif _update_in_progress():
+            # Mid-update (e.g. timer fired before loam update's gateway step):
+            # leave front-port servers running until loam update restarts the gateway.
+            can_sleep_front = False
+            gateway_action = "deferred-update"
+        else:
+            gw_res = ensure_gateway_current()
+            gateway_action = gw_res["action"]
+            if gw_res["action"] not in ("current", "restarted"):
+                can_sleep_front = False
+                errors["gateway"] = gw_res.get("error") or gw_res.get("reason") or "gateway stale"
+    loaded = set(loaded_units())
     for pid, spec in sorted(want.items()):
         try:
             front = port_for(pid)
@@ -560,7 +781,7 @@ def reconcile() -> dict:
                 bport = backend_port_for(pid)
                 if pid not in loaded:
                     asleep.append(pid)
-                else:
+                elif can_sleep_front:
                     # Stop pre-upgrade units still holding the front port so
                     # plugin-gateway can bind it and wake on demand.
                     uport = unit_port(pid)
@@ -596,6 +817,9 @@ def reconcile() -> dict:
     except OSError:
         pass
     notify_gateway()
-    return {"managed": True, "started": started, "stopped": stopped,
-            "asleep": sorted(asleep), "moved": moved, "errors": errors,
-            "running": sorted(set(want) & (loaded | set(started)))}
+    out = {"managed": True, "started": started, "stopped": stopped,
+           "asleep": sorted(asleep), "moved": moved, "errors": errors,
+           "running": sorted(set(want) & (loaded | set(started)))}
+    if gateway_action is not None:
+        out["gateway"] = gateway_action
+    return out

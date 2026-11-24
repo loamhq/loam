@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import fcntl
+import hashlib
 import json
 import os
 import signal
@@ -40,19 +41,30 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.request
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+import loam_config as lc
 import loam_deploy as dep
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SCHEMA_PATH = ROOT / "deploy" / "browser-tools.json"
 CACHE_PATH = Path(os.environ.get("LOAM_BROWSER_TOOLS_CACHE") or "/var/lib/loam/browser-tools-cache.json")
 STATE_PATH = Path(os.environ.get("LOAM_BROWSER_STATE") or "/run/loam-browser/state.json")
+RUNNING_PATH = Path(os.environ.get("LOAM_BROWSER_RUNNING") or "/run/loam-browser/running.json")
 LOCK_PATH = Path(os.environ.get("LOAM_BROWSER_LOCK") or "/run/loam-browser.lock")
+
+PROXY_CODE_FILES = (
+    "bin/browser-proxy",
+    "lib/loam_browser_proxy.py",
+    "lib/loam_deploy.py",
+    "lib/loam_config.py",
+    "deploy/browser-tools.json",
+)
 
 BROWSER_IDLE_S = float(os.environ.get("LOAM_BROWSER_IDLE_S") or 600)
 PROXY_IDLE_S = float(os.environ.get("LOAM_BROWSER_PROXY_IDLE_S") or 30)
@@ -116,6 +128,152 @@ def read_state(state_path: Path = STATE_PATH) -> dict[str, Any]:
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
         return {}
+
+
+def code_fingerprint(root: Path | None = None) -> str:
+    """Content digest of bin/browser-proxy and the files it loads, used to
+    detect an active browser-proxy running stale code after a landing or update."""
+    base = root or ROOT
+    h = hashlib.sha256()
+    for rel in PROXY_CODE_FILES:
+        h.update(rel.encode("utf-8") + b"\0")
+        try:
+            h.update((base / rel).read_bytes())
+        except OSError:
+            h.update(b"<missing>")
+        h.update(b"\0")
+    return h.hexdigest()
+
+
+def write_running(
+    pid: int | None = None,
+    fingerprint: str | None = None,
+    *,
+    running_path: Path = RUNNING_PATH,
+    root: Path | None = None,
+) -> dict[str, Any]:
+    doc = {
+        "pid": os.getpid() if pid is None else pid,
+        "fingerprint": code_fingerprint(root) if fingerprint is None else fingerprint,
+    }
+    try:
+        running_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = running_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(doc, sort_keys=True) + "\n", encoding="utf-8")
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, running_path)
+    except OSError:
+        pass
+    return doc
+
+
+def read_running(running_path: Path = RUNNING_PATH) -> dict[str, Any] | None:
+    try:
+        data = json.loads(running_path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def proxy_managed() -> bool:
+    flag = os.environ.get("LOAM_BROWSER_PROXY_MANAGED")
+    if flag is not None:
+        return flag == "1"
+    import loam_offline  # noqa: PLC0415
+    if loam_offline.offline():
+        return False
+    return lc.is_install_config()
+
+
+def proxy_status(
+    *,
+    root: Path | None = None,
+    running_path: Path = RUNNING_PATH,
+    run: Callable[..., Any] = subprocess.run,
+) -> dict[str, Any]:
+    """Report whether loam-browser-proxy.service is inactive, current, or stale.
+    Read-only: never wakes the socket, proxy, or Docker."""
+    done = run(
+        ["systemctl", "show", "--no-pager", "-p", "ActiveState,MainPID",
+         dep.BROWSER_PROXY_SERVICE_NAME],
+        capture_output=True, text=True, check=False,
+    )
+    props: dict[str, str] = {}
+    for line in (done.stdout or "").splitlines():
+        if "=" in line:
+            k, _, v = line.partition("=")
+            props[k] = v
+    active = props.get("ActiveState", "")
+    try:
+        pid = int(props.get("MainPID") or 0)
+    except ValueError:
+        pid = 0
+    if active != "active" or pid <= 0:
+        return {"state": "inactive", "active": active or "unknown", "pid": 0, "reason": "not active"}
+    rec = read_running(running_path)
+    expected = code_fingerprint(root)
+    if not rec:
+        return {"state": "stale", "active": active, "pid": pid,
+                "reason": "running browser-proxy predates fingerprint tracking"}
+    if rec.get("pid") != pid:
+        return {"state": "stale", "active": active, "pid": pid,
+                "reason": f"browser-proxy PID mismatch (unit {pid}, recorded {rec.get('pid')})"}
+    if rec.get("fingerprint") != expected:
+        return {"state": "stale", "active": active, "pid": pid,
+                "reason": "browser-proxy code on disk changed since the running process started"}
+    return {"state": "current", "active": active, "pid": pid, "reason": "ok"}
+
+
+def _active_browser_sessions(up_url: str | None = None) -> tuple[int, int]:
+    """Ask the active proxy's /up endpoint how many calls/browser tabs are open
+    (never wakes Docker or Chromium). Returns (open_browsers, in_flight)."""
+    url = up_url or f"http://127.0.0.1:{dep.BROWSER_PORT}/up"
+    try:
+        with urllib.request.urlopen(url, timeout=2) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        if isinstance(data, dict):
+            return int(data.get("open_browsers") or 0), int(data.get("in_flight") or 0)
+    except (OSError, ValueError, TypeError):
+        pass
+    return 0, 0
+
+
+def reconcile_proxy(
+    *,
+    force: bool = False,
+    root: Path | None = None,
+    running_path: Path = RUNNING_PATH,
+    run: Callable[..., Any] = subprocess.run,
+    up_url: str | None = None,
+) -> dict[str, Any]:
+    """Restart loam-browser-proxy.service if active and running stale code.
+    Never wakes an inactive proxy; defers when a browser tab or tool call is open
+    unless ``force`` is True."""
+    if not proxy_managed():
+        return {"action": "unmanaged"}
+    info = proxy_status(root=root, running_path=running_path, run=run)
+    if info["state"] in ("inactive", "current"):
+        return {"action": info["state"], "pid": info["pid"]}
+    if not force:
+        open_browsers, in_flight = _active_browser_sessions(up_url)
+        if open_browsers > 0 or in_flight > 0:
+            return {
+                "action": "deferred",
+                "pid": info["pid"],
+                "open_browsers": open_browsers,
+                "in_flight": in_flight,
+                "reason": f"active browser session ({open_browsers} open, {in_flight} in flight)",
+            }
+    prefix = ["sudo", "-n"] if os.geteuid() != 0 else []
+    done = run(
+        [*prefix, "systemctl", "try-restart", dep.BROWSER_PROXY_SERVICE_NAME],
+        capture_output=True, text=True, check=False,
+    )
+    if done.returncode != 0:
+        err = (done.stderr or done.stdout or "").strip() or f"exit {done.returncode}"
+        return {"action": "failed", "before_pid": info["pid"],
+                "reason": info["reason"], "error": err}
+    return {"action": "restarted", "before_pid": info["pid"], "reason": info["reason"]}
 
 
 @contextmanager
@@ -506,6 +664,7 @@ class BrowserProxy:
         schema_cache_path: Path = CACHE_PATH,
         default_schema_path: Path = DEFAULT_SCHEMA_PATH,
         socket_activated: bool = False,
+        running_path: Path | None = None,
     ) -> None:
         self.controller = controller
         self.listen_host = listen_host
@@ -518,6 +677,7 @@ class BrowserProxy:
         self.schema_cache_path = schema_cache_path
         self.default_schema_path = default_schema_path
         self.socket_activated = socket_activated
+        self.running_path = running_path
 
         self.schema = load_schema(schema_cache_path, default_schema_path)
         self._schema_refreshed = False
@@ -1154,6 +1314,7 @@ class BrowserProxy:
                 print(f"browser-proxy reaper: {exc!r}", file=sys.stderr, flush=True)
 
     async def serve(self, sock: socket.socket | None = None) -> None:
+        startup_fp = code_fingerprint() if self.running_path is not None else None
         if sock is not None:
             sock.setblocking(False)
             self._server = await asyncio.start_server(self.handle_client, sock=sock, limit=HEAD_MAX)
@@ -1163,6 +1324,8 @@ class BrowserProxy:
             )
             addr = self._server.sockets[0].getsockname()
             self.listen_port = addr[1]
+        if self.running_path is not None:
+            write_running(pid=os.getpid(), fingerprint=startup_fp, running_path=self.running_path)
         self._reaper_task = asyncio.create_task(self._reaper_loop())
         print(json.dumps({
             "listening": f"{self.listen_host}:{self.listen_port}",
@@ -1192,6 +1355,13 @@ class BrowserProxy:
                 try:
                     await asyncio.wait_for(self._server.wait_closed(), timeout=5.0)
                 except asyncio.TimeoutError:
+                    pass
+            if self.running_path is not None:
+                try:
+                    rec = read_running(self.running_path)
+                    if rec and rec.get("pid") == os.getpid():
+                        self.running_path.unlink(missing_ok=True)
+                except OSError:
                     pass
 
 
@@ -1228,6 +1398,10 @@ def run_cli(argv: list[str] | None = None) -> int:
     if args == ["--wake"]:
         print(json.dumps(ctrl.wake()))
         return 0
+    if args and args[0] == "--reconcile":
+        out = reconcile_proxy(force="--force" in args[1:])
+        print(json.dumps(out, sort_keys=True))
+        return 1 if out.get("action") == "failed" else 0
 
     sock = inherited_socket()
     listen_port = dep.BROWSER_PORT
@@ -1244,6 +1418,7 @@ def run_cli(argv: list[str] | None = None) -> int:
         listen_port=listen_port,
         backend_port=dep.BROWSER_BACKEND_PORT,
         socket_activated=sock is not None,
+        running_path=RUNNING_PATH,
     )
 
     async def main() -> None:

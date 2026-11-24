@@ -424,8 +424,12 @@ def generate(dry: bool) -> int:
     res = run(["systemctl", "enable", "--now", dep.BROWSER_PROXY_SOCKET_NAME])
     print(f"  browser proxy socket: enabled (exit {res.returncode})"
           f"{': ' + res.stderr.strip() if res.returncode and res.stderr.strip() else ''}")
-    if dep.BROWSER_PROXY_UNIT in changed:
-        run(["systemctl", "try-restart", dep.BROWSER_PROXY_SERVICE_NAME])
+    import loam_browser_proxy  # noqa: PLC0415
+    if (dep.BROWSER_PROXY_UNIT in changed
+            or loam_browser_proxy.proxy_status()["state"] == "stale"):
+        res = run(["systemctl", "try-restart", dep.BROWSER_PROXY_SERVICE_NAME])
+        print(f"  browser proxy: restarted (exit {res.returncode})"
+              f"{': ' + res.stderr.strip() if res.returncode and res.stderr.strip() else ''}")
     run(["systemctl", "enable", dep.DOCKER_IDLE_SERVICE_NAME])
 
     if dep.loam_broker.FIREWALL_SCRIPT in changed and dep.docker_active():
