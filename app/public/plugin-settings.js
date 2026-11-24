@@ -60,7 +60,8 @@ export function guideParts(text) {
 }
 // A guide's first heading that only repeats the plugin's name is not drawn.
 const withoutTitle = (text, name) => text.replace(/^#\s+(.+)\n+/, (all, title) => title.trim().toLowerCase() === String(name ?? '').trim().toLowerCase() ? '' : all)
-const SERVICE = { running: 'Running', starting: 'Starting', failing: 'Failing', stopping: 'Stopping', stopped: 'Stopped' }
+const SERVICE = { running: 'Running', asleep: 'Asleep', starting: 'Starting', failing: 'Failing', stopping: 'Stopping', stopped: 'Stopped' }
+const serviceHealthy = state => state === 'running' || state === 'asleep'
 const external = source => { try { const u = new URL(source?.url); return u.protocol === 'https:' ? u.href : null } catch { return null } }
 export function createPluginSettings({ loader, theme, host, changed = () => {} }) {
   const st = { keys: null, how: {}, selected: null, detail: null, detailError: '', opening: false, remove: false, error: '', done: '', guide: false, focusDetail: false, restarting: null, serviceError: null, logs: new Set(), advanced: null }
@@ -309,7 +310,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
           unreviewed ? h('div', { class: 'plugin-row-origin', text: UNREVIEWED }) : null,
           rowNotices(row)),
         icon.chevronRight(12)), control),
-      imageQuestion(row), row.on && row.service && row.service.state !== 'running' ? serviceView(row) : null)
+      imageQuestion(row), row.on && row.service && !serviceHealthy(row.service.state) ? serviceView(row) : null)
   }
   const failedCovers = new Set()
   function themeCover(row) {
@@ -333,7 +334,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
         inUse ? h('span', { class: 'plugin-theme-state' }, icon.check(12), state) : null,
         rowNotices(row)),
       pluginSwitch(row),
-      row.on && row.service && row.service.state !== 'running' ? serviceView(row) : null)
+      row.on && row.service && !serviceHealthy(row.service.state) ? serviceView(row) : null)
   }
   // Each `settings.entry` of a plugin that is on: a switch, a choice menu, or
   // text as a field, each saved by itself (PATCH /plugins/<id>/settings).
@@ -475,7 +476,7 @@ export function createPluginSettings({ loader, theme, host, changed = () => {} }
         h('div', { class: 'plugin-hero-words' }, host.settingsHead(row.name || row.id),
           aboutOrigin(row), row.description ? h('p', { class: 'plugin-promise', text: row.description }) : null)),
       notice(row.broken), notice(loader.st.failures.get(row.id)),
-      row.service && row.on && row.service.state !== 'running' ? serviceView(row) : null,
+      row.service && row.on && !serviceHealthy(row.service.state) ? serviceView(row) : null,
       theme ? picture(row) : null,
       ready || row.id === 'images' ? null : how,
       row.shadows ? h('p', { class: 'plugin-mark', text: 'Changes a shipped plugin.' }) : null,

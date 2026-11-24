@@ -55,6 +55,10 @@ def main(argv: list[str]) -> int:
     if cmd == "ports":
         print(json.dumps(servers.read_ports(), indent=2, sort_keys=True))
         return 0
+    if cmd == "gateway-state":
+        doc = servers.refresh_gateway_state()
+        print(json.dumps(doc, sort_keys=True, default=str))
+        return 0
     print(__doc__, file=sys.stderr)
     return 2
 

@@ -57,7 +57,7 @@ my-plugin/
   PLUGIN.md        required
   theme.css        a theme's token values, light and dark
   page/main.js     an ES module the app imports; no build step
-  server/main.py   a program Loam runs while the plugin is on
+  server/main.py   a program Loam wakes on first use and sleeps when idle
   assets/          images, fonts, sounds
 ```
 
@@ -77,7 +77,16 @@ What it does and how to use it.
 ```
 
 `kind: theme` needs `theme.css`; an `app` is a server plugin that also has
-a row in Apps. A plugin that calls a paid service names its provider in
+a row in Apps. A server plugin sleeps by default until the first request
+arrives on `/x/<id>/`, the share door `/s/<token>`, or its loopback
+`$LOAM_PLUGIN_URL`, and sleeps again after ten quiet minutes with no active
+request, stream or WebSocket in flight. Bind the port given in `PORT` /
+`LOAM_PLUGIN_PORT` and persist durable state to `$LOAM_PLUGIN_DATA` or
+`$LOAM_PLUGIN_PRIVATE`. Use `contributes.schedule.kind` for periodic
+background work. If a server genuinely needs to stay running continuously
+(for example an outbound bot connection or long-lived in-memory state),
+declare `server: { always_on: true }` in `PLUGIN.md` (plugins with an
+external `contributes.box.listener` stay on by default). A plugin that calls a paid service names its provider in
 `keys:` (`- provider: openai`, with a `why`) instead of asking for a key of
 its own: the owner enters each key once in Settings › Connections › API keys, and Loam
 hands the plugin the keys it declared, in the file `$LOAM_PLUGIN_KEYS`

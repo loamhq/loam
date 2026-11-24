@@ -328,10 +328,15 @@ def generate(dry: bool) -> int:
     # Loam's own app's unit template (2026-11-16). A changed template is
     # loaded, never restarted from here: `bin/deploy <app> up <commit>` is
     # what restarts an app, and it says what it did.
-    if dep.SERVICE_UNIT in changed:
+    need_daemon_reload = any(
+        u in changed for u in (
+            dep.SERVICE_UNIT, dep.BROWSER_PROXY_SOCKET, dep.BROWSER_PROXY_UNIT,
+            dep.DOCKER_IDLE_UNIT, dep.SIGHT_FIREWALL_UNIT, dep.INBOUND_FIREWALL_UNIT,
+        )
+    )
+    if need_daemon_reload:
         res = run(["systemctl", "daemon-reload"])
-        print(f"  {dep.SERVICE_UNIT.name}: daemon-reload (exit {res.returncode}); "
-              f"running instances pick it up at their next `bin/deploy <app> up`")
+        print(f"  systemd: daemon-reload (exit {res.returncode})")
     reload_caddy = dep.CADDYFILE in changed
     if dep.EDGE.get("app") and not dep.unclaimed() and not switching_claim and not reload_caddy:
         # Earlier claims loaded a staged filename into file_server's hide rules.
@@ -348,6 +353,8 @@ def generate(dry: bool) -> int:
         print(f"  authelia: not started; this install is unclaimed (no "
               f"{dep.CLAIMED_FILE}), so the login has no user. The claim starts it.")
     elif dep.AUTHELIA_SECRETS.exists():
+        if os.geteuid() == 0 and not dep.docker_active():
+            run(["systemctl", "start", "docker.service"])
         args = ["up", "-d", "--remove-orphans"]
         if dep.AUTHELIA_CONFIG in changed:
             args.append("--force-recreate")   # Authelia does not reload its config
@@ -366,32 +373,88 @@ def generate(dry: bool) -> int:
     if switching_claim:
         wait_for_login()
         switch_claim_edge(caddy)
-    res = compose(dep.BROWSER_COMPOSE, "up", "-d", "--remove-orphans")
-    print(f"  browser: compose up (exit {res.returncode})")
-    if res.returncode:
-        print(res.stderr.strip())
-    if dep.loam_broker.FIREWALL_SCRIPT in changed:
+
+    # Keep installed system units (loam-claim.service, loam-broker-firewall.service)
+    # aligned with this release's templates so Docker sleep/wake never leaves them
+    # stopped on existing installs.
+    if os.geteuid() == 0 and dep.BROWSER_PROXY_UNIT in files:
+        re_enable_system: list[str] = []
+        for unit_name in ("loam-claim.service", dep.loam_broker.WALL_SERVICE):
+            dst = Path("/etc/systemd/system") / unit_name
+            src = Path(__file__).resolve().parent.parent / "systemd" / "system" / unit_name
+            if dst.is_file() and src.is_file():
+                rendered = (src.read_text(encoding="utf-8")
+                            .replace("@ROOT@", str(dep.lc.ROOT))
+                            .replace("@PYCACHE@", "/var/cache/loam/pycache")
+                            .replace("@USER@", dep.lc.USER))
+                if dst.read_text(encoding="utf-8") != rendered:
+                    write_root(dst, rendered, 0o644)
+                    re_enable_system.append(unit_name)
+                    print(f"  {unit_name}: updated")
+        if re_enable_system:
+            run(["systemctl", "daemon-reload"])
+            for unit_name in re_enable_system:
+                run(["systemctl", "enable", unit_name])
+
+    # Agents' browser: created stopped on BROWSER_BACKEND_PORT, woken on first
+    # browser tool call by loam-browser-proxy.socket on BROWSER_PORT (8931).
+    proxy_socket_active = run(
+        ["systemctl", "is-active", "--quiet", dep.BROWSER_PROXY_SOCKET_NAME]
+    ).returncode == 0
+    need_browser_recreate = dep.BROWSER_COMPOSE in changed or not proxy_socket_active
+    if not need_browser_recreate and dep.docker_active():
+        insp = run([*DOCKER, "inspect", "-f", "{{json .HostConfig.PortBindings}}", dep.BROWSER_PROJECT])
+        out_str = insp.stdout if isinstance(insp.stdout, str) else ""
+        if insp.returncode != 0 or f"{dep.BROWSER_BACKEND_PORT}/tcp" not in out_str:
+            need_browser_recreate = True
+    if need_browser_recreate:
+        if os.geteuid() == 0 and not dep.docker_active():
+            run(["systemctl", "start", "docker.service"])
+        # Stop any pre-upgrade loam-browser holding port 8931 before binding the socket.
+        run([*DOCKER, "stop", "-t", "10", dep.BROWSER_PROJECT])
+        args = ["up", "--no-start", "--remove-orphans"]
+        if dep.BROWSER_COMPOSE in changed:
+            args.append("--force-recreate")
+        res = compose(dep.BROWSER_COMPOSE, *args)
+        print(f"  browser: prepared asleep (exit {res.returncode})")
+        if res.returncode:
+            print(res.stderr.strip())
+    else:
+        print("  browser: asleep (unchanged)")
+    res = run(["systemctl", "enable", "--now", dep.BROWSER_PROXY_SOCKET_NAME])
+    print(f"  browser proxy socket: enabled (exit {res.returncode})"
+          f"{': ' + res.stderr.strip() if res.returncode and res.stderr.strip() else ''}")
+    if dep.BROWSER_PROXY_UNIT in changed:
+        run(["systemctl", "try-restart", dep.BROWSER_PROXY_SERVICE_NAME])
+    run(["systemctl", "enable", dep.DOCKER_IDLE_SERVICE_NAME])
+
+    if dep.loam_broker.FIREWALL_SCRIPT in changed and dep.docker_active():
         subprocess.run(["systemctl", "restart", dep.loam_broker.WALL_SERVICE], check=True)
-    # The wall. A changed script or unit is re-applied by restarting the
-    # unit (the script rebuilds both chains); an unchanged one is only made
-    # sure of, because check-drift will ask the kernel either way.
-    if dep.SIGHT_FIREWALL_UNIT in changed or dep.SIGHT_FIREWALL_SCRIPT in changed:
-        run(["systemctl", "daemon-reload"])
-        res = run(["systemctl", "enable", "--now", dep.SIGHT_WALL_SERVICE])
+    # The wall. Always enabled (including WantedBy=docker.service so waking
+    # Docker re-raises it). Only started now when Docker is active or rules
+    # are missing from the kernel, so a no-op gen-deploy never wakes Docker.
+    res = run(["systemctl", "enable", dep.SIGHT_WALL_SERVICE])
+    if dep.docker_active() and (
+        dep.SIGHT_FIREWALL_UNIT in changed
+        or dep.SIGHT_FIREWALL_SCRIPT in changed
+        or bool(dep.sight_wall_missing())
+    ):
         res = run(["systemctl", "restart", dep.SIGHT_WALL_SERVICE])
         print(f"  wall: {dep.SIGHT_WALL_SERVICE} restarted (exit {res.returncode})"
               f"{': ' + res.stderr.strip() if res.stderr.strip() else ''}")
     else:
-        res = run(["systemctl", "enable", "--now", dep.SIGHT_WALL_SERVICE])
         print(f"  wall: {dep.SIGHT_WALL_SERVICE} enabled (exit {res.returncode})")
     missing = dep.sight_wall_missing()
+    if missing and not dep.docker_active():
+        run(["systemctl", "start", "docker.service"])
+        run(["systemctl", "restart", dep.SIGHT_WALL_SERVICE])
+        missing = dep.sight_wall_missing()
     print("  wall: every rule present" if not missing else
           "  wall: MISSING\n" + "\n".join("    " + m for m in missing))
     # The inbound wall (2026-11-19): default-deny on this server's own ports,
     # standing aside for a firewall the server already has. Restarted when
     # its script or unit changed, else made sure of; its line is what it did.
     if dep.INBOUND_FIREWALL_UNIT in changed or dep.INBOUND_FIREWALL_SCRIPT in changed:
-        run(["systemctl", "daemon-reload"])
         run(["systemctl", "enable", dep.INBOUND_WALL_SERVICE])
         res = run(["systemctl", "restart", dep.INBOUND_WALL_SERVICE])
     else:
@@ -399,6 +462,13 @@ def generate(dry: bool) -> int:
     status = dep.inbound_wall_status()
     print(f"  inbound wall: {status or 'not raised'} (exit {res.returncode})"
           f"{': ' + res.stderr.strip() if res.returncode and res.stderr.strip() else ''}")
+    # If Docker was started solely to prepare loam-browser and no other
+    # container needs it, put Docker and containerd back to sleep.
+    if os.geteuid() == 0 and dep.BROWSER_PROXY_UNIT in files:
+        import loam_browser_proxy  # noqa: PLC0415
+        slept = loam_browser_proxy.DockerController().sleep_docker_if_unused()
+        if slept.get("stopped_docker"):
+            print("  docker: asleep (no other container needs Docker)")
     for app in dep.records():
         if app.exposure == "shared" and app.share_active(dt.date.today()) is None:
             print(f"  note: {app.name} is recorded as shared but has no live "
@@ -410,7 +480,11 @@ def show(name: str) -> int:
     renders = {
         "caddyfile": dep.caddyfile, "daemon": dep.daemon_json,
         "authelia": dep.authelia_config, "authelia-compose": dep.authelia_compose,
-        "browser": dep.browser_compose, "sudoers": dep.sudoers,
+        "browser": dep.browser_compose,
+        "browser-proxy-socket": dep.browser_proxy_socket,
+        "browser-proxy-unit": dep.browser_proxy_unit,
+        "docker-idle-unit": dep.docker_idle_unit,
+        "sudoers": dep.sudoers,
         "firewall": dep.sight_firewall_script, "firewall-unit": dep.sight_firewall_unit,
         "inbound-firewall": dep.inbound_firewall_script,
         "inbound-firewall-unit": dep.inbound_firewall_unit,

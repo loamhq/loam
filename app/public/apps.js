@@ -34,7 +34,9 @@ export function canFrame(app) {
 export function appUnavailable(app) {
   if (app.kind !== 'plugin') return null
   if (!app.on) return 'Off'
-  return app.state === 'running' ? null : ({ starting: 'Starting', failing: 'Failing', stopping: 'Stopping', stopped: 'Stopped' }[app.state] ?? 'Unavailable')
+  return app.state === 'running' || app.state === 'asleep'
+    ? null
+    : ({ starting: 'Starting', failing: 'Failing', stopping: 'Stopping', stopped: 'Stopped' }[app.state] ?? 'Unavailable')
 }
 
 export function readApps(body) {

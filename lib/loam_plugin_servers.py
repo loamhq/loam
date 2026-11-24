@@ -1,7 +1,8 @@
 """Supervise each enabled server plugin in its own transient user unit. Give it a
 loopback port, plugin-specific state and resource limits. The authenticated gateway
-routes requests to that unit. Confine fixture reconciliation to its isolated
-environment.
+routes requests to that unit, waking on-demand plugins on first request and
+putting them back to sleep after a quiet period. Confine fixture reconciliation
+to its isolated environment.
 """
 
 from __future__ import annotations
@@ -9,6 +10,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import signal
 import socket
 import subprocess
 from contextlib import contextmanager
@@ -17,12 +19,13 @@ from pathlib import Path
 import loam_config as lc
 
 import loam_broker as cfg
-import loam_plugins as plugins
 
 UNIT_PREFIX = "loam-plugin-"
 GATEWAY_PORT = 8933                 # bin/plugin-gateway, on 127.0.0.1
 DOOR_PORT = 8936                    # its share door, /s/*, without the login (2026-11-16)
-PORTS = range(9100, 9300)           # one per plugin, kept across restarts
+PORTS = range(9100, 9300)           # front ports: stable across restarts (LOAM_PLUGIN_URL)
+BACKEND_PORTS = range(9300, 9500)   # backend ports for on-demand servers behind plugin-gateway
+BACKEND_PORT_OFFSET = 200
 MEMORY_MAX = "512M"
 TASKS_MAX = 256
 OOM_SCORE = 700                     # after agents (800), before core (100); lib/loam_config.py
@@ -31,10 +34,18 @@ BURST, BURST_WINDOW = 5, 60         # starts within seconds, then `failing`
 LOG_LINES = 20
 PROPS = ("LoadState", "ActiveState", "SubState", "MainPID", "NRestarts",
          "Result", "ActiveEnterTimestamp", "ExecMainStatus")
+_API = 0
+_DATA_DIR = "_data"
+_SETTINGS_DIR = "_settings"
 
 
 class ServerError(Exception):
     pass
+
+
+def _yours_root() -> Path:
+    env = os.environ.get("LOAM_PLUGINS_DIR")
+    return Path(env) if env else lc.PLUGINS
 
 
 def managed() -> bool:
@@ -45,7 +56,7 @@ def managed() -> bool:
     if loam_offline.offline():
         return False
     return (lc.is_install_config()
-            and plugins.yours_root().resolve() == plugins.YOURS_DEFAULT.resolve())
+            and _yours_root().resolve() == lc.PLUGINS.resolve())
 
 
 def unit(pid: str) -> str:
@@ -61,6 +72,73 @@ def ports_path() -> Path:
     return state_dir() / "ports.json"
 
 
+def gateway_pid_path() -> Path:
+    return state_dir() / "gateway.pid"
+
+
+def gateway_state_path() -> Path:
+    return state_dir() / "gateway.json"
+
+
+def write_gateway_state(want: dict[str, dict], door_owner: str | None) -> dict:
+    """Persist lightweight gateway routing/wake state so bin/plugin-gateway
+    never needs to import PyYAML or loam_plugins into its resident heap."""
+    d = state_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    doc = {"wanted": want, "door_owner": door_owner}
+    tmp = gateway_state_path().with_suffix(".tmp")
+    tmp.write_text(json.dumps(doc, indent=2, sort_keys=True, default=str) + "\n",
+                   encoding="utf-8")
+    os.replace(tmp, gateway_state_path())
+    return doc
+
+
+def read_gateway_state() -> dict | None:
+    try:
+        data = json.loads(gateway_state_path().read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def gateway_state_stale() -> bool:
+    """True when gateway.json is absent or older than plugin switch/port files."""
+    path = gateway_state_path()
+    try:
+        gm = path.stat().st_mtime
+    except OSError:
+        return True
+    yours = _yours_root()
+    for src in (ports_path(), yours, yours / "installed.json", lc.ROOT / "plugins"):
+        try:
+            if src.stat().st_mtime > gm:
+                return True
+        except OSError:
+            pass
+    return False
+
+
+def refresh_gateway_state() -> dict:
+    import loam_contributions  # noqa: PLC0415
+    import loam_plugins as plugins  # noqa: PLC0415
+    want = plugins.wanted_servers()
+    try:
+        owner = loam_contributions.door_owner()
+    except Exception:
+        owner = None
+    return write_gateway_state(want, owner)
+
+
+def notify_gateway() -> None:
+    """Poke bin/plugin-gateway (if running) to sync listeners immediately."""
+    try:
+        pid = int(gateway_pid_path().read_text(encoding="utf-8").strip())
+        if pid > 1:
+            os.kill(pid, signal.SIGHUP)
+    except (OSError, ValueError):
+        pass
+
+
 @contextmanager
 def _locked():
     d = state_dir()
@@ -73,13 +151,33 @@ def _locked():
             fcntl.flock(fh, fcntl.LOCK_UN)
 
 
-def read_ports() -> dict[str, int]:
-    """``{id: port}``; what bin/plugin-gateway routes by."""
+def _read_ports_doc() -> dict:
     try:
         data = json.loads(ports_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    ports = data.get("ports") if isinstance(data, dict) else None
+    return data if isinstance(data, dict) else {}
+
+
+def _write_ports_doc(ports: dict[str, int], backend_ports: dict[str, int]) -> None:
+    doc: dict = {"ports": ports}
+    if backend_ports:
+        doc["backend_ports"] = backend_ports
+    tmp = ports_path().with_suffix(".tmp")
+    tmp.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(tmp, ports_path())
+
+
+def read_ports() -> dict[str, int]:
+    """``{id: port}``; front port per plugin (LOAM_PLUGIN_URL and gateway table)."""
+    ports = _read_ports_doc().get("ports")
+    return {k: v for k, v in (ports or {}).items()
+            if isinstance(k, str) and isinstance(v, int)}
+
+
+def read_backend_ports() -> dict[str, int]:
+    """``{id: port}``; backend port per on-demand plugin server."""
+    ports = _read_ports_doc().get("backend_ports")
     return {k: v for k, v in (ports or {}).items()
             if isinstance(k, str) and isinstance(v, int)}
 
@@ -94,21 +192,48 @@ def _free(port: int) -> bool:
 
 
 def port_for(pid: str) -> int:
-    """The plugin's port: the one it had, or the first free one."""
+    """The plugin's front port: the one it had, or the first free one."""
     with _locked():
         ports = read_ports()
+        backend = read_backend_ports()
         if pid in ports:
             return ports[pid]
-        taken = set(ports.values())
+        taken = set(ports.values()) | set(backend.values())
         for port in PORTS:
             if port not in taken and _free(port):
                 ports[pid] = port
-                tmp = ports_path().with_suffix(".tmp")
-                tmp.write_text(json.dumps({"ports": ports}, indent=2, sort_keys=True)
-                               + "\n", encoding="utf-8")
-                os.replace(tmp, ports_path())
+                _write_ports_doc(ports, backend)
                 return port
     raise ServerError(f"no free port in {PORTS.start}-{PORTS.stop - 1}")
+
+
+def backend_port_for(pid: str) -> int:
+    """The plugin's backend port when sleeping on demand behind plugin-gateway."""
+    front = port_for(pid)
+    with _locked():
+        ports = read_ports()
+        backend = read_backend_ports()
+        if pid in backend:
+            return backend[pid]
+        taken = set(ports.values()) | set(backend.values())
+        preferred = front + BACKEND_PORT_OFFSET
+        candidates = ([preferred] if preferred in BACKEND_PORTS else []) + [
+            p for p in BACKEND_PORTS if p != preferred
+        ]
+        for port in candidates:
+            if port not in taken and _free(port):
+                backend[pid] = port
+                _write_ports_doc(ports, backend)
+                return port
+    raise ServerError(f"no free backend port in {BACKEND_PORTS.start}-{BACKEND_PORTS.stop - 1}")
+
+
+def listen_port_for(pid: str, want: dict) -> int:
+    """Port the plugin process itself binds: front port if always_on, backend port if on-demand."""
+    front = port_for(pid)
+    if want.get("always_on"):
+        return front
+    return backend_port_for(pid)
 
 
 def _env() -> dict:
@@ -124,13 +249,12 @@ def run(args: list[str]) -> subprocess.CompletedProcess:
 
 
 def environment(pid: str, want: dict, port: int) -> dict[str, str]:
-    yours = plugins.yours_root()
-    data = yours / plugins.DATA_DIR / pid
-    settings_dir = yours / plugins.SETTINGS_DIR / pid
+    yours = _yours_root()
+    data = yours / _DATA_DIR / pid
+    settings_dir = yours / _SETTINGS_DIR / pid
     data.mkdir(parents=True, exist_ok=True)
     settings_dir.mkdir(parents=True, exist_ok=True)
-    import loam_contributions  # noqa: PLC0415
-    private = loam_contributions.private_dir(pid)
+    private = state_dir() / "private" / pid
     private.mkdir(parents=True, exist_ok=True, mode=0o700)
     name = Path(want.get("settings") or "settings.md").name
     return {
@@ -147,10 +271,10 @@ def environment(pid: str, want: dict, port: int) -> dict[str, str]:
         # keys, resolved; absent when it declares none (lib/loam_keys.py).
         "LOAM_PLUGIN_KEYS": str(private / "keys.env"),
         "LOAM_PLUGIN_FACTS": str(lc.ROOT / "bin" / "plugin-facts"),
-           "LOAM_LIB": str(lc.ROOT / "lib"),
+        "LOAM_LIB": str(lc.ROOT / "lib"),
         "LOAM_BROKER_URL": f"http://{cfg.BIND_ADDR}:{cfg.PORT}",
         "LOAM_BROKER_TOKEN_FILE": str(cfg.TOKEN_PATH),
-        "LOAM_API": str(plugins.API),
+        "LOAM_API": str(_API),
         # Since 2026-11-16 (doc-comments): the plugin's own folder in the
         # vault, `<system>/Loam/data/<id>`, which an update keeps
         # (lib/loam_skills.py, KEPT_DIR). Vault-relative, for the broker's
@@ -165,11 +289,11 @@ def environment(pid: str, want: dict, port: int) -> dict[str, str]:
 def vault_data(pid: str) -> str:
     """A plugin's folder in the vault, relative to it: under Loam's own
     folder, in the one place there an update does not replace."""
-    import loam_skills  # noqa: PLC0415
-    return f"{lc.vault_folder('system')}/{loam_skills.LOAM_DIR}/{loam_skills.KEPT_DIR}/{pid}"
+    return f"{lc.vault_folder('system')}/Loam/data/{pid}"
 
 
 def argv(pid: str, want: dict, port: int) -> list[str]:
+    restart = "always" if want.get("always_on") else "on-failure"
     out = ["systemd-run", "--user", f"--unit={unit(pid)}",
            f"--description=Loam plugin server: {pid}",
            f"--property=WorkingDirectory={want['folder']}",
@@ -178,8 +302,9 @@ def argv(pid: str, want: dict, port: int) -> list[str]:
            f"--property=TasksMax={TASKS_MAX}",
            f"--property=OOMScoreAdjust={OOM_SCORE}",
            "--property=NoNewPrivileges=yes",
-           "--property=Restart=always",
+           f"--property=Restart={restart}",
            f"--property=RestartSec={RESTART_SEC}",
+           "--property=SuccessExitStatus=SIGTERM 143",
            f"--property=StartLimitIntervalSec={BURST_WINDOW}",
            f"--property=StartLimitBurst={BURST}",
            "--property=StandardOutput=journal",
@@ -202,6 +327,22 @@ def _show(pids: list[str]) -> dict[str, dict]:
             props[k] = v
         out[pid] = props
     return out
+
+
+def unit_port(pid: str) -> int | None:
+    """PORT configured in a loaded unit's environment, or None if unavailable."""
+    done = run(["systemctl", "--user", "show", "--no-pager", "-p", "Environment", unit(pid)])
+    if done.returncode != 0:
+        return None
+    for token in (done.stdout or "").split():
+        if token.startswith("Environment="):
+            token = token[len("Environment="):]
+        if token.startswith("PORT="):
+            try:
+                return int(token.split("=", 1)[1])
+            except ValueError:
+                return None
+    return None
 
 
 def _state(props: dict) -> str:
@@ -227,18 +368,29 @@ def logs(pid: str, lines: int = LOG_LINES) -> list[str]:
     return [ln for ln in text.splitlines() if ln.strip()][-lines:]
 
 
-def status(pid: str, props: dict | None = None, with_logs: bool = False) -> dict:
+def status(
+    pid: str,
+    props: dict | None = None,
+    with_logs: bool = False,
+    *,
+    wanted: bool | None = None,
+    always_on: bool | None = None,
+) -> dict:
     props = props if props is not None else _show([pid]).get(pid, {})
     state = _state(props)
+    if state == "stopped" and wanted is True and always_on is False:
+        state = "asleep"
     out = {"state": state, "unit": unit(pid), "port": read_ports().get(pid),
            "url": f"/x/{pid}/", "pid": None, "restarts": 0, "since": None,
            "memory_max": MEMORY_MAX}
+    if always_on is not None:
+        out["always_on"] = bool(always_on)
     try:
         out["pid"] = int(props.get("MainPID") or 0) or None
         out["restarts"] = int(props.get("NRestarts") or 0)
     except ValueError:
         pass
-    if state != "stopped":
+    if state not in ("stopped", "asleep"):
         out["since"] = props.get("ActiveEnterTimestamp") or None
     if with_logs or state == "failing":
         out["log"] = logs(pid)
@@ -247,9 +399,10 @@ def status(pid: str, props: dict | None = None, with_logs: bool = False) -> dict
 
 def annotate(rows: list[dict], logs: bool = False) -> list[dict]:
     """Each row that has a server gets ``service``: whether it should run
-    (``wanted``), its state (running, starting, failing, stopping,
+    (``wanted``), its state (running, asleep, starting, failing, stopping,
     stopped), port, address, process, restarts and, when failing or asked,
     its last log lines. One systemctl call for the whole list."""
+    import loam_plugins as plugins  # noqa: PLC0415
     have = [r for r in rows if plugins.server_spec(r)]
     if not have:
         return rows
@@ -257,6 +410,7 @@ def annotate(rows: list[dict], logs: bool = False) -> list[dict]:
         for r in have:
             spec = plugins.server_spec(r)
             r["service"] = {"state": "unmanaged", "wanted": False,
+                            "always_on": bool(spec.get("always_on")),
                             "run": spec["run"], "url": f"/x/{r['id']}/",
                             "why": "server plugins are run on the box's own "
                                    "plugin folder only"}
@@ -266,11 +420,16 @@ def annotate(rows: list[dict], logs: bool = False) -> list[dict]:
     for r in have:
         spec = plugins.server_spec(r)
         if not r["effective"]:
-            r["service"] = {"state": "stopped", "wanted": False, "run": spec["run"],
+            r["service"] = {"state": "stopped", "wanted": False,
+                            "always_on": bool(spec.get("always_on")),
+                            "run": spec["run"],
                             "url": None, "why": "another copy of this id is in force"}
             continue
-        svc = status(r["id"], shown.get(r["id"], {}), with_logs=logs)
-        svc["wanted"] = bool(r.get("on") and r.get("switch") == "plugin")
+        wanted = bool(r.get("on") and r.get("switch") == "plugin")
+        always_on = bool(spec.get("always_on"))
+        svc = status(r["id"], shown.get(r["id"], {}), with_logs=logs,
+                     wanted=wanted, always_on=always_on)
+        svc["wanted"] = wanted
         svc["run"] = spec["run"]
         r["service"] = svc
     return rows
@@ -282,10 +441,25 @@ def stop(pid: str) -> dict:
         return {"state": "unmanaged"}
     run(["systemctl", "--user", "stop", unit(pid)])
     run(["systemctl", "--user", "reset-failed", unit(pid)])
+    notify_gateway()
     return status(pid)
 
 
-def start(pid: str, want: dict, fresh: bool = False) -> dict:
+def prepare_on_demand(pid: str, want: dict, reset: bool = False) -> dict:
+    """Allocate front/backend ports for an on-demand plugin without starting it.
+    With ``reset``, stop any running instance so the next request wakes fresh."""
+    if not managed():
+        return {"state": "unmanaged"}
+    port_for(pid)
+    backend_port_for(pid)
+    if reset:
+        run(["systemctl", "--user", "stop", unit(pid)])
+        run(["systemctl", "--user", "reset-failed", unit(pid)])
+    notify_gateway()
+    return status(pid, wanted=True, always_on=False)
+
+
+def start(pid: str, want: dict, fresh: bool = False, port: int | None = None) -> dict:
     """Start it if it is not running; with ``fresh``, stop it first (an
     update, a restart, a failing unit given another go)."""
     if not managed():
@@ -293,16 +467,17 @@ def start(pid: str, want: dict, fresh: bool = False) -> dict:
     props = _show([pid]).get(pid, {})
     state = _state(props)
     if state in ("running", "starting") and not fresh:
-        return status(pid, props)
+        return status(pid, props, wanted=True, always_on=bool(want.get("always_on")))
     if props.get("LoadState") == "loaded":
         run(["systemctl", "--user", "stop", unit(pid)])
         run(["systemctl", "--user", "reset-failed", unit(pid)])
-    port = port_for(pid)
-    done = run(argv(pid, want, port))
+    listen_port = port if port is not None else listen_port_for(pid, want)
+    done = run(argv(pid, want, listen_port))
     if done.returncode != 0:
         raise ServerError(f"systemd-run refused {unit(pid)}: "
                           f"{(done.stderr or done.stdout).strip()[-400:]}")
-    return status(pid)
+    notify_gateway()
+    return status(pid, wanted=True, always_on=bool(want.get("always_on")))
 
 
 def loaded_units() -> list[str]:
@@ -338,11 +513,15 @@ def _folders(pids: list[str]) -> dict[str, str]:
 
 
 def reconcile() -> dict:
-    """Start every wanted server whose unit is not loaded; stop every loaded
-    unit no longer wanted. A failed unit is loaded and is left alone, unless
-    it runs from another folder than its plugin's (below)."""
+    """Reconcile plugin servers:
+    - Always-on wanted servers are started if not loaded (and restarted if moved).
+    - On-demand wanted servers get their front/backend ports allocated and stay
+      asleep until woken by plugin-gateway (if a pre-upgrade unit is still
+      holding the front port or running from a stale folder, stop it cleanly).
+    - Loaded units no longer wanted are stopped.
+    """
     if not managed():
-        return {"managed": False, "started": [], "stopped": []}
+        return {"managed": False, "started": [], "stopped": [], "asleep": []}
     # The contributed timers too (2026-11-14, first release L4): a plugin
     # edited in place, or a timer someone removed by hand, comes back into
     # line within five minutes. Never stops a standing timer to do it.
@@ -360,31 +539,63 @@ def reconcile() -> dict:
         loam_keys.sync()
     except Exception:  # noqa: BLE001
         pass
+    import loam_plugins as plugins  # noqa: PLC0415
     want = plugins.wanted_servers()
+    door_owner = None
+    try:
+        import loam_contributions  # noqa: PLC0415
+        door_owner = loam_contributions.door_owner()
+    except Exception:  # noqa: BLE001
+        pass
     loaded = set(loaded_units())
-    started, stopped, errors = [], [], {}
+    started, stopped, asleep, moved, errors = [], [], [], [], {}
     for pid, spec in sorted(want.items()):
-        if pid not in loaded:
-            try:
-                start(pid, spec)
-                started.append(pid)
-            except Exception as exc:  # noqa: BLE001 -- one plugin never stops the rest
-                errors[pid] = str(exc)
+        try:
+            front = port_for(pid)
+            if spec.get("always_on"):
+                if pid not in loaded:
+                    start(pid, spec)
+                    started.append(pid)
+            else:
+                bport = backend_port_for(pid)
+                if pid not in loaded:
+                    asleep.append(pid)
+                else:
+                    # Stop pre-upgrade units still holding the front port so
+                    # plugin-gateway can bind it and wake on demand.
+                    uport = unit_port(pid)
+                    if uport is not None and uport == front and uport != bport:
+                        stop(pid)
+                        stopped.append(pid)
+                        loaded.discard(pid)
+                        asleep.append(pid)
+        except Exception as exc:  # noqa: BLE001 -- one plugin never stops the rest
+            errors[pid] = str(exc)
     # A loaded unit that runs from another folder than its plugin's is not
     # this plugin's server: a test's scratch copy started under the real
     # unit name, then its folder removed (2026-11-19, Dictation and Read
-    # aloud, until someone restarted them by hand). Started afresh from its
-    # own folder, running or failed.
-    moved = []
+    # aloud, until someone restarted them by hand).
     for pid, folder in sorted(_folders(sorted(set(want) & loaded)).items()):
         if folder and folder != str(want[pid]["folder"]):
             try:
-                start(pid, want[pid], fresh=True)
+                if want[pid].get("always_on"):
+                    start(pid, want[pid], fresh=True)
+                else:
+                    stop(pid)
+                    loaded.discard(pid)
+                    if pid not in asleep:
+                        asleep.append(pid)
                 moved.append(pid)
             except Exception as exc:  # noqa: BLE001
                 errors[pid] = str(exc)
     for pid in sorted(loaded - set(want)):
         stop(pid)
         stopped.append(pid)
-    return {"managed": True, "started": started, "stopped": stopped, "moved": moved,
-            "errors": errors, "running": sorted(set(want) & (loaded | set(started)))}
+    try:
+        write_gateway_state(want, door_owner)
+    except OSError:
+        pass
+    notify_gateway()
+    return {"managed": True, "started": started, "stopped": stopped,
+            "asleep": sorted(asleep), "moved": moved, "errors": errors,
+            "running": sorted(set(want) & (loaded | set(started)))}

@@ -14,4 +14,4 @@ RemainAfterExit=yes
 ExecStart=/etc/loam/broker/firewall.sh
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=multi-user.target docker.service

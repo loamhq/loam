@@ -204,6 +204,21 @@ def _volume_host_path(raw: str) -> str:
     return text
 
 
+def _docker_asleep() -> bool:
+    """True only when systemd reports docker.service is inactive (so inspecting
+    a volume would wake it via docker.socket)."""
+    systemctl = shutil.which("systemctl", path=ENV["PATH"])
+    if not systemctl:
+        return False
+    try:
+        done = subprocess.run([systemctl, "is-active", "docker.service"],
+                              capture_output=True, text=True, env=ENV,
+                              check=False, timeout=10)
+        return done.returncode != 0 and done.stdout.strip() == "inactive"
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def find_login(previous: dict | None = None) -> tuple[str | None, str]:
     """The host folder of the login's volume, and a sentence saying what was
     found. ``previous`` is the last state's ``about``: when Docker is there
@@ -212,6 +227,12 @@ def find_login(previous: dict | None = None) -> tuple[str | None, str]:
     docker = shutil.which("docker", path=ENV["PATH"])
     if not docker:
         return None, "no Docker on this machine, so no login database to keep"
+    if _docker_asleep():
+        last = ((previous or {}).get("login") or {}).get("dir", "")
+        if last and os.path.isdir(last):
+            return last, (f"Docker is asleep; the login's volume folder the last "
+                          f"state found, {last}, is kept without waking Docker")
+        return None, "Docker is asleep, so no login database is running"
     try:
         done = subprocess.run([docker, "volume", "inspect", "--format", "{{json .}}",
                                LOGIN_VOLUME], capture_output=True, text=True, env=ENV,

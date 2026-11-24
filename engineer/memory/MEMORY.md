@@ -2973,3 +2973,58 @@ listener for immediate notification in an open page.
   floors the private handoff timer at `max(THREAD_IDLE_S, DEFAULT_THREAD_IDLE_S)`
   (600 s) so short small-box idle unloads do not spawn premature forked handoff
   subprocesses on every 90–120 s pause.
+## 2026-11-23 — On-demand sleep for the browser, Docker, and plugin servers; job process reaper
+
+- **MCP-aware socket-activated browser proxy (`lib/loam_browser_proxy.py`,
+  `bin/browser-proxy`, `loam-browser-proxy.socket`).** Every agent provider
+  (`claude`, `codex`, `agy`) connects to `http://127.0.0.1:8931/mcp` at session
+  start and keeps `GET /mcp` SSE open even without calling a browser tool, so a
+  raw TCP proxy wakes Docker on every conversation. Instead, systemd listens on
+  `127.0.0.1:8931` (`0 MB` standing RAM) and spawns `bin/browser-proxy` only on
+  a connection; it serves `initialize`, `notifications/initialized`,
+  `tools/list` (from `deploy/browser-tools.json`), `ping`, `resources/list`,
+  `prompts/list`, `GET /mcp`, `DELETE /mcp`, and `GET /up` locally without
+  starting Docker. On the first `tools/call`, it wakes Docker (if asleep),
+  raises `loam-sight-firewall.service` and `loam-broker-firewall.service`,
+  starts `loam-browser` on internal `BROWSER_BACKEND_PORT` (`8937`), replays
+  `initialize`, and proxies the call. Active browser tabs (`browser_open`) block
+  idle sleep until `browser_close`, `DELETE /mcp`, or SSE disconnect; after 10
+  minutes idle, `loam-browser` stops, and when no other container needs Docker
+  (`other_containers_need_docker()` is false — e.g. unclaimed boxes or installs
+  without other running containers), `docker.service` and `containerd.service`
+  sleep too.
+- **Docker sleep/wake unit traps.** Never put `Requires=docker.service` on
+  `loam-claim.service`: stopping Docker stops it and starting Docker does not
+  bring it back. Firewalls (`loam-sight-firewall.service`,
+  `loam-broker-firewall.service`) must carry `WantedBy=docker.service` in
+  addition to `Requires=/PartOf=` so waking Docker re-raises them automatically.
+  Every read-only observer (`bin/loam-status`, `bin/check-drift`,
+  `lib/loam_deploy.py`, `lib/loam_host.py`, `lib/loam_data_disk.py`) must guard
+  `docker` CLI calls behind `docker_active()`, because `docker.socket`
+  socket-activates `docker.service` on any CLI invocation.
+- **On-demand plugin servers behind `bin/plugin-gateway` (`lib/loam_plugin_servers.py`,
+  `bin/plugin-gateway`).** Server plugins sleep by default (`always_on: false`)
+  unless `server.always_on: true` or `contributes.box.listener` is declared.
+  Each on-demand plugin keeps its stable front port (`9100–9299`, exposed as
+  `LOAM_PLUGIN_URL` and `/v1/plugins/services`) bound by `bin/plugin-gateway` as
+  a transparent TCP wake-and-proxy listener (preserving headers such as
+  `X-Garden-Tool` and avoiding `X-Forwarded-Prefix`), while the plugin unit
+  binds its paired backend port (`9300–9499`, `ports.json["backend_ports"]`)
+  with `Restart=on-failure` and `SuccessExitStatus=SIGTERM 143`. Requests on
+  `/x/<id>/`, unauthenticated `/s/<token>`, or direct loopback wake the unit
+  once (coalescing concurrent callers, waiting through mid-shutdown, and keeping
+  active requests/streams/WebSockets awake) and sleep it after 10 minutes idle.
+  `bin/plugin-gateway` reads `gateway.json` (written by `reconcile` and
+  `_servers_follow`, refreshed via a short-lived `bin/plugin-servers
+  gateway-state` subprocess when stale) so PyYAML and `loam_plugins` never enter
+  the gateway's resident heap (~14 MB PSS vs ~32 MB).
+- **Reaping processes that escape a job's systemd cgroup
+  (`lib/loam_engineer.py`, `bin/engineer-job`).** Commands run under
+  `systemd-run --user --scope` (such as memory-capped browser test rigs) move
+  into a sibling transient scope under `user@<uid>.service/app.slice`, outside
+  `loam-engineer-<job>.service`'s cgroup, so background helpers they spawn
+  survive job teardown while still carrying `LOAM_WAKE=engineer:<job>` /
+  `LOAM_JOB_DIR=.../<job>` in `/proc/<pid>/environ`. `reap_job_processes()`
+  finds and SIGTERM/SIGKILLs remaining same-UID processes tagged with the job
+  id (sparing ancestors and non-engineer `loam-*.service` units) on job exit,
+  cancel, and `--recover` sweeps.
