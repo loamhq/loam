@@ -73,10 +73,62 @@ def describe(holder: dict | None) -> str:
     )
 
 
+def _lock_owner(lock_dir: Path) -> tuple[int, int] | None:
+    """Resolve the non-root (uid, gid) that should own `lock_dir` and its files."""
+    if os.geteuid() != 0:
+        return None
+    for candidate in (lock_dir, *lock_dir.parents):
+        try:
+            st = candidate.stat()
+        except OSError:
+            continue
+        if st.st_uid != 0:
+            return (st.st_uid, st.st_gid)
+    return None
+
+
+def _ensure_lock_dir(lock_dir: Path | None = None) -> tuple[int, int] | None:
+    """Ensure the lock directory exists and, when run as root under a user's
+    state directory, belongs to that user rather than root."""
+    target = lock_dir or LOCK_DIR
+    missing: list[Path] = []
+    if os.geteuid() == 0:
+        cur = target
+        while not cur.exists() and cur != cur.parent:
+            missing.append(cur)
+            cur = cur.parent
+    target.mkdir(parents=True, exist_ok=True)
+    owner = _lock_owner(target)
+    if owner is not None:
+        uid, gid = owner
+        for created in reversed(missing):
+            try:
+                os.chown(created, uid, gid)
+            except OSError:
+                pass
+        try:
+            st = target.stat()
+            if st.st_uid == 0:
+                os.chown(target, uid, gid)
+        except OSError:
+            pass
+    return owner
+
+
+def _chown_lock_file(path: Path, owner: tuple[int, int] | None) -> None:
+    if owner is None:
+        return
+    try:
+        os.chown(path, owner[0], owner[1])
+    except OSError:
+        pass
+
+
 def _try_take(path: Path, me: dict):
     """Take the lock without blocking, or return None. Stamps the holder."""
-    LOCK_DIR.mkdir(parents=True, exist_ok=True)
+    owner = _ensure_lock_dir(path.parent)
     handle = path.open("a+", encoding="utf-8")
+    _chown_lock_file(path, owner)
     try:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError as exc:
@@ -200,9 +252,10 @@ ROOM_WANTED_TTL_S = 30
 def note_room_wanted() -> None:
     """Record that a non-chat run is waiting for memory right now. Fail-soft."""
     try:
-        LOCK_DIR.mkdir(parents=True, exist_ok=True)
+        owner = _ensure_lock_dir()
         path = LOCK_DIR / ROOM_WANTED_FILE
         path.touch(exist_ok=True)
+        _chown_lock_file(path, owner)
         os.utime(path, None)
     except OSError:
         pass
@@ -224,8 +277,10 @@ _COUNTER = [0]
 
 def _try_admit(me: dict):
     """Check headroom and claim a record under one lock so concurrent starts share a budget."""
-    LOCK_DIR.mkdir(parents=True, exist_ok=True)
-    with (LOCK_DIR / "admit.lock").open("a+", encoding="utf-8") as gate:
+    owner = _ensure_lock_dir()
+    admit_path = LOCK_DIR / "admit.lock"
+    with admit_path.open("a+", encoding="utf-8") as gate:
+        _chown_lock_file(admit_path, owner)
         fcntl.flock(gate.fileno(), fcntl.LOCK_EX)
         try:
             _sweep()
@@ -399,12 +454,10 @@ def live(name: str, lane: str, wait_seconds: float | None = None,
     me = {"agent": os.environ.get("LOAM_WAKE") or name, "lane": lane,
           "pid": os.getpid(), "since": now_iso()}
     path = live_lock_path(name)
-    # Root deployments create the lock for the user who owns the directory.
-    LOCK_DIR.mkdir(parents=True, exist_ok=True)
+    # Root deployments create the lock (and locks dir if absent) for the user who owns state.
+    owner = _ensure_lock_dir(path.parent)
     path.touch(exist_ok=True)
-    if os.geteuid() == 0:
-        owner = LOCK_DIR.stat()
-        os.chown(path, owner.st_uid, owner.st_gid)
+    _chown_lock_file(path, owner)
     deadline = time.monotonic() + wait
     last_seen = object()
     while True:

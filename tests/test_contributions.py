@@ -595,6 +595,21 @@ with tempfile.TemporaryDirectory() as tmp:
     check("LOAM_OFFLINE=1 forces real_layer() to False",
           subprocess.check_output([sys.executable, "-c", probe_off], env=off_env, text=True).strip() == "False")
 
+# -- _contributions_follow logs apply errors to stderr instead of dropping them --
+import io as _io  # noqa: E402
+from unittest.mock import patch as _patch  # noqa: E402
+import loam_plugins as _lp  # noqa: E402
+_err_buf = _io.StringIO()
+with _patch.object(_lp, "CONTRIBUTIONS_FOLLOW", True), \
+     _patch.object(c, "apply", return_value={"reason": "demo turned off", "errors": ["provision ada: PermissionError"]}), \
+     _patch.object(sys, "stderr", _err_buf):
+    _res = _lp._contributions_follow("demo turned off")
+check("_contributions_follow returns apply dict",
+      isinstance(_res, dict) and bool(_res.get("errors")), _res)
+check("_contributions_follow logs contribution errors to stderr",
+      "demo turned off" in _err_buf.getvalue() and "PermissionError" in _err_buf.getvalue(),
+      _err_buf.getvalue())
+
 failed = results.count(False)
 print(f"\n{len(results) - failed}/{len(results)} passed")
 sys.exit(1 if failed else 0)

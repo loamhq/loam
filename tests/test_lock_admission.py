@@ -130,6 +130,37 @@ try:
     check("the agent lock: a second run of one agent is refused for it",
           refused is not None and "run lock" in refused, True)
     check("nothing is left running", loam_lock.running(), [])
+
+    # Root creating a missing LOCK_DIR under a non-root state directory must
+    # chown both the newly created LOCK_DIR and the live lock file to the
+    # non-root parent's owner (not root:root).
+    from unittest.mock import patch  # noqa: PLC0415
+    state_dir = root / "user-state"
+    state_dir.mkdir()
+    fresh_locks = state_dir / "locks"
+    chowned: list[tuple[Path, int, int]] = []
+    real_stat = Path.stat
+
+    def fake_stat(self, *args, **kwargs):
+        st = real_stat(self, *args, **kwargs)
+        if self == fresh_locks:
+            return os.stat_result((st.st_mode, st.st_ino, st.st_dev, st.st_nlink,
+                                   0, 0, st.st_size, st.st_atime, st.st_mtime, st.st_ctime))
+        if self == state_dir:
+            return os.stat_result((st.st_mode, st.st_ino, st.st_dev, st.st_nlink,
+                                   1000, 1000, st.st_size, st.st_atime, st.st_mtime, st.st_ctime))
+        return st
+
+    loam_lock.LOCK_DIR = fresh_locks
+    with patch.object(os, "geteuid", return_value=0), \
+         patch.object(Path, "stat", fake_stat), \
+         patch.object(os, "chown", side_effect=lambda p, u, g: chowned.append((Path(p), u, g))):
+        with loam_lock.live("Loam", "gen-deploy", wait_seconds=0):
+            pass
+    check("root live lock creates and chowns LOCK_DIR to parent user",
+          (fresh_locks, 1000, 1000) in chowned, True)
+    check("root live lock chowns live-Loam.lock to parent user",
+          (fresh_locks / "live-Loam.lock", 1000, 1000) in chowned, True)
 finally:
     loam_lock.LOCK_DIR, loam_lock.MEMINFO = saved
     shutil.rmtree(root, ignore_errors=True)

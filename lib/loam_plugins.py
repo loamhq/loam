@@ -1851,14 +1851,21 @@ def wanted_servers() -> dict[str, dict]:
 
 def _contributions_follow(reason: str) -> dict | None:
     """Bring every lane into line with the plugins now in force (timers,
-    the personas' assembled files). Never raises, as _servers_follow."""
+    the personas' assembled files). Never raises, as _servers_follow, but logs
+    any errors so failed renders or timer updates are never silent."""
     try:
         import loam_contributions  # noqa: PLC0415
         if not CONTRIBUTIONS_FOLLOW:
             return None
-        return loam_contributions.apply(reason)
+        res = loam_contributions.apply(reason)
+        if isinstance(res, dict):
+            for err in res.get("errors") or []:
+                print(f"plugins: {reason}: {err}", file=sys.stderr, flush=True)
+        return res
     except Exception as exc:  # noqa: BLE001
-        return {"error": f"the contributions could not be brought into line: {exc}"}
+        msg = f"the contributions could not be brought into line: {exc}"
+        print(f"plugins: {reason}: {msg}", file=sys.stderr, flush=True)
+        return {"error": msg}
 
 
 # Off in a test that has no lanes to render (the env var, not a constant
