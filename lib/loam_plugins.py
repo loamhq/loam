@@ -1873,8 +1873,18 @@ def _servers_follow(pid: str, restart: bool = False) -> dict | None:
     (``restart`` stops any running copy so the next request wakes the new code);
     unwanted servers stop. Never raises."""
     try:
-        want = wanted_servers().get(pid)
+        want_all = wanted_servers()
+        want = want_all.get(pid)
         srv = _servers()
+        try:
+            import loam_contributions  # noqa: PLC0415
+            owner = loam_contributions.door_owner()
+        except Exception:  # noqa: BLE001
+            owner = None
+        try:
+            srv.write_gateway_state(want_all, owner)
+        except OSError:
+            pass
         if want is None:
             return srv.stop(pid)
         if want.get("always_on"):

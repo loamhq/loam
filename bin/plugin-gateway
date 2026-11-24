@@ -32,6 +32,7 @@ import json
 import os
 import re
 import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -40,7 +41,53 @@ from typing import Callable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import loam_plugin_servers as servers  # noqa: E402
-import loam_plugins as plugins  # noqa: E402
+
+_PLUGIN_SERVERS_BIN = Path(__file__).resolve().parent / "plugin-servers"
+_state_cache: dict = {"mtime": None, "doc": None}
+
+
+def _load_gateway_state(*, force_refresh: bool = False) -> dict:
+    """Read gateway.json; only invoke bin/plugin-servers in a short-lived
+    subprocess when missing or stale so PyYAML never enters this daemon's heap."""
+    path = servers.gateway_state_path()
+    stale = force_refresh or servers.gateway_state_stale()
+    if not stale:
+        try:
+            mt = path.stat().st_mtime
+            if _state_cache["mtime"] == mt and isinstance(_state_cache["doc"], dict):
+                return _state_cache["doc"]
+        except OSError:
+            stale = True
+    if stale:
+        try:
+            done = subprocess.run(
+                [sys.executable, str(_PLUGIN_SERVERS_BIN), "gateway-state"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if done.returncode == 0 and done.stdout.strip():
+                doc = json.loads(done.stdout)
+                if isinstance(doc, dict):
+                    try:
+                        _state_cache["mtime"] = path.stat().st_mtime
+                    except OSError:
+                        _state_cache["mtime"] = None
+                    _state_cache["doc"] = doc
+                    return doc
+        except Exception as exc:  # noqa: BLE001
+            print(f"plugin-gateway refresh state: {exc!r}", file=sys.stderr, flush=True)
+    doc = servers.read_gateway_state() or {"wanted": {}, "door_owner": None}
+    try:
+        _state_cache["mtime"] = path.stat().st_mtime
+    except OSError:
+        _state_cache["mtime"] = None
+    _state_cache["doc"] = doc
+    return doc
+
+
+def _wanted_from_state() -> dict[str, dict]:
+    doc = _load_gateway_state()
+    wanted = doc.get("wanted")
+    return dict(wanted) if isinstance(wanted, dict) else {}
 
 DOOR_PATH = re.compile(r"^/s/([A-Za-z0-9_-]{32,64})(/[^?#]*)?(\?[^#]*)?$")
 DOOR_METHODS = {"GET", "HEAD", "POST", "PATCH", "DELETE"}
@@ -147,7 +194,7 @@ class GatewaySupervisor:
         self.idle_s = idle_s
         self.wake_timeout_s = wake_timeout_s
         self._managed_fn = managed_fn or servers.managed
-        self._wanted_fn = wanted_fn or plugins.wanted_servers
+        self._wanted_fn = wanted_fn or _wanted_from_state
         self._start_fn = start_fn or servers.start
         self._stop_fn = stop_fn or servers.stop
         self._status_fn = status_fn or servers.status
@@ -561,12 +608,12 @@ async def handle(
 
 
 def door_owner() -> str | None:
-    """The plugin holding the door, looked up at most every 5 seconds."""
+    """The plugin holding the door, read from gateway.json at most every 5 seconds."""
     now = time.monotonic()
     if now - _owner_cache["at"] > 5:
         try:
-            import loam_contributions  # noqa: PLC0415
-            _owner_cache["pid"] = loam_contributions.door_owner()
+            owner = _load_gateway_state().get("door_owner")
+            _owner_cache["pid"] = owner if isinstance(owner, str) else None
         except Exception as exc:  # noqa: BLE001 -- no owner is a closed door
             print(f"plugin-gateway: door owner: {exc!r}", file=sys.stderr, flush=True)
             _owner_cache["pid"] = None
@@ -675,6 +722,7 @@ async def _housekeep(sup: GatewaySupervisor, wake_sync: asyncio.Event, stop: asy
         try:
             await asyncio.wait_for(wake_sync.wait(), timeout=interval)
             wake_sync.clear()
+            _owner_cache["at"] = 0.0
         except asyncio.TimeoutError:
             pass
         if stop.is_set():

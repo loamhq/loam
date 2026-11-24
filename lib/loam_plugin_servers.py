@@ -19,7 +19,6 @@ from pathlib import Path
 import loam_config as lc
 
 import loam_broker as cfg
-import loam_plugins as plugins
 
 UNIT_PREFIX = "loam-plugin-"
 GATEWAY_PORT = 8933                 # bin/plugin-gateway, on 127.0.0.1
@@ -35,10 +34,18 @@ BURST, BURST_WINDOW = 5, 60         # starts within seconds, then `failing`
 LOG_LINES = 20
 PROPS = ("LoadState", "ActiveState", "SubState", "MainPID", "NRestarts",
          "Result", "ActiveEnterTimestamp", "ExecMainStatus")
+_API = 0
+_DATA_DIR = "_data"
+_SETTINGS_DIR = "_settings"
 
 
 class ServerError(Exception):
     pass
+
+
+def _yours_root() -> Path:
+    env = os.environ.get("LOAM_PLUGINS_DIR")
+    return Path(env) if env else lc.PLUGINS
 
 
 def managed() -> bool:
@@ -49,7 +56,7 @@ def managed() -> bool:
     if loam_offline.offline():
         return False
     return (lc.is_install_config()
-            and plugins.yours_root().resolve() == plugins.YOURS_DEFAULT.resolve())
+            and _yours_root().resolve() == lc.PLUGINS.resolve())
 
 
 def unit(pid: str) -> str:
@@ -67,6 +74,59 @@ def ports_path() -> Path:
 
 def gateway_pid_path() -> Path:
     return state_dir() / "gateway.pid"
+
+
+def gateway_state_path() -> Path:
+    return state_dir() / "gateway.json"
+
+
+def write_gateway_state(want: dict[str, dict], door_owner: str | None) -> dict:
+    """Persist lightweight gateway routing/wake state so bin/plugin-gateway
+    never needs to import PyYAML or loam_plugins into its resident heap."""
+    d = state_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    doc = {"wanted": want, "door_owner": door_owner}
+    tmp = gateway_state_path().with_suffix(".tmp")
+    tmp.write_text(json.dumps(doc, indent=2, sort_keys=True, default=str) + "\n",
+                   encoding="utf-8")
+    os.replace(tmp, gateway_state_path())
+    return doc
+
+
+def read_gateway_state() -> dict | None:
+    try:
+        data = json.loads(gateway_state_path().read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def gateway_state_stale() -> bool:
+    """True when gateway.json is absent or older than plugin switch/port files."""
+    path = gateway_state_path()
+    try:
+        gm = path.stat().st_mtime
+    except OSError:
+        return True
+    yours = _yours_root()
+    for src in (ports_path(), yours, yours / "installed.json", lc.ROOT / "plugins"):
+        try:
+            if src.stat().st_mtime > gm:
+                return True
+        except OSError:
+            pass
+    return False
+
+
+def refresh_gateway_state() -> dict:
+    import loam_contributions  # noqa: PLC0415
+    import loam_plugins as plugins  # noqa: PLC0415
+    want = plugins.wanted_servers()
+    try:
+        owner = loam_contributions.door_owner()
+    except Exception:
+        owner = None
+    return write_gateway_state(want, owner)
 
 
 def notify_gateway() -> None:
@@ -189,13 +249,12 @@ def run(args: list[str]) -> subprocess.CompletedProcess:
 
 
 def environment(pid: str, want: dict, port: int) -> dict[str, str]:
-    yours = plugins.yours_root()
-    data = yours / plugins.DATA_DIR / pid
-    settings_dir = yours / plugins.SETTINGS_DIR / pid
+    yours = _yours_root()
+    data = yours / _DATA_DIR / pid
+    settings_dir = yours / _SETTINGS_DIR / pid
     data.mkdir(parents=True, exist_ok=True)
     settings_dir.mkdir(parents=True, exist_ok=True)
-    import loam_contributions  # noqa: PLC0415
-    private = loam_contributions.private_dir(pid)
+    private = state_dir() / "private" / pid
     private.mkdir(parents=True, exist_ok=True, mode=0o700)
     name = Path(want.get("settings") or "settings.md").name
     return {
@@ -215,7 +274,7 @@ def environment(pid: str, want: dict, port: int) -> dict[str, str]:
         "LOAM_LIB": str(lc.ROOT / "lib"),
         "LOAM_BROKER_URL": f"http://{cfg.BIND_ADDR}:{cfg.PORT}",
         "LOAM_BROKER_TOKEN_FILE": str(cfg.TOKEN_PATH),
-        "LOAM_API": str(plugins.API),
+        "LOAM_API": str(_API),
         # Since 2026-11-16 (doc-comments): the plugin's own folder in the
         # vault, `<system>/Loam/data/<id>`, which an update keeps
         # (lib/loam_skills.py, KEPT_DIR). Vault-relative, for the broker's
@@ -230,8 +289,7 @@ def environment(pid: str, want: dict, port: int) -> dict[str, str]:
 def vault_data(pid: str) -> str:
     """A plugin's folder in the vault, relative to it: under Loam's own
     folder, in the one place there an update does not replace."""
-    import loam_skills  # noqa: PLC0415
-    return f"{lc.vault_folder('system')}/{loam_skills.LOAM_DIR}/{loam_skills.KEPT_DIR}/{pid}"
+    return f"{lc.vault_folder('system')}/Loam/data/{pid}"
 
 
 def argv(pid: str, want: dict, port: int) -> list[str]:
@@ -344,6 +402,7 @@ def annotate(rows: list[dict], logs: bool = False) -> list[dict]:
     (``wanted``), its state (running, asleep, starting, failing, stopping,
     stopped), port, address, process, restarts and, when failing or asked,
     its last log lines. One systemctl call for the whole list."""
+    import loam_plugins as plugins  # noqa: PLC0415
     have = [r for r in rows if plugins.server_spec(r)]
     if not have:
         return rows
@@ -480,7 +539,14 @@ def reconcile() -> dict:
         loam_keys.sync()
     except Exception:  # noqa: BLE001
         pass
+    import loam_plugins as plugins  # noqa: PLC0415
     want = plugins.wanted_servers()
+    door_owner = None
+    try:
+        import loam_contributions  # noqa: PLC0415
+        door_owner = loam_contributions.door_owner()
+    except Exception:  # noqa: BLE001
+        pass
     loaded = set(loaded_units())
     started, stopped, asleep, moved, errors = [], [], [], [], {}
     for pid, spec in sorted(want.items()):
@@ -525,6 +591,10 @@ def reconcile() -> dict:
     for pid in sorted(loaded - set(want)):
         stop(pid)
         stopped.append(pid)
+    try:
+        write_gateway_state(want, door_owner)
+    except OSError:
+        pass
     notify_gateway()
     return {"managed": True, "started": started, "stopped": stopped,
             "asleep": sorted(asleep), "moved": moved, "errors": errors,
