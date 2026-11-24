@@ -186,6 +186,12 @@ def first_to_go(argv: list[str]) -> list[str]:
         return list(argv)
     return [CHOOM, "-n", str(cfg.CHILD_OOM_SCORE_ADJ), "--", *argv]
 
+# Reasons a session is ended on purpose by Loam (not by the owner and not by a
+# crash/OOM). A thread turn whose session exits with one of these before any
+# reply or tool step recovers automatically on a fresh/resumed session.
+RECLAIM_REASONS = ("room", "idle", "pressure", "retire")
+
+
 class BrokerError(Exception):
     """Returned to the client as a 4xx with this text. Never a stack trace:
     the client is a web app and its user is a person."""
@@ -302,6 +308,11 @@ class Session:
     """Own one session and its provider process. Choose its ID before launch so
     clients can address it immediately and use the same ID to resume it.
     """
+
+    # Class defaults so tests constructing instances via __new__ still see them.
+    _stop_requested = False
+    _stop_reason: str | None = None
+    _stopping_event: asyncio.Event | None = None
 
     def __init__(self, agent: str, session_id: str | None = None,
                  provider: str | None = None, model: str | None = None,
@@ -442,6 +453,8 @@ class Session:
         # not. Read at the turn's `result`, which then counts as failed.
         self._unsaved: str | None = None
         self._stop_requested = False
+        self._stop_reason: str | None = None
+        self._stopping_event: asyncio.Event | None = None
         self._restored_status: str | None = None
         # Whether this session has the name it is going to keep, and whether
         # somebody is currently looking for one. The second exists because the
@@ -546,8 +559,8 @@ class Session:
         ``returncode`` reads for the next few milliseconds. Neither direction
         may claim residency: 450 MB the box cannot use is not 450 MB in use.
         """
-        return (self.state == "running" and self.proc is not None
-                and self.proc.returncode is None)
+        return (self.state == "running" and not self._stop_requested
+                and self.proc is not None and self.proc.returncode is None)
 
     def meta(self) -> dict:
         """Build the session record for a list row or broker.session snapshot. Its
@@ -775,6 +788,8 @@ class Session:
         # file is no longer what this session is; it is what it was.
         self._restored_status = None
         self._stop_requested = False
+        self._stop_reason = None
+        self._stopping_event = None
         self._turn_active = False
         # A new process has no children yet, whatever the last one left behind.
         self._clear_background()
@@ -828,6 +843,13 @@ class Session:
             self._dispatches[dispatch_id] = task
         return await asyncio.shield(task)
 
+    def _not_running_error(self) -> BrokerError:
+        if self._stop_reason in RECLAIM_REASONS:
+            return BrokerError(
+                409, f"session {self.id} was unloaded ({self._stop_reason})",
+                {"reclaimed": self._stop_reason})
+        return BrokerError(409, f"session {self.id} is not running")
+
     async def send_message(self, text: str,
                            attachments: list[dict] | None = None, *,
                            dispatch_id: str | None = None) -> int:
@@ -836,8 +858,9 @@ class Session:
         that specific event; another event may have advanced the session cursor. Name
         attachments by path and include image blocks for the provider.
         """
-        if self.proc is None or self.proc.stdin is None or self.state != "running":
-            raise BrokerError(409, f"session {self.id} is not running")
+        if (self.proc is None or self.proc.stdin is None
+                or self.state != "running" or self._stop_requested):
+            raise self._not_running_error()
         attachments = attachments or []
         event = {"type": "broker.user_message",
                  "session_id": self.id,
@@ -873,7 +896,7 @@ class Session:
         of accepted input or None if the session cannot steer.
         """
         if (not self._turn_active or self.proc is None or self.proc.stdin is None
-                or self.state != "running"):
+                or self.state != "running" or self._stop_requested):
             return None
         attachments = attachments or []
         event = {"type": "broker.user_message", "session_id": self.id,
@@ -929,7 +952,7 @@ class Session:
                 continue
             value = changes[field]
             setattr(self, field, value)
-            if value and self.state == "running":
+            if value and self.state == "running" and not self._stop_requested:
                 await self.send_raw({
                     "type": "user",
                     "message": {"role": "user",
@@ -1568,36 +1591,49 @@ class Session:
             # and got no answer, and `done` would be a lie about that.
             self._turn_active = False
             self._last_result_ok = False
-        await self.emit({"type": "broker.exit", "session_id": self.id,
-                         "exit_code": self.exit_code, "ts": now_iso()})
+        exit_event = {"type": "broker.exit", "session_id": self.id,
+                      "exit_code": self.exit_code, "ts": now_iso()}
+        if self._stop_reason:
+            exit_event["reason"] = self._stop_reason
+        await self.emit(exit_event)
         self.save()
         for queue in list(self.subscribers):
             queue.put_nowait(None)
 
-    async def stop(self) -> None:
+    async def stop(self, reason: str | None = None) -> None:
         """End the process, keep the session. The id resumes: the CLI's own
         session file under ~/.claude holds the context, which is the whole
         reason `--session-id` is chosen up front."""
+        if self._stopping_event is not None:
+            if reason and not self._stop_reason:
+                self._stop_reason = reason
+            await self._stopping_event.wait()
+            return
         # Set before the signal, because _reap runs as soon as the pipe
         # closes and asks this question: a process that ended because
         # somebody asked it to has not failed.
         self._stop_requested = True
-        if self.proc is not None and self.proc.returncode is None:
-            self.proc.terminate()
-            try:
-                async with asyncio.timeout(10):   # not wait_for: gh-86296
-                    await self.proc.wait()
-            except TimeoutError:
-                self.proc.kill()
-        # Shutdown may finish before the pump reads EOF. Journal request closures here as
-        # well.
-        await self.close_pending("ended")
-        self.state = "exited"
-        # Whatever it was running behind the turn went with it. `_reap` says
-        # the same thing on the stream when the pipe closes; this is what the
-        # record says, and the two must not disagree for even one write.
-        self._clear_background()
-        self.save()
+        self._stop_reason = reason
+        self._stopping_event = asyncio.Event()
+        try:
+            if self.proc is not None and self.proc.returncode is None:
+                self.proc.terminate()
+                try:
+                    async with asyncio.timeout(10):   # not wait_for: gh-86296
+                        await self.proc.wait()
+                except TimeoutError:
+                    self.proc.kill()
+            # Shutdown may finish before the pump reads EOF. Journal request closures here as
+            # well.
+            await self.close_pending("ended")
+            self.state = "exited"
+            # Whatever it was running behind the turn went with it. `_reap` says
+            # the same thing on the stream when the pipe closes; this is what the
+            # record says, and the two must not disagree for even one write.
+            self._clear_background()
+            self.save()
+        finally:
+            self._stopping_event.set()
 
     # Refresh adopted records from the provider file on reads, while watching an open thread,
     # and when scanning for new sessions.
@@ -1870,6 +1906,8 @@ class CodexSession(Session):
         self.resumed = resume
         self._restored_status = None
         self._stop_requested = False
+        self._stop_reason = None
+        self._stopping_event = None
         self._turn_active = False
         self._clear_background()
         self._root_calls.clear()
@@ -2324,8 +2362,8 @@ class CodexSession(Session):
         A ``turn/start`` Codex refuses -- no login, a model it does not
         know -- closes the turn as a failed ``result`` carrying Codex's
         sentence, so the page shows the refusal where the answer would be."""
-        if self.proc is None or self.state != "running":
-            raise BrokerError(409, f"session {self.id} is not running")
+        if self.proc is None or self.state != "running" or self._stop_requested:
+            raise self._not_running_error()
         attachments = attachments or []
         event = {"type": "broker.user_message", "session_id": self.id,
                  "text": text}
@@ -2376,7 +2414,8 @@ class CodexSession(Session):
         """
         turn_id = self._codex.turn_id
         if (not self._turn_active or not turn_id or not self.thread_id
-                or self.proc is None or self.state != "running"):
+                or self.proc is None or self.state != "running"
+                or self._stop_requested):
             return None
         attachments = attachments or []
         lines = [self._timed(text)] if text or self.tell_time else []
@@ -2418,37 +2457,47 @@ class CodexSession(Session):
         self.save()
         return []
 
-    async def stop(self) -> None:
+    async def stop(self, reason: str | None = None) -> None:
         """``turn/interrupt`` for a turn in flight, then the process ends.
         DELETE on the session is the one stop route there is; interrupting
         first lets Codex close the turn and write its rollout rather than
         lose it to a signal."""
-        if (self.state == "running" and self._turn_active
-                and self.thread_id and self._codex.turn_id):
-            try:
-                await self.request("turn/interrupt", {
-                    "threadId": self.thread_id, "turnId": self._codex.turn_id})
-                deadline = time.monotonic() + 5
-                while self._turn_active and time.monotonic() < deadline:
-                    await asyncio.sleep(0.1)
-            except BrokerError as exc:
-                print(f"[{self.agent}/{self.id[:8]}] interrupt: {exc.message}",
-                      file=sys.stderr, flush=True)
-        # `Session.stop`, by process group: see `loam_codex.kill_group`.
+        if self._stopping_event is not None:
+            if reason and not self._stop_reason:
+                self._stop_reason = reason
+            await self._stopping_event.wait()
+            return
         self._stop_requested = True
-        if self.proc is not None and self.proc.returncode is None:
-            codex.kill_group(self.proc.pid, signal.SIGTERM)
-            try:
-                async with asyncio.timeout(10):   # not wait_for: gh-86296
-                    await self.proc.wait()
-            except TimeoutError:
-                codex.kill_group(self.proc.pid)
-        await self.close_pending("ended")
-        self.state = "exited"
-        self._clear_background()
-        self._root_calls.clear()
-        self._wakes.clear()
-        self.save()
+        self._stop_reason = reason
+        self._stopping_event = asyncio.Event()
+        try:
+            if (self.state == "running" and self._turn_active
+                    and self.thread_id and self._codex.turn_id):
+                try:
+                    await self.request("turn/interrupt", {
+                        "threadId": self.thread_id, "turnId": self._codex.turn_id})
+                    deadline = time.monotonic() + 5
+                    while self._turn_active and time.monotonic() < deadline:
+                        await asyncio.sleep(0.1)
+                except BrokerError as exc:
+                    print(f"[{self.agent}/{self.id[:8]}] interrupt: {exc.message}",
+                          file=sys.stderr, flush=True)
+            # `Session.stop`, by process group: see `loam_codex.kill_group`.
+            if self.proc is not None and self.proc.returncode is None:
+                codex.kill_group(self.proc.pid, signal.SIGTERM)
+                try:
+                    async with asyncio.timeout(10):   # not wait_for: gh-86296
+                        await self.proc.wait()
+                except TimeoutError:
+                    codex.kill_group(self.proc.pid)
+            await self.close_pending("ended")
+            self.state = "exited"
+            self._clear_background()
+            self._root_calls.clear()
+            self._wakes.clear()
+            self.save()
+        finally:
+            self._stopping_event.set()
 
     async def _reap(self) -> None:
         for future in self._waiters.values():
@@ -2474,8 +2523,8 @@ class AntigravitySession(Session):
         self._agy = agy.Translator(self.id)
 
     def is_live(self) -> bool:
-        return (self.state == "running" and self.proc is not None
-                and self.proc.returncode is None)
+        return (self.state == "running" and not self._stop_requested
+                and self.proc is not None and self.proc.returncode is None)
 
     async def start(self, resume: bool = False) -> None:
         if not (self.workspace / "agent.json").is_file():
@@ -2491,6 +2540,8 @@ class AntigravitySession(Session):
         self.resumed = resume
         self._restored_status = None
         self._stop_requested = False
+        self._stop_reason = None
+        self._stopping_event = None
         self._turn_active = False
         self._clear_background()
         self.last_activity = time.time()
@@ -2511,8 +2562,8 @@ class AntigravitySession(Session):
     async def send_message(self, text: str,
                            attachments: list[dict] | None = None, *,
                            dispatch_id: str | None = None) -> int:
-        if self.state != "running":
-            raise BrokerError(409, f"session {self.id} is not running")
+        if self.state != "running" or self._stop_requested:
+            raise self._not_running_error()
         if self._turn_active or (self.proc is not None and self.proc.returncode is None):
             raise BrokerError(409, f"session {self.id} has a turn in flight")
         self._turn_active = True
@@ -2621,23 +2672,36 @@ class AntigravitySession(Session):
         self._turn_active = False
         self.save()
 
-    async def stop(self) -> None:
+    async def stop(self, reason: str | None = None) -> None:
+        if self._stopping_event is not None:
+            if reason and not self._stop_reason:
+                self._stop_reason = reason
+            await self._stopping_event.wait()
+            return
         self._stop_requested = True
-        if self.proc is not None and self.proc.returncode is None:
-            codex.kill_group(self.proc.pid, signal.SIGTERM)
-            try:
-                async with asyncio.timeout(10):   # not wait_for: gh-86296
-                    await self.proc.wait()
-            except TimeoutError:
-                codex.kill_group(self.proc.pid)
-        await self.close_pending("ended")
-        self.state = "exited"
-        self._clear_background()
-        self.save()
-        await self.emit({"type": "broker.exit", "session_id": self.id,
-                         "exit_code": None, "ts": now_iso()})
-        for queue in list(self.subscribers):
-            queue.put_nowait(None)
+        self._stop_reason = reason
+        self._stopping_event = asyncio.Event()
+        try:
+            if self.proc is not None and self.proc.returncode is None:
+                codex.kill_group(self.proc.pid, signal.SIGTERM)
+                try:
+                    async with asyncio.timeout(10):   # not wait_for: gh-86296
+                        await self.proc.wait()
+                except TimeoutError:
+                    codex.kill_group(self.proc.pid)
+            await self.close_pending("ended")
+            self.state = "exited"
+            self._clear_background()
+            self.save()
+            exit_event = {"type": "broker.exit", "session_id": self.id,
+                          "exit_code": None, "ts": now_iso()}
+            if self._stop_reason:
+                exit_event["reason"] = self._stop_reason
+            await self.emit(exit_event)
+            for queue in list(self.subscribers):
+                queue.put_nowait(None)
+        finally:
+            self._stopping_event.set()
 
     async def set_choices(self, changes: dict) -> list[str]:
         for field in ("model", "effort"):

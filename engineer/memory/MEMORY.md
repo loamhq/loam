@@ -2973,3 +2973,17 @@ listener for immediate notification in an open page.
   floors the private handoff timer at `max(THREAD_IDLE_S, DEFAULT_THREAD_IDLE_S)`
   (600 s) so short small-box idle unloads do not spawn premature forked handoff
   subprocesses on every 90–120 s pause.
+- **Stop-vs-message race closure (`lib/loam_provider_session.py`, `lib/loam_session_host.py`, `lib/loam_thread_engine.py`).**
+  `Session.stop(reason=...)` sets `_stop_requested = True` and an idempotent
+  `_stopping_event` synchronously before `SIGTERM` + `proc.wait()` (~0.6 s on
+  Claude Code with MCPs). `is_live()` returns `False` immediately once
+  `_stop_requested` is set (preventing double-eviction), `start_session()`
+  refreshes `last_activity` when returning a warm session and awaits any
+  in-flight `_stopping_event` + `stdout_task` before resuming instead of handing
+  back a dying CLI, and `send_message()`/`steer()` reject stopping sessions
+  (carrying `detail={"reclaimed": reason}` for `RECLAIM_REASONS`: `room`,
+  `idle`, `pressure`, `retire`). As defense in depth, `ThreadEngine` catches
+  both a reclaimed `409` on dispatch and a reclaimed `broker.exit` before any
+  words or steps, keeps the durable input, and retries cleanly on a fresh/resumed
+  session (showing the ordinary waiting line if full) with no failed-turn mark;
+  unexpected exits (no reason) and owner stops still behave as before.

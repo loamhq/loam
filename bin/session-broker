@@ -1971,6 +1971,8 @@ class Server:
                         raise
                     kept.append({"id": session.id, "agent": session.agent, "why": exc.message})
                     continue
+            elif hasattr(session, "_stop_reason"):
+                await session.stop(reason="idle")
             else:
                 await session.stop()
             ended.append({"id": session.id, "agent": session.agent})

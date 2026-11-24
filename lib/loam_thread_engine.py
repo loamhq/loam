@@ -21,7 +21,7 @@ import loam_config as lc
 import loam_lane_notice as lane_notice
 import loam_provider_memory as provider_memory
 import loam_broker as cfg
-from loam_provider_session import configure_thread
+from loam_provider_session import RECLAIM_REASONS, configure_thread
 import loam_thread_steps as steps
 from loam_thread_summaries import Summaries, prior as prior_summary
 import loam_session_fence as fence
@@ -164,6 +164,19 @@ def step_label(block: dict) -> str:
     return name
 
 
+# Bounded self-healing retries when Loam's own unload (room/idle/pressure)
+# raced an arriving turn before any reply or tool step ran.
+RECLAIM_RETRIES = 3
+
+
+class _Reclaimed(Exception):
+    """The session was intentionally unloaded by Loam before this turn replied."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 class Turn:
     def __init__(self, thread_id: str, persona: str, chain: int,
                  reason: str, model: str | None = None,
@@ -191,6 +204,7 @@ class Turn:
         self.sent = False
         self.posted = False
         self.completed = False
+        self.reclaims = 0
         # Words for this persona alone, after the thread in its prompt
         # (2026-11-12): a job's receipt the persona is to read
         # (`ThreadEngine.deliver_job`). Never posted in the thread.
@@ -1318,6 +1332,35 @@ class ThreadEngine:
             if not turn.dispatch and self.already_heard(turn):
                 return
             await self.run_turn(turn)
+        except _Reclaimed as exc:
+            # Loam unloaded this session for room/idle/pressure before the turn
+            # produced any reply or tool step. Keep the durable input and start
+            # again on a fresh/resumed session (showing the ordinary waiting
+            # line if the box is currently full).
+            turn.settle = False
+            steps.log(f"{thread_id} {turn.persona}: session was unloaded "
+                      f"({exc.reason}) before reply; retrying turn")
+            retry_turns: list[Turn] = []
+            if turn.input_id:
+                ids = [turn.input_id, *turn.carried]
+                inputs.keep(thread_id, turn.persona, ids)
+                by_id = {e["id"]: e for e in inputs.items(*key)}
+                for iid in ids:
+                    item = by_id.get(iid)
+                    if item is not None:
+                        t = Turn.of_entry(*key, item)
+                        t.held = turn.held
+                        t.reclaims = turn.reclaims + 1
+                        retry_turns.append(t)
+            else:
+                t = Turn(turn.thread_id, turn.persona, turn.chain, turn.reason,
+                         model=turn.model, attachments=list(turn.attachments),
+                         note=turn.note, briefed_at=turn.briefed_at)
+                t.held = turn.held
+                t.reclaims = turn.reclaims + 1
+                retry_turns.append(t)
+            if retry_turns and not getattr(self.broker, "stopping", False):
+                self._unclaim(key, retry_turns)
         except OSError as exc:
             if not turn.dispatch and not getattr(self.broker, "remote", False):
                 self.mark(thread_id, turn.persona,
@@ -1691,6 +1734,7 @@ class ThreadEngine:
         reply = Reply()
         posted: list[dict] = []
         ended = None
+        exit_reason = None
         waiting = False
 
         def step(label: str, top: bool = True, ends: bool | None = None,
@@ -1756,15 +1800,24 @@ class ThreadEngine:
             if recovering:
                 await self._restore_steers(turn, session, history)
                 restored_steers = {s["id"]: s for s in turn.dispatch["steers"]}
-            if turn.dispatch:
-                if receipt is None or (same_host and session.state == "running"):
-                    receipt = await session.dispatch(turn.input_id, prompt, turn.attachments)
-                if kept:
-                    await self.recover_late(turn, session, kept, engine, model, before=receipt)
-            elif turn.attachments:
-                await session.send_message(prompt, turn.attachments)
-            else:
-                await session.send_message(prompt)
+            try:
+                if turn.dispatch:
+                    if receipt is None or (same_host and session.state == "running"):
+                        receipt = await session.dispatch(turn.input_id, prompt, turn.attachments)
+                    if kept:
+                        await self.recover_late(turn, session, kept, engine, model, before=receipt)
+                elif turn.attachments:
+                    await session.send_message(prompt, turn.attachments)
+                else:
+                    await session.send_message(prompt)
+            except Exception as exc:  # noqa: BLE001
+                detail = getattr(exc, "detail", None)
+                reclaimed = detail.get("reclaimed") if isinstance(detail, dict) else None
+                if (reclaimed in RECLAIM_REASONS
+                        and not getattr(self.broker, "stopping", False)
+                        and turn.reclaims < RECLAIM_RETRIES):
+                    raise _Reclaimed(reclaimed) from exc
+                raise
             # The once-only mark, with no await between the send and it.
             turn.sent = True
             if turn.input_id:
@@ -1923,6 +1976,7 @@ class ThreadEngine:
                         park(False)          # the follow-up turn has begun
                 elif kind == "broker.exit":
                     ended = "exit"
+                    exit_reason = event.get("reason")
             lock = self.steer_locks.get(turn.key)
             if lock is not None and lock.locked():
                 # Close this turn to new steers, but keep reading while the
@@ -1956,6 +2010,14 @@ class ThreadEngine:
         if ended in ("exit", "closed") and not posted and not reply.spoken() \
                 and not (self.turns.get(turn.key) or {}).get("ended_by"):
             seen = (kept or {}).get("through") or "m0"
+            if (ended == "exit" and exit_reason in RECLAIM_REASONS
+                    and not reply.did
+                    and not getattr(self.broker, "stopping", False)
+                    and turn.reclaims < RECLAIM_RETRIES):
+                threads.remember_session(turn.thread_id, turn.persona, session.id,
+                                         engine, seen, seq=turn.cursor,
+                                         context=session_context(session), watch=False)
+                raise _Reclaimed(exit_reason)
             steps.log(f"{turn.thread_id} {turn.persona}: turn ended ({ended}) "
                       f"before any reply; its messages stay new to the next turn")
         due = self.summary_due(turn, session) if ended in ("result", "handed") else None

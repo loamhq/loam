@@ -250,7 +250,7 @@ class SessionSocket:
             if req.get("idle") and (self.host.hold_reason(session) or
                                     time.time() - session.last_activity < cfg.EVICT_GRACE_S):
                 raise BrokerError(409, "session became busy")
-            await session.stop()
+            await session.stop(reason="idle" if req.get("idle") else None)
             answer = snapshot(session)
         elif op == "dispatch":
             key, text = req.get("id"), req.get("text")

@@ -270,10 +270,20 @@ class SessionHost:
             existing = self.sessions[session_id]
             if existing.agent != agent or (requested and requested != existing.provider):
                 raise BrokerError(409, "session belongs to another agent or provider")
-            if existing.state == "running":
+            if existing.state == "running" and not existing._stop_requested:
                 if (existing.provider not in ("claude-code", "codex") or existing.busy()
                         or existing.images_tool == existing.has_images_tool()):
+                    # Refresh activity on reuse so a concurrent room/idle/pressure
+                    # pass cannot reclaim this session before its turn dispatches.
+                    existing.last_activity = time.time()
                     return existing
+                retire = existing
+                resume = True
+            elif (existing._stopping_event is not None
+                  and not existing._stopping_event.is_set()):
+                # A stop (for room/idle/pressure) is shutting down the old
+                # process right now. Wait for it to exit before resuming so we
+                # never hand out a dying CLI or race it on its session file.
                 retire = existing
                 resume = True
         sid = session_id or str(uuid.uuid4())
@@ -283,9 +293,9 @@ class SessionHost:
                 if self.stopping:
                     raise BrokerError(503, "the broker is stopping")
                 if retire is not None:
-                    if retire.busy():
+                    if not retire._stop_requested and retire.busy():
                         return retire
-                    await retire.stop()
+                    await retire.stop(reason="retire")
                     if retire.stdout_task is not None:
                         await retire.stdout_task
                 await self.make_room(agent)
@@ -437,7 +447,7 @@ class SessionHost:
                   f"{int(now - victim.last_activity)} s) for {agent}: "
                   f"{room['reason']}, {room['available_mb']} MB available, "
                   f"reserve {room['reserve_mb']}", file=sys.stderr, flush=True)
-            await victim.stop()
+            await victim.stop(reason="room")
 
     def cap_error(self, agent: str, room: dict | None = None,
                   protected: dict[str, str] | None = None) -> BrokerError:
@@ -513,7 +523,7 @@ class SessionHost:
                 if idle > short and self.hold_reason(session, protected) is None:
                     print(f"idle: ending {session.agent}/{session.id}",
                           file=sys.stderr, flush=True)
-                    await session.stop()
+                    await session.stop(reason="idle")
             except Exception as exc:  # noqa: BLE001 - the next pass retries
                 print(f"idle: {session.agent}/{session.id}: {exc!r}",
                       file=sys.stderr, flush=True)
@@ -552,7 +562,7 @@ class SessionHost:
             print(f"pressure: ending {idle[0].agent}/{idle[0].id}, {available} MB "
                   f"available against a {reserve} MB reserve",
                   file=sys.stderr, flush=True)
-        await idle[0].stop()
+        await idle[0].stop(reason="pressure")
         return idle[0]
 
     def prepare_records(self) -> None:
