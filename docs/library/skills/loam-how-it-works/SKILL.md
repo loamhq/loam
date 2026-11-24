@@ -373,7 +373,10 @@ wake automatically on the first request that needs them:
   transparently. Open browser sessions are never stopped mid-use; after ten
   quiet minutes with no open session and no call, `loam-browser` stops — and
   when no other container needs Docker, Docker and containerd sleep with it,
-  on a claimed server as well. Saved files in `/var/lib/loam/browser` remain on
+  on a claimed server as well. Whenever anything else wakes Docker (for example
+  an admin running `docker ps`), `loam-docker-idle-watch.timer` runs only while
+  Docker is active and puts Docker and containerd back to sleep after the same
+  ten quiet minutes once nothing needs them. Saved files in `/var/lib/loam/browser` remain on
   disk.
 - **Plugin servers.** Server plugins sleep by default until their first
   request arrives on `/x/<id>/`, the unauthenticated share door `/s/<token>`,

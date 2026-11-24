@@ -17,7 +17,8 @@ Usage:
                                      authelia | authelia-unit |
                                      authelia-redis-unit | browser |
                                      browser-proxy-socket | browser-proxy-unit |
-                                     docker-idle-unit | firewall |
+                                     docker-idle-unit | docker-idle-watch-unit |
+                                     docker-idle-watch-timer | firewall |
                                      firewall-unit | inbound-firewall |
                                      inbound-firewall-unit | sudoers |
                                      preview-sysctl
@@ -1068,7 +1069,8 @@ def generate(dry: bool) -> int:
         u in changed for u in (
             dep.SERVICE_UNIT, dep.AUTHELIA_UNIT, dep.AUTHELIA_REDIS_UNIT,
             dep.BROWSER_PROXY_SOCKET, dep.BROWSER_PROXY_UNIT,
-            dep.DOCKER_IDLE_UNIT, dep.SIGHT_FIREWALL_UNIT, dep.INBOUND_FIREWALL_UNIT,
+            dep.DOCKER_IDLE_UNIT, dep.DOCKER_IDLE_WATCH_UNIT, dep.DOCKER_IDLE_WATCH_TIMER,
+            dep.SIGHT_FIREWALL_UNIT, dep.INBOUND_FIREWALL_UNIT,
         )
     )
     if need_daemon_reload:
@@ -1185,6 +1187,7 @@ def generate(dry: bool) -> int:
         print(f"  browser proxy: restarted (exit {res.returncode})"
               f"{': ' + res.stderr.strip() if res.returncode and res.stderr.strip() else ''}")
     run(["systemctl", "enable", dep.DOCKER_IDLE_SERVICE_NAME])
+    run(["systemctl", "enable", dep.DOCKER_IDLE_WATCH_TIMER_NAME])
 
     if dep.loam_broker.FIREWALL_SCRIPT in changed and dep.docker_active():
         subprocess.run(["systemctl", "restart", dep.loam_broker.WALL_SERVICE], check=True)
@@ -1222,10 +1225,15 @@ def generate(dry: bool) -> int:
           f"{': ' + res.stderr.strip() if res.returncode and res.stderr.strip() else ''}")
     # If Docker was started solely to prepare loam-browser or migrate the login
     # and no other container needs it, put Docker and containerd back to sleep.
+    # Otherwise, if Docker remains active (e.g. for an app container), make sure
+    # the quiet-period watcher timer is active without waking an asleep Docker.
     if os.geteuid() == 0 and dep.BROWSER_PROXY_UNIT in files:
         slept = loam_browser_proxy.DockerController().sleep_docker_if_unused()
         if slept.get("stopped_docker"):
             print("  docker: asleep (no container needs Docker)")
+        elif dep.docker_active():
+            verb = "restart" if dep.DOCKER_IDLE_WATCH_TIMER in changed else "start"
+            run(["systemctl", verb, dep.DOCKER_IDLE_WATCH_TIMER_NAME])
     # Older updaters (<= 0.2.33) do not re-exec into the new release or know
     # about the `swap` step; ensure tiered swap here when the host has none yet.
     if os.geteuid() == 0:
@@ -1250,6 +1258,8 @@ def show(name: str) -> int:
         "browser-proxy-socket": dep.browser_proxy_socket,
         "browser-proxy-unit": dep.browser_proxy_unit,
         "docker-idle-unit": dep.docker_idle_unit,
+        "docker-idle-watch-unit": dep.docker_idle_watch_unit,
+        "docker-idle-watch-timer": dep.docker_idle_watch_timer,
         "sudoers": dep.sudoers,
         "firewall": dep.sight_firewall_script, "firewall-unit": dep.sight_firewall_unit,
         "inbound-firewall": dep.inbound_firewall_script,

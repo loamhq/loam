@@ -1372,16 +1372,36 @@ class Box:
             subprocess.run(
                 ["sudo", "-n", "systemctl", "disable", "--now",
                  "loam-browser-proxy.socket", "loam-browser-proxy.service",
-                 "loam-docker-idle.service"],
+                 "loam-docker-idle.service",
+                 "loam-docker-idle-watch.timer", "loam-docker-idle-watch.service"],
                 capture_output=True, text=True, check=False,
             )
             subprocess.run(["sudo", "-n", "systemctl", "start", "docker.service"],
                            capture_output=True, text=True, check=False)
+        dep_src = runtime() / "lib" / "loam_deploy.py"
+        dep_text = dep_src.read_text(encoding="utf-8") if dep_src.is_file() else ""
+        # On rollback to a release whose browser-proxy predates --after-idle,
+        # remove the watcher timer/service so it cannot invoke an older CLI.
+        if (loam_deploy.DOCKER_IDLE_WATCH_TIMER.exists()
+                and dep_text and "def docker_idle_watch_timer(" not in dep_text):
+            subprocess.run(
+                ["sudo", "-n", "systemctl", "disable", "--now",
+                 loam_deploy.DOCKER_IDLE_WATCH_TIMER_NAME,
+                 loam_deploy.DOCKER_IDLE_WATCH_SERVICE_NAME],
+                capture_output=True, text=True, check=False,
+            )
+            subprocess.run(
+                ["sudo", "-n", "rm", "-f",
+                 str(loam_deploy.DOCKER_IDLE_WATCH_TIMER),
+                 str(loam_deploy.DOCKER_IDLE_WATCH_UNIT)],
+                capture_output=True, text=True, check=False,
+            )
+            subprocess.run(["sudo", "-n", "systemctl", "daemon-reload"],
+                           capture_output=True, text=True, check=False)
         # Belt-and-suspenders if rolling back to a pre-service login release
         # without having gone through restore_container_login_if_older().
-        dep_src = runtime() / "lib" / "loam_deploy.py"
-        if (loam_deploy.AUTHELIA_UNIT.exists() and dep_src.is_file()
-                and "def authelia_unit(" not in dep_src.read_text(encoding="utf-8")):
+        if (loam_deploy.AUTHELIA_UNIT.exists()
+                and dep_text and "def authelia_unit(" not in dep_text):
             subprocess.run(
                 ["sudo", "-n", "systemctl", "disable", "--now",
                  loam_deploy.AUTHELIA_SERVICE_NAME, loam_deploy.AUTHELIA_REDIS_SERVICE_NAME],

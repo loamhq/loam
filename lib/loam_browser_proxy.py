@@ -36,6 +36,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -45,6 +46,7 @@ import urllib.request
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -67,6 +69,7 @@ PROXY_CODE_FILES = (
 )
 
 BROWSER_IDLE_S = float(os.environ.get("LOAM_BROWSER_IDLE_S") or 600)
+DOCKER_IDLE_S = float(os.environ.get("LOAM_DOCKER_IDLE_S") or BROWSER_IDLE_S)
 PROXY_IDLE_S = float(os.environ.get("LOAM_BROWSER_PROXY_IDLE_S") or 30)
 SSE_DISCONNECT_GRACE_S = float(os.environ.get("LOAM_BROWSER_SSE_GRACE_S") or 15)
 WAKE_TIMEOUT_S = float(os.environ.get("LOAM_BROWSER_WAKE_TIMEOUT_S") or 45)
@@ -287,6 +290,44 @@ def _file_lock(lock_path: Path = LOCK_PATH):
             fcntl.flock(fh, fcntl.LOCK_UN)
 
 
+_DOCKER_TS_FRAC_RE = re.compile(r"(\.\d{6})\d+")
+DOCKER_SOCK_PATHS = frozenset({"/run/docker.sock", "/var/run/docker.sock"})
+
+
+def _parse_docker_timestamp(raw: str) -> float | None:
+    """Parse a Docker RFC3339 timestamp (including nanosecond precision) into POSIX seconds.
+    Returns None for Docker's zero timestamp (0001-01-01...) or unparseable values."""
+    text = (raw or "").strip()
+    if not text or text.startswith("0001-"):
+        return None
+    text = _DOCKER_TS_FRAC_RE.sub(r"\1", text)
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.year < 2000:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
+def docker_clients_connected(proc_net_unix: Path = Path("/proc/net/unix")) -> bool:
+    """True when any client holds an active (SS_CONNECTED) connection on Docker's socket.
+    Reads /proc/net/unix only; never connects to docker.sock."""
+    try:
+        text = proc_net_unix.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    for line in text.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) >= 8 and parts[5] == "03" and parts[7] in DOCKER_SOCK_PATHS:
+            return True
+    return False
+
+
 def _run(argv: list[str], timeout: float = 120) -> subprocess.CompletedProcess:
     return subprocess.run(argv, capture_output=True, text=True, check=False, timeout=timeout)
 
@@ -304,6 +345,9 @@ class DockerController:
         lock_path: Path = LOCK_PATH,
         state_path: Path = STATE_PATH,
         runner: Callable[[list[str], float], subprocess.CompletedProcess] | None = None,
+        monotonic: Callable[[], float] | None = None,
+        now: Callable[[], float] | None = None,
+        proc_net_unix: Path = Path("/proc/net/unix"),
     ) -> None:
         self.backend_host = backend_host
         self.backend_port = backend_port
@@ -312,6 +356,9 @@ class DockerController:
         self.lock_path = lock_path
         self.state_path = state_path
         self._run = runner or _run
+        self._monotonic = monotonic or time.monotonic
+        self._now = now or time.time
+        self.proc_net_unix = proc_net_unix
 
     def docker_active(self) -> bool:
         res = self._run(["systemctl", "is-active", "--quiet", "docker.service"], 15)
@@ -467,20 +514,106 @@ class DockerController:
             write_state(info, self.state_path)
             return info
 
-    def sleep_docker_if_unused(self) -> dict[str, Any]:
-        """Stop Docker and containerd when neither loam-browser nor any other container needs them."""
+    def docker_active_age_s(self) -> float | None:
+        """Seconds since docker.service entered the active state (never wakes Docker)."""
+        res = self._run(
+            ["systemctl", "show", "-p", "ActiveEnterTimestampMonotonic", "--value", "docker.service"],
+            15,
+        )
+        if res.returncode != 0:
+            return None
+        try:
+            ts_us = int((res.stdout or "").strip())
+        except ValueError:
+            return None
+        if ts_us <= 0:
+            return None
+        return max(0.0, self._monotonic() - (ts_us / 1_000_000.0))
+
+    def last_container_finish_age_s(self) -> float | None:
+        """Seconds since the most recent container finished, or None if no container has
+        a real FinishedAt timestamp. Call only when docker.service is already active."""
+        ids = self._run(["docker", "ps", "-aq"], 15)
+        if ids.returncode != 0:
+            return 0.0  # fail safe: treat as just active if inspection fails
+        cids = [ln.strip() for ln in (ids.stdout or "").splitlines() if ln.strip()]
+        if not cids:
+            return None
+        insp = self._run(["docker", "inspect", "-f", "{{.State.FinishedAt}}", *cids], 20)
+        if insp.returncode != 0:
+            return 0.0
+        latest: float | None = None
+        for line in (insp.stdout or "").splitlines():
+            ts = _parse_docker_timestamp(line)
+            if ts is not None and (latest is None or ts > latest):
+                latest = ts
+        if latest is None:
+            return None
+        return max(0.0, self._now() - latest)
+
+    def browser_proxy_busy(self) -> bool:
+        """True when loam-browser-proxy.service is active and holding an open browser
+        session or in-flight tool call. Never wakes loam-browser-proxy.socket."""
+        res = self._run(
+            ["systemctl", "is-active", "--quiet", dep.BROWSER_PROXY_SERVICE_NAME], 15,
+        )
+        if res.returncode != 0:
+            return False
+        open_browsers, in_flight = _active_browser_sessions()
+        return open_browsers > 0 or in_flight > 0
+
+    def sleep_docker_if_unused(self, *, quiet_s: float = 0.0) -> dict[str, Any]:
+        """Stop Docker and containerd when neither loam-browser nor any other container needs them.
+        When ``quiet_s > 0``, wait until Docker has been active and quiet (no connected
+        docker.sock client, no active browser-proxy session, and no recently finished
+        container) for at least ``quiet_s`` seconds before stopping it."""
         with _file_lock(self.lock_path):
             stopped_docker = False
-            if self.docker_active() and not self.browser_running() and not self.other_containers_need_docker():
-                self._run(["systemctl", "stop", "docker.service", "containerd.service"], 60)
-                stopped_docker = not self.docker_active()
-            info = {
-                "state": "awake" if self.browser_running() else "asleep",
-                "docker_active": self.docker_active(),
+            reason = "ok"
+            extra: dict[str, Any] = {}
+            if not self.docker_active():
+                reason = "already_asleep"
+            elif self.browser_running():
+                reason = "browser_running"
+            elif self.other_containers_need_docker():
+                reason = "containers_need_docker"
+            else:
+                can_stop = True
+                if quiet_s > 0:
+                    extra["quiet_seconds"] = quiet_s
+                    if self.browser_proxy_busy():
+                        can_stop = False
+                        reason = "browser_proxy_busy"
+                    elif docker_clients_connected(self.proc_net_unix):
+                        can_stop = False
+                        reason = "docker_client_connected"
+                    else:
+                        active_age = self.docker_active_age_s()
+                        if active_age is None:
+                            can_stop = False
+                            reason = "unknown_active_age"
+                        else:
+                            finish_age = self.last_container_finish_age_s()
+                            idle_for = active_age if finish_age is None else min(active_age, finish_age)
+                            extra["idle_seconds"] = round(idle_for, 1)
+                            if idle_for < quiet_s:
+                                can_stop = False
+                                reason = "within_quiet_period"
+                if can_stop:
+                    self._run(["systemctl", "stop", "docker.service", "containerd.service"], 60)
+                    stopped_docker = not self.docker_active()
+                    reason = "slept" if stopped_docker else "stop_failed"
+            active_now = self.docker_active()
+            info: dict[str, Any] = {
+                "state": "awake" if (active_now and self.browser_running()) else "asleep",
+                "docker_active": active_now,
                 "stopped_docker": stopped_docker,
-                "updated_at": time.time(),
+                "reason": reason,
+                "updated_at": self._now(),
+                **extra,
             }
-            write_state(info, self.state_path)
+            if quiet_s <= 0 or stopped_docker:
+                write_state(info, self.state_path)
             return info
 
 
@@ -1383,8 +1516,21 @@ def inherited_socket() -> socket.socket | None:
 def run_cli(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     ctrl = DockerController()
-    if args == ["--sleep-if-idle"]:
-        print(json.dumps(ctrl.sleep_docker_if_unused()))
+    if args and args[0] == "--sleep-if-idle":
+        quiet_s = 0.0
+        rest = args[1:]
+        if not rest:
+            quiet_s = 0.0
+        elif rest == ["--after-idle"]:
+            quiet_s = DOCKER_IDLE_S
+        elif len(rest) == 2 and rest[0] == "--after-idle":
+            quiet_s = max(0.0, float(rest[1]))
+        elif len(rest) == 1 and rest[0].startswith("--after-idle="):
+            quiet_s = max(0.0, float(rest[0].split("=", 1)[1]))
+        else:
+            print(f"browser-proxy: unexpected arguments: {' '.join(args)}", file=sys.stderr)
+            return 2
+        print(json.dumps(ctrl.sleep_docker_if_unused(quiet_s=quiet_s)))
         return 0
     if args == ["--status"]:
         running = ctrl.browser_running()
