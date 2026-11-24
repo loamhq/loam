@@ -223,17 +223,29 @@ class DockerController:
             self._run(["systemctl", "start", dep.loam_broker.WALL_SERVICE], 30)
 
     def _wait_tcp(self, timeout: float = WAKE_TIMEOUT_S) -> None:
+        """Wait until Playwright MCP inside the container answers HTTP, not just
+        docker-proxy's early TCP accept before Node has bound the port."""
         deadline = time.monotonic() + timeout
+        probe = (
+            f"GET /mcp HTTP/1.1\r\n"
+            f"Host: {self.backend_host}:{self.backend_port}\r\n"
+            f"Connection: close\r\n\r\n"
+        ).encode("latin-1")
         last_err = ""
         while time.monotonic() < deadline:
             try:
-                with socket.create_connection((self.backend_host, self.backend_port), timeout=1.0):
-                    return
+                with socket.create_connection((self.backend_host, self.backend_port), timeout=1.0) as sock:
+                    sock.settimeout(1.0)
+                    sock.sendall(probe)
+                    head = sock.recv(16)
+                    if head.startswith(b"HTTP/1."):
+                        return
+                    last_err = f"empty/non-HTTP probe reply ({head!r})"
             except OSError as exc:
                 last_err = str(exc)
             time.sleep(0.05)
         raise RuntimeError(
-            f"{self.container_name} did not answer on {self.backend_host}:{self.backend_port} "
+            f"{self.container_name} did not answer HTTP on {self.backend_host}:{self.backend_port} "
             f"within {timeout:.0f}s ({last_err})"
         )
 
@@ -754,7 +766,7 @@ class BrowserProxy:
                 st, reason, rhdrs, rbody = await self._upstream_roundtrip(
                     "POST", target, headers, body, real_sid=real_sid,
                 )
-            except (ConnectionError, OSError):
+            except (ConnectionError, OSError, asyncio.IncompleteReadError):
                 # Container stopped or restarted externally; re-wake once.
                 await self.ensure_awake(force=True)
                 if session is not None:
