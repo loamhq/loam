@@ -232,7 +232,15 @@ def run_proxy_tests() -> None:
         check("non-loopback Host header gets 403 without waking",
               st == 403 and fake.wakes == 0, (st, fake.wakes))
 
-        # 3. Handshake + tools/list + ping + resources/list + SSE GET NEVER wake browser
+        # 2.5 Pre-init discovery probe (Claude Code 2.1.328 sends server/discover before initialize)
+        st_d, _, msg_d = rpc_post(pport, {
+            "jsonrpc": "2.0", "id": "server-discover-probe-1", "method": "server/discover", "params": {},
+        })
+        check("pre-init server/discover returns 400 Server not initialized without waking",
+              st_d == 400 and (msg_d or {}).get("error", {}).get("code") == -32000 and fake.wakes == 0,
+              (st_d, msg_d, fake.wakes))
+
+        # 3. Handshake + tools/list + ping + resources/list + logging/setLevel + SSE GET NEVER wake browser
         st, hdrs, msg = rpc_post(pport, {
             "jsonrpc": "2.0", "id": 1, "method": "initialize",
             "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "c1", "version": "1"}},
@@ -245,11 +253,12 @@ def run_proxy_tests() -> None:
         st_t, _, msg_t = rpc_post(pport, {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}, sid=sid1)
         st_p, _, msg_p = rpc_post(pport, {"jsonrpc": "2.0", "id": 3, "method": "ping", "params": {}}, sid=sid1)
         st_r, _, msg_r = rpc_post(pport, {"jsonrpc": "2.0", "id": 4, "method": "resources/list", "params": {}}, sid=sid1)
+        st_l, _, msg_l = rpc_post(pport, {"jsonrpc": "2.0", "id": 5, "method": "logging/setLevel", "params": {"level": "info"}}, sid=sid1)
         tools = msg_t["result"]["tools"]
-        check("notifications/initialized, tools/list (25 tools), ping, resources/list stay asleep",
-              (st_n, st_t, len(tools), st_p, msg_p["result"], st_r, msg_r["error"]["code"], fake.wakes)
-              == (202, 200, 25, 200, {}, 200, -32601, 0),
-              (st_n, st_t, len(tools), fake.wakes))
+        check("notifications/initialized, tools/list (25 tools), ping, resources/list, logging/setLevel stay asleep",
+              (st_n, st_t, len(tools), st_p, msg_p["result"], st_r, msg_r["error"]["code"], st_l, msg_l["error"]["code"], fake.wakes)
+              == (202, 200, 25, 200, {}, 200, -32601, 200, -32601, 0),
+              (st_n, st_t, len(tools), st_l, fake.wakes))
 
         # Open an SSE stream on sid1 (as Claude/Agy do) -> still asleep
         sse_sock = socket.create_connection(("127.0.0.1", pport), timeout=5)

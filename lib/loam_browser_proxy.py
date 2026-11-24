@@ -538,18 +538,24 @@ class BrowserProxy:
             "idle_seconds": self.idle_s,
         }
 
-    async def ensure_awake(self, *, force: bool = False) -> None:
+    async def ensure_awake(self, *, force: bool = False, reason: str = "tools/call") -> None:
         async with self.lifecycle_lock:
             if self.state == "awake" and not force:
                 return
             self.state = "starting"
             try:
-                await asyncio.to_thread(self.controller.wake)
+                info = await asyncio.to_thread(self.controller.wake)
             except Exception:
                 self.state = "awake" if await asyncio.to_thread(self.controller.browser_running) else "asleep"
                 raise
             self.state = "awake"
             self.last_tool_activity = time.monotonic()
+            print(json.dumps({
+                "event": "wake",
+                "reason": reason,
+                "started_docker": bool(isinstance(info, dict) and info.get("started_docker")),
+                "wake_seconds": info.get("wake_seconds") if isinstance(info, dict) else None,
+            }), flush=True)
 
     async def _upstream_roundtrip(
         self,
@@ -672,7 +678,10 @@ class BrowserProxy:
         raw_body: bytes,
         keep_alive: bool,
     ) -> tuple[bytes | None, ClientSession | None]:
-        """Handle MCP methods that do not need a running browser. Returns (response, session) or (None, session)."""
+        """Handle MCP methods that do not need a running browser.
+        Playwright MCP advertises only `capabilities.tools`, so ONLY `tools/call`
+        needs to wake Docker/Chromium; every handshake, discovery probe,
+        notification, list, ping, or unsupported capability returns locally."""
         method = msg.get("method")
         req_id = msg.get("id")
         if method == "initialize":
@@ -691,30 +700,36 @@ class BrowserProxy:
             self.sessions[client_sid] = sess
             payload = {"jsonrpc": "2.0", "id": req_id, "result": init_res}
             return _mcp_payload_response(payload, accept=accept, sid=client_sid, keep_alive=keep_alive), sess
-        if method == "notifications/initialized" or (isinstance(method, str) and method.startswith("notifications/") and req_id is None):
-            if session is not None and method == "notifications/initialized":
-                session.initialized_sent = True
-            if session is None or session.real_sid is None:
-                return _http_response(202, "Accepted", b"", content_type="text/plain", keep_alive=keep_alive), session
+        if session is None:
+            # Matches Playwright MCP's own uninitialized response (e.g. Claude
+            # Code's pre-init `server/discover` probe) without waking Docker.
+            err = {"jsonrpc": "2.0", "error": {"code": -32000, "message": "Bad Request: Server not initialized"}, "id": None}
+            return _http_response(
+                400, "Bad Request", json.dumps(err).encode("utf-8"),
+                content_type="application/json", keep_alive=keep_alive,
+            ), None
+        if method == "tools/call":
             return None, session
+        if method is None or (isinstance(method, str) and method.startswith("notifications/") and "id" not in msg):
+            if method == "notifications/initialized":
+                session.initialized_sent = True
+            return _http_response(202, "Accepted", b"", content_type="text/plain", keep_alive=keep_alive), session
         if method == "ping":
             payload = {"jsonrpc": "2.0", "id": req_id, "result": {}}
             return _mcp_payload_response(
-                payload, accept=accept, sid=session.client_sid if session else None, keep_alive=keep_alive,
+                payload, accept=accept, sid=session.client_sid, keep_alive=keep_alive,
             ), session
         if method == "tools/list":
-            if session is not None and session.real_sid is not None and self.state == "awake":
-                return None, session
             payload = {"jsonrpc": "2.0", "id": req_id, "result": {"tools": self.schema["tools"]}}
             return _mcp_payload_response(
-                payload, accept=accept, sid=session.client_sid if session else None, keep_alive=keep_alive,
+                payload, accept=accept, sid=session.client_sid, keep_alive=keep_alive,
             ), session
-        if method in ("resources/list", "prompts/list", "resources/templates/list"):
-            payload = {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32601, "message": "Method not found"}}
-            return _mcp_payload_response(
-                payload, accept=accept, sid=session.client_sid if session else None, keep_alive=keep_alive,
-            ), session
-        return None, session
+        if "id" not in msg:
+            return _http_response(202, "Accepted", b"", content_type="text/plain", keep_alive=keep_alive), session
+        payload = {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32601, "message": "Method not found"}}
+        return _mcp_payload_response(
+            payload, accept=accept, sid=session.client_sid, keep_alive=keep_alive,
+        ), session
 
     async def _forward_mcp_post(
         self,
@@ -729,7 +744,11 @@ class BrowserProxy:
         if session is not None:
             session.in_flight += 1
         try:
-            await self.ensure_awake()
+            wake_reason = "tools/call"
+            if isinstance(msg, dict):
+                tname = (msg.get("params") or {}).get("name") if isinstance(msg.get("params"), dict) else None
+                wake_reason = f"tools/call:{tname}" if tname else str(msg.get("method") or "tools/call")
+            await self.ensure_awake(reason=wake_reason)
             real_sid = await self._materialize(session) if session is not None else None
             try:
                 st, reason, rhdrs, rbody = await self._upstream_roundtrip(
@@ -861,7 +880,7 @@ class BrowserProxy:
         """Fallback raw proxy for legacy /sse and /messages endpoints."""
         self.in_flight += 1
         try:
-            await self.ensure_awake()
+            await self.ensure_awake(reason=f"legacy:{target}")
             up_reader, up_writer = await asyncio.wait_for(
                 asyncio.open_connection(self.backend_host, self.backend_port), timeout=10.0,
             )
@@ -981,12 +1000,44 @@ class BrowserProxy:
                                 if not keep_alive:
                                     return
                                 continue
-                        elif sid and session is None:
+                        elif session is None:
+                            status_code, reason_txt, err_code, err_msg = (
+                                (404, "Not Found", -32001, "Session not found")
+                                if sid else (400, "Bad Request", -32000, "Bad Request: Server not initialized")
+                            )
                             writer.write(_http_response(
-                                404, "Not Found",
-                                json.dumps({"jsonrpc": "2.0", "error": {"code": -32001, "message": "Session not found"}, "id": None}).encode(),
+                                status_code, reason_txt,
+                                json.dumps({"jsonrpc": "2.0", "error": {"code": err_code, "message": err_msg}, "id": None}).encode(),
                                 content_type="application/json", keep_alive=keep_alive,
                             ))
+                            await writer.drain()
+                            if not keep_alive:
+                                return
+                            continue
+                        elif isinstance(parsed, list) and not any(
+                            isinstance(item, dict) and item.get("method") == "tools/call" for item in parsed
+                        ):
+                            replies = []
+                            for item in parsed:
+                                if not isinstance(item, dict):
+                                    continue
+                                m = item.get("method")
+                                if m == "notifications/initialized":
+                                    session.initialized_sent = True
+                                elif m == "ping" and "id" in item:
+                                    replies.append({"jsonrpc": "2.0", "id": item["id"], "result": {}})
+                                elif m == "tools/list" and "id" in item:
+                                    replies.append({"jsonrpc": "2.0", "id": item["id"], "result": {"tools": self.schema["tools"]}})
+                                elif "id" in item:
+                                    replies.append({"jsonrpc": "2.0", "id": item["id"], "error": {"code": -32601, "message": "Method not found"}})
+                            if replies:
+                                encoded = json.dumps(replies, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+                                writer.write(_http_response(
+                                    200, "OK", encoded, content_type="application/json",
+                                    extra_headers=[("Mcp-Session-Id", session.client_sid)], keep_alive=keep_alive,
+                                ))
+                            else:
+                                writer.write(_http_response(202, "Accepted", b"", content_type="text/plain", keep_alive=keep_alive))
                             await writer.drain()
                             if not keep_alive:
                                 return
@@ -1055,14 +1106,20 @@ class BrowserProxy:
                         and not any(s.browser_open for s in self.sessions.values())
                         and (now2 - self.last_tool_activity) >= self.idle_s):
                     self.state = "stopping"
+                    sleep_info = None
                     try:
-                        await asyncio.to_thread(self.controller.sleep)
+                        sleep_info = await asyncio.to_thread(self.controller.sleep)
                     finally:
                         for sess in self.sessions.values():
                             if not sess.browser_open:
                                 sess.real_sid = None
                         self.state = "awake" if await asyncio.to_thread(self.controller.browser_running) else "asleep"
                     slept = self.state == "asleep"
+                    if slept:
+                        print(json.dumps({
+                            "event": "sleep",
+                            "stopped_docker": bool(isinstance(sleep_info, dict) and sleep_info.get("stopped_docker")),
+                        }), flush=True)
 
         if (self.socket_activated and self.state == "asleep"
                 and not self.sessions and self.in_flight == 0
