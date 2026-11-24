@@ -110,33 +110,26 @@ def main() -> int:
                          capture_output=True, text=True, env=dict(os.environ))
     check("bin/library seed-vault exits 0", (out.returncode, out.stderr), (0, ""))
     shape = [p for p in tree(lc.VAULT) if "/skills/loam-" not in p and "skills/loam-" not in p]
-    check("a blank install's vault: About me, Projects/Loam explainer, Loam files, no Inbox/Daily/Images",
+    check("a blank install's vault: About me, Projects/Loam explainer, Loam files, no vault README or Inbox/Daily/Images",
           shape, ["About me.md", "Attachments/", "Boards/", "Conversations/", "Projects/",
                   "Projects/Loam/", "Projects/Loam/Start here.html",
-                  "README.md", "System/", "System/Dictation terms.md", "System/Loam/", "System/Loam/README.md",
+                  "System/", "System/Dictation terms.md", "System/Loam/", "System/Loam/README.md",
                   "System/Loam/skills/", "System/skills/", "System/skills/README.md"])
     check("...and Loam's shelf is the library, file for file",
           sk.library_diff(), {"added": [], "removed": [], "changed": []})
-    readme = (lc.VAULT / "README.md").read_text()
-    check("the README names each folder by its configured name",
-          all(f"`{n}/`" in readme for n in ("Conversations", "Projects",
-                                             "Attachments", "Boards", "System", "System/Loam",
-                                             "System/skills")), True)
-    check("the README stays plain-spoken (no config paths or SKILL.md jargon)",
-          "/etc/loam/loam.toml" not in readme and "[vault]" not in readme and "SKILL.md" not in readme,
-          True)
+    check("no vault-root README.md is created on a new install",
+          (lc.VAULT / "README.md").exists(), False)
     own_readme = (lc.VAULT / "System" / "skills" / "README.md").read_text()
     check("System/skills/README.md does not falsely claim Marketplace auto-installs skills",
           "Marketplace skills install here" not in own_readme, True)
 
-    (lc.VAULT / "README.md").write_text("mine\n")
     (lc.VAULT / "System" / "skills" / "README.md").write_text("mine too\n")
     made = sk.seed_vault(lc.VAULT)
-    check("seeding again makes nothing", made, [])
-    check("...and leaves the person's README and shelf as they wrote them",
-          ((lc.VAULT / "README.md").read_text(),
-           (lc.VAULT / "System" / "skills" / "README.md").read_text()),
-          ("mine\n", "mine too\n"))
+    check("seeding again makes nothing and does not create a vault-root README.md",
+          (made, (lc.VAULT / "README.md").exists()), ([], False))
+    check("...and leaves the person's shelf README as they wrote it",
+          (lc.VAULT / "System" / "skills" / "README.md").read_text(),
+          "mine too\n")
 
     numbered = TMP / "numbered"
     folders = {"inbox": "00_INBOX", "failure_log": "00_INBOX/from-agents/loam-wake-failures.md",
@@ -150,7 +143,7 @@ def main() -> int:
                  "98_ATTACHMENTS/", "Boards/", "99_SYSTEM/Dictation terms.md", "99_SYSTEM/skills/", "99_SYSTEM/Loam/ (installed)"])
     check("...and an existing vault gets no About me.md",
           (numbered / "About me.md").exists(), False)
-    check("...an existing vault's own folders and README are untouched",
+    check("...an existing vault's own folders and owner README are untouched",
           ((numbered / "99_SYSTEM" / "conventions").is_dir(),
            (numbered / "README.md").read_text()), (True, "an old vault\n"))
 

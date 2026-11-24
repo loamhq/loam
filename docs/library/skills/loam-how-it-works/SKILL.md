@@ -210,19 +210,22 @@ step where there is one, and clears it when agents can run again. A fresh instal
 **Files** brings together **Your files** (the vault: plain Markdown and files
 written by the owner or their agents, for the owner), **Agent files** (each
 agent's workspace and the shared Commons: theirs to write, the owner's to read),
-and **Shared** when Sharing is on. The vault's `README.md`
-says what each folder is for, and `About me.md` at its top is what the agents
-know about the owner (agents add to it, and the owner can read and edit it).
-New installs seed `About me.md`, `README.md`, `Projects/Loam/Start here.html`,
-and the machinery folders.
+and **Shared** when Sharing is on. `About me.md` at the top of the vault is what
+the agents know about the owner (agents add to it, and the owner can read and
+edit it). New installs seed `About me.md`, `Projects/Loam/Start here.html`, and
+the machinery folders (no vault-root `README.md`).
 
-Loam's machinery folders — conversations, attachments, boards and system —
-sit behind one quiet **Loam files** row at the bottom of **Your files** (still
-reachable by search, wiki-links, deep links and from chats). Wake failure logs
-(`System/loam-wake-failures.md`), the generated schedule table
-(`System/schedule.md`), the platform engineer's role and project files
-(`System/engineer/`), and chat boards (`Boards/`, when the Boards plugin is on)
-live inside **Loam files** rather than the owner's main folders.
+Loam's machinery folders — conversations (saved chat records written by Loam;
+read-only, never edit them), attachments, boards and system — sit behind one
+quiet **Loam files** row at the bottom of **Your files** (still reachable by
+search, wiki-links, deep links and from chats). Inside `System/`, `System/Loam/`
+holds Loam's built-in docs and skills and is replaced whole on each update
+(never edit files there), while `System/skills/` holds shared skills that
+updates never touch. Wake failure logs (`System/loam-wake-failures.md`), the
+generated schedule table (`System/schedule.md`), the platform engineer's role
+and project files (`System/engineer/`), and chat boards (`Boards/`, when the
+Boards plugin is on) also live inside **Loam files** rather than the owner's
+main folders.
 
 On the **Files** home, optional **Files quick actions** (**New note**, **Today's
 note**) come from the built-in `quick-actions` plugin (off by default on new

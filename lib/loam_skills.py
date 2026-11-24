@@ -372,37 +372,6 @@ def carry_kept(src: Path, dst: Path) -> None:
 
 # -- the starter vault ------------------------------------------------------------
 
-def vault_readme(folders: dict[str, str] | None = None) -> str:
-    f = {**lc.VAULT_FOLDERS, **(folders or {})}
-    system = f["system"]
-    projects = f["projects"]
-    boards = f["boards"]
-    return f"""# Your files
-
-Everything here belongs to you: plain notes and files that you and your agents
-can read and edit. Add folders, reorganize, or edit and delete this note
-whenever you like.
-
-In Files, this folder is **Your files**, each agent’s own workspace is in
-**Agent files**, and the folders Loam uses to run sit at the bottom under
-**Loam files** (you’ll rarely need to open them).
-
-| File or folder | What it is for |
-|---|---|
-| `{ABOUT_ME}` | What your agents know about you. They add to it as they learn; read or edit it anytime. |
-| `{projects}/` | Your projects and notes. |
-| `{f['conversations']}/` | **Loam files** — saved records of your chats, written automatically. Read-only. |
-| `{f['attachments']}/` | **Loam files** — images and files you attach in chats. |
-| `{boards}/` | **Loam files** — chat boards, when you use the Boards plugin. |
-| `{system}/` | **Loam files** — shared skills and Loam’s own settings and docs. |
-| `{system}/{LOAM_DIR}/` | Loam’s built-in docs and skills, refreshed on each update. |
-| `{system}/{OWN_DIR}/` | Shared skills for all your agents. Updates never touch it. |
-
-Extra folders such as `Inbox/`, `Daily/` or `Images/` appear only if you turn
-on Files quick actions or Images in Settings › Plugins, or make them yourself.
-"""
-
-
 OWN_SHELF_README = """# Shared skills
 
 Every agent reads the skills on this shelf, whatever its provider. A skill is
@@ -431,19 +400,20 @@ def seed_dictation_terms(system: Path) -> bool:
 def seed_vault(vault: Path, folders: dict[str, str] | None = None,
                library: Path | None = None) -> list[str]:
     """The starter vault a blank install gets, at ``vault``: ``About me.md``,
-    ``<projects>/Loam/Start here.html``, the Loam files folders
-    (conversations, attachments, boards, system + library + skills shelf), and
-    ``README.md``. No Inbox, Daily or Images folders are created on a new
-    install. Writes only what is missing (the library excepted, which is Loam's
-    and installed whole), so on a vault that already exists it moves nothing;
-    ``About me.md`` and ``Start here.html`` only on a fresh vault (one with no
-    README yet). Returns what it made."""
+    ``<projects>/Loam/Start here.html``, and the Loam files folders
+    (conversations, attachments, boards, system + library + skills shelf).
+    No vault-root ``README.md``, ``Inbox``, ``Daily`` or ``Images`` folders are
+    created on a new install. Writes only what is missing (the library
+    excepted, which is Loam's and installed whole), so on a vault that already
+    exists it moves nothing; ``About me.md`` and ``Start here.html`` only on a
+    fresh vault (one with no visible entries yet). Returns what it made."""
     f = {**lc.VAULT_FOLDERS, **(folders or {})}
     made = []
-    readme = vault / "README.md"
-    # A new vault's (no README yet): an existing one is never handed starter
-    # pages it did not have.
-    fresh = not readme.exists()
+    # A brand-new vault has no visible files or folders yet; an existing vault
+    # is never handed starter pages it did not have (or that the owner removed).
+    fresh = not vault.exists() or not any(
+        not p.name.startswith(".") for p in vault.iterdir()
+    )
     for key in ("conversations", "projects", "attachments", "boards", "system"):
         path = vault / f[key]
         if not path.is_dir():
@@ -468,9 +438,6 @@ def seed_vault(vault: Path, folders: dict[str, str] | None = None,
             explainer.write_text(START_HERE_SRC.read_text(encoding="utf-8"),
                                  encoding="utf-8")
             made.append(f"{f['projects']}/{LOAM_DIR}/{START_HERE}")
-    if not readme.exists():
-        readme.write_text(vault_readme(f), encoding="utf-8")
-        made.append("README.md")
     dst = vault / f["system"] / LOAM_DIR
     before = dst.is_dir()
     diff = install_library(library or LIBRARY, dest=dst)

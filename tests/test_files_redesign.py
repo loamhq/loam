@@ -108,15 +108,15 @@ seed_persona("ada", "Ada")
 seed_persona("finn", "Finn")
 
 # ---------------------------------------------------------------------------
-# 1. New install seed: About me, Start here.html, README, Loam files only
+# 1. New install seed: About me, Start here.html, Loam files only (no vault README)
 # ---------------------------------------------------------------------------
 seed_vault = TMP / "fresh-seed-vault"
 created = skills.seed_vault(seed_vault)
 check(
-    "new install seed: About me.md, Start here.html, README.md exist",
+    "new install seed: About me.md and Start here.html exist, no vault-root README.md",
     (seed_vault / "About me.md").is_file()
     and (seed_vault / "Projects" / "Loam" / "Start here.html").is_file()
-    and (seed_vault / "README.md").is_file(),
+    and not (seed_vault / "README.md").exists(),
     created,
 )
 check(
@@ -863,37 +863,44 @@ check(
 )
 
 # ---------------------------------------------------------------------------
-# 10. Stock README refresh, engineer/schedule migration, schedule & reviewer text
+# 10. Stock README removal, engineer/schedule migration, schedule & reviewer text
 # ---------------------------------------------------------------------------
 readme_vault = TMP / "readme-migration-vault"
 readme_vault.mkdir(parents=True)
-old_nov19_readme = cleanup._legacy_stock_readmes()[1]
-(readme_vault / "README.md").write_text(old_nov19_readme, encoding="utf-8")
+stock_variants = cleanup._stock_vault_readmes()
+all_removed = True
+for idx, variant in enumerate(stock_variants):
+    (readme_vault / "README.md").write_text(variant, encoding="utf-8")
+    r_res = cleanup.remove_stock_vault_readme(readme_vault)
+    if r_res["status"] != "removed" or (readme_vault / "README.md").exists():
+        all_removed = False
+        break
+check(
+    "README removal: every historical untouched stock vault README is removed on update",
+    all_removed and len(stock_variants) >= 7,
+    len(stock_variants),
+)
+check(
+    "README removal: absent README stays absent and is never re-created",
+    cleanup.remove_stock_vault_readme(readme_vault)["status"] == "absent"
+    and not (readme_vault / "README.md").exists(),
+)
+(readme_vault / "README.md").write_text("# My own notes\n", encoding="utf-8")
+kept_res = cleanup.remove_stock_vault_readme(readme_vault)
+check(
+    "README removal: owner-edited README is kept untouched",
+    kept_res["status"] == "kept" and (readme_vault / "README.md").read_text(encoding="utf-8") == "# My own notes\n",
+    kept_res,
+)
+
 (readme_vault / "Projects" / "Loam" / "engineer" / "projects").mkdir(parents=True)
 (readme_vault / "Projects" / "Loam" / "engineer" / "role.md").write_text("# Role\n", encoding="utf-8")
 (readme_vault / "Projects" / "Loam" / "engineer" / "projects" / "loam.md").write_text("# Project\n", encoding="utf-8")
 (readme_vault / "Projects" / "Loam" / "infrastructure").mkdir(parents=True)
 (readme_vault / "Projects" / "Loam" / "infrastructure" / "schedule.md").write_text("# Schedule\n", encoding="utf-8")
 
-r_res = cleanup.refresh_vault_readme(readme_vault)
 e_res = cleanup.migrate_engineer_sources(readme_vault)
 s_res = cleanup.migrate_schedule_page(readme_vault)
-new_readme = (readme_vault / "README.md").read_text(encoding="utf-8")
-check(
-    "README refresh: untouched pre-redesign stock README is replaced with plain current README",
-    r_res["status"] == "refreshed"
-    and "Inbox/boards/general.md" not in new_readme
-    and "/etc/loam/loam.toml" not in new_readme
-    and "SKILL.md" not in new_readme,
-    r_res,
-)
-(readme_vault / "README.md").write_text("# My own notes\n", encoding="utf-8")
-kept_res = cleanup.refresh_vault_readme(readme_vault)
-check(
-    "README refresh: owner-edited README is never overwritten",
-    kept_res["status"] == "kept" and (readme_vault / "README.md").read_text(encoding="utf-8") == "# My own notes\n",
-    kept_res,
-)
 check(
     "migration: stock Projects/Loam/engineer and infrastructure/schedule.md move to System/ and clean empty Loam/",
     len(e_res) == 2 and len(s_res) == 1
@@ -974,6 +981,55 @@ check(
     and "@ROOT@" not in rendered_reviewer
     and "@CONVERSATIONS@" not in rendered_reviewer
     and "@REVIEWER_STATE@" not in rendered_reviewer,
+)
+
+# Renamed agent: provision refreshes CLAUDE.md, existing Codex and Antigravity
+# rendered instructions, and schedule_page() with the agent's display name.
+ines_ws = SPACES / "ines"
+ines_ws.mkdir(parents=True, exist_ok=True)
+(ines_ws / "agent.json").write_text(
+    json.dumps({"name": "ines", "display": "Astrid", "workspace": str(ines_ws), "vault": str(VAULT)}),
+    encoding="utf-8",
+)
+(ines_ws / "soul.md").write_text("# Soul\nAstrid's soul.\n", encoding="utf-8")
+(ines_ws / "config.md").write_text("# Config\n", encoding="utf-8")
+(ines_ws / "map.md").write_text("# Map\n", encoding="utf-8")
+(SPACES / "_shared").mkdir(parents=True, exist_ok=True)
+(SPACES / "_shared" / "reach.md").write_text("# Reach\n", encoding="utf-8")
+prov_mod.render_persona_loading(ines_ws, "Astrid")
+codex_dir = prov_mod.CODEX_HOME / "instructions"
+codex_dir.mkdir(parents=True, exist_ok=True)
+codex_file = codex_dir / "ines.md"
+codex_file.write_text("stale\nYou are Ines.\n", encoding="utf-8")
+agy_file = ines_ws / prov_mod.agy.RULES_FILE
+agy_file.parent.mkdir(parents=True, exist_ok=True)
+agy_file.write_text("stale\nYou are Ines.\n", encoding="utf-8")
+prov_mod.provision_codex(["ines"])
+prov_mod.provision_antigravity(["ines"])
+codex_text = codex_file.read_text(encoding="utf-8")
+agy_text = agy_file.read_text(encoding="utf-8")
+check(
+    "provision: renamed agent renders display name across CLAUDE.md, Codex, and Antigravity",
+    (ines_ws / "CLAUDE.md").read_text(encoding="utf-8").splitlines()[0] == "You are Astrid."
+    and "You are Astrid." in codex_text and "You are Ines." not in codex_text
+    and "You are Astrid." in agy_text and "You are Ines." not in agy_text,
+    (codex_text[:120], agy_text[:120]),
+)
+import loam_schedule  # noqa: E402
+(ines_ws / "crons").mkdir(parents=True, exist_ok=True)
+(ines_ws / "crons" / "reflection.md").write_text(
+    loam_schedule.reflection_record("01:40"),
+    encoding="utf-8",
+)
+fake_units = TMP / "fake-units"
+fake_units.mkdir(parents=True, exist_ok=True)
+(fake_units / "loam-wake-ines.timer").write_text("[Timer]\nOnCalendar=*-*-* 01:40:00\n", encoding="utf-8")
+with patch.object(loam_cron, "AI_LABS", SPACES), patch.object(loam_cron, "UNIT_DIR", fake_units):
+    sched_renamed = loam_cron.schedule_page(VAULT, names=["ines"])
+check(
+    "schedule_page: renamed agent row uses display name Astrid",
+    "| Astrid | reflection |" in sched_renamed and "| Ines |" not in sched_renamed,
+    sched_renamed,
 )
 
 passed = sum(results)

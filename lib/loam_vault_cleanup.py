@@ -453,9 +453,10 @@ def _running_broker_rejects_boards(vault: Path) -> bool:
     return src is not None and "def _allowed_roots(" not in src
 
 
-def _legacy_stock_readmes(folders: dict[str, str] | None = None) -> tuple[str, ...]:
-    """Earlier stock vault README templates, rendered for ``folders`` so an
-    unedited stock README can be refreshed while any owner-edited copy stays."""
+def _stock_vault_readmes(folders: dict[str, str] | None = None) -> tuple[str, ...]:
+    """Every historical stock vault-root README template, rendered for
+    ``folders``, so an unedited stock README is removed on update while any
+    owner-edited copy stays untouched."""
     import loam_skills as sk  # noqa: PLC0415
 
     f = {**lc.VAULT_FOLDERS, **(folders or {})}
@@ -465,6 +466,7 @@ def _legacy_stock_readmes(folders: dict[str, str] | None = None) -> tuple[str, .
     boards = f["boards"]
     convs = f["conversations"]
     att = f["attachments"]
+    general_board = f.get("general_board") or f"{inbox}/boards/general.md"
     loam_dir = sk.LOAM_DIR
     own_dir = sk.OWN_DIR
     about = sk.ABOUT_ME
@@ -473,6 +475,10 @@ def _legacy_stock_readmes(folders: dict[str, str] | None = None) -> tuple[str, .
     old_boards_line = (
         f"| `{inbox}/` | What needs you. Each thread's board is a file in "
         f"`{inbox}/boards/`; the General board is `{inbox}/boards/general.md`. |"
+    )
+    old_boards_line_cfg = (
+        f"| `{inbox}/` | What needs you. Each thread's board is a file in "
+        f"`{boards}/`; the General board is `{general_board}`. |"
     )
     old_plain_inbox = f"| `{inbox}/` | What needs you. |"
     old_v1_tail = (
@@ -485,15 +491,15 @@ def _legacy_stock_readmes(folders: dict[str, str] | None = None) -> tuple[str, .
         "A skill is a folder with a `SKILL.md` in it. An agent's own skill, in its\n"
         "workspace's `skills/`, wins over a shared one with the same name.\n"
     )
-    old_v1_head = (
+    old_v1_intro = (
         "# Your vault\n\n"
         "Everything here is yours: plain Markdown files, readable by you, your agents\n"
         "and any editor. Change any of it. Loam finds its own folders by the names in\n"
         "its configuration (`/etc/loam/loam.toml`, `[vault]`), so a folder renamed\n"
         "there keeps working.\n\n"
-        "| File or folder | What it is for |\n"
-        "|---|---|\n"
     )
+    old_v1_head_folder = old_v1_intro + "| Folder | What it is for |\n|---|---|\n"
+    old_v1_head = old_v1_intro + "| File or folder | What it is for |\n|---|---|\n"
     about_row = f"| `{about}` | What your agents know about you. They add to it as they learn; read it and edit it whenever you like. |\n"
 
     def v2(quick_label: str) -> str:
@@ -522,21 +528,55 @@ def _legacy_stock_readmes(folders: dict[str, str] | None = None) -> tuple[str, .
             "workspace’s `skills/`, wins over a shared one with the same name.\n"
         )
 
-    return (
+    def v3(with_start_here: bool) -> str:
+        proj_desc = (
+            f"Your projects and notes. New installs start with a short guide at `{projects}/Loam/{start_here}`."
+            if with_start_here else "Your projects and notes."
+        )
+        sys_desc = (
+            "**Loam files** — shared skills, dictation terms, and Loam’s own settings and docs."
+            if with_start_here else "**Loam files** — shared skills and Loam’s own settings and docs."
+        )
+        return (
+            "# Your files\n\n"
+            "Everything here belongs to you: plain notes and files that you and your agents\n"
+            "can read and edit. Add folders, reorganize, or edit and delete this note\n"
+            "whenever you like.\n\n"
+            "In Files, this folder is **Your files**, each agent’s own workspace is in\n"
+            "**Agent files**, and the folders Loam uses to run sit at the bottom under\n"
+            "**Loam files** (you’ll rarely need to open them).\n\n"
+            "| File or folder | What it is for |\n"
+            "|---|---|\n"
+            f"| `{about}` | What your agents know about you. They add to it as they learn; read or edit it anytime. |\n"
+            f"| `{projects}/` | {proj_desc} |\n"
+            f"| `{convs}/` | **Loam files** — saved records of your chats, written automatically. Read-only. |\n"
+            f"| `{att}/` | **Loam files** — images and files you attach in chats. |\n"
+            f"| `{boards}/` | **Loam files** — chat boards, when you use the Boards plugin. |\n"
+            f"| `{system}/` | {sys_desc} |\n"
+            f"| `{system}/{loam_dir}/` | Loam’s built-in docs and skills, refreshed on each update. |\n"
+            f"| `{system}/{own_dir}/` | Shared skills for all your agents. Updates never touch it. |\n\n"
+            "Extra folders such as `Inbox/`, `Daily/` or `Images/` appear only if you turn\n"
+            "on Files quick actions or Images in Settings › Plugins, or make them yourself.\n"
+        )
+
+    return tuple(dict.fromkeys((
+        old_v1_head_folder + old_boards_line + "\n" + old_v1_tail,
+        old_v1_head_folder + old_boards_line_cfg + "\n" + old_v1_tail,
         old_v1_head + old_boards_line + "\n" + old_v1_tail,
         old_v1_head + about_row + old_boards_line + "\n" + old_v1_tail,
+        old_v1_head + about_row + old_boards_line_cfg + "\n" + old_v1_tail,
         old_v1_head + about_row + old_plain_inbox + "\n" + old_v1_tail,
         v2("Quick actions"),
         v2("Files quick actions"),
-    )
+        v3(True),
+        v3(False),
+    )))
 
 
-def refresh_vault_readme(vault: Path, *, folders: dict[str, str] | None = None,
-                         dry_run: bool = False) -> dict:
-    """Replace an untouched older stock vault README with the current one.
-    Never overwrites a README the owner edited."""
-    import loam_skills as sk  # noqa: PLC0415
-
+def remove_stock_vault_readme(vault: Path, *, folders: dict[str, str] | None = None,
+                              dry_run: bool = False) -> dict:
+    """Remove an untouched stock vault-root README.md.
+    Never removes or alters a README the owner edited."""
     readme = vault / "README.md"
     if readme.is_symlink() or not readme.is_file():
         return {"status": "absent"}
@@ -544,16 +584,14 @@ def refresh_vault_readme(vault: Path, *, folders: dict[str, str] | None = None,
         current = readme.read_text(encoding="utf-8")
     except OSError:
         return {"status": "unreadable"}
-    wanted = sk.vault_readme(folders)
-    if current == wanted:
-        return {"status": "current"}
-    if current not in _legacy_stock_readmes(folders):
+    if current not in _stock_vault_readmes(folders):
         return {"status": "kept"}
     if not dry_run:
-        tmp = readme.with_name(f".README.{os.getpid()}.tmp")
-        tmp.write_text(wanted, encoding="utf-8")
-        os.replace(tmp, readme)
-    return {"status": "would-refresh" if dry_run else "refreshed"}
+        if _git_tracked(vault, readme):
+            subprocess.run(["git", "-C", str(vault), "rm", "-f", "--", "README.md"],
+                           capture_output=True, text=True, check=False)
+        readme.unlink(missing_ok=True)
+    return {"status": "would-remove" if dry_run else "removed"}
 
 
 def migrate_engineer_sources(vault: Path, *, projects_folder: str | None = None,
@@ -650,7 +688,7 @@ def run_update_migration(vault: Path | None = None, *, dry_run: bool = False,
 
     vroot = (vault or lc.VAULT).resolve()
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    readme = refresh_vault_readme(vroot, dry_run=dry_run)
+    readme = remove_stock_vault_readme(vroot, dry_run=dry_run)
     engineer = migrate_engineer_sources(vroot, dry_run=dry_run)
     schedule = migrate_schedule_page(vroot, dry_run=dry_run)
 
@@ -731,8 +769,8 @@ def format_report(report: dict) -> str:
         return "Deferred vault cleanup until session-broker restarts on the new release."
     lines = []
     readme = report.get("readme") or {}
-    if readme.get("status") in ("refreshed", "would-refresh"):
-        lines.append(f"Refreshed vault README.md ({readme['status']})")
+    if readme.get("status") in ("removed", "would-remove"):
+        lines.append(f"Removed untouched stock vault README.md ({readme['status']})")
     for row in report.get("engineer_moved") or []:
         lines.append(f"Moved engineer file: {row['from']} -> {row['to']} ({row['how']})")
     for row in report.get("schedule_moved") or []:

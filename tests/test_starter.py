@@ -60,8 +60,8 @@ def main() -> int:
     about = lc.VAULT / "About me.md"
     check("seed-vault writes About me.md at the top of the vault",
           ("About me.md" in made, about.read_text().splitlines()[0]), (True, "# About me"))
-    check("...and the vault's README names it",
-          "`About me.md`" in (lc.VAULT / "README.md").read_text(), True)
+    check("...and writes no vault-root README.md",
+          (lc.VAULT / "README.md").exists(), False)
     about.write_text("# About me\n\nSam's own words.\n")
     loam_skills.seed_vault(lc.VAULT)
     check("...and never writes it again", about.read_text(), "# About me\n\nSam's own words.\n")

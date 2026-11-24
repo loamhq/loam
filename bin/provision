@@ -480,6 +480,15 @@ def provision_codex(names: list[str], dry: bool = False) -> None:
                 link.unlink()
             link.symlink_to("../skills")
             changed = True
+        codex_instr = CODEX_HOME / "instructions" / f"{name}.md"
+        if codex_instr.is_file() and (workspace / "CLAUDE.md").is_file():
+            import loam_codex  # noqa: PLC0415
+            rendered = loam_codex.instructions(workspace)
+            if codex_instr.read_text(encoding="utf-8") != rendered:
+                tmp = codex_instr.with_name(f".{codex_instr.name}.{os.getpid()}.tmp")
+                tmp.write_text(rendered, encoding="utf-8")
+                tmp.replace(codex_instr)
+                changed = True
         print(f"  {name}: .codex/ {'written' if changed else 'unchanged'}")
 
 
@@ -524,6 +533,12 @@ def provision_antigravity(names: list[str], dry: bool = False) -> None:
         # A personal skill takes precedence over a shared skill with the same name.
         if loam_skills.render_view(workspace):
             changed = True
+        agy_instr = workspace / agy.RULES_FILE
+        if agy_instr.is_file() and (workspace / "CLAUDE.md").is_file():
+            before = agy_instr.read_text(encoding="utf-8")
+            agy.write_instructions(workspace)
+            if agy_instr.read_text(encoding="utf-8") != before:
+                changed = True
         print(f"  {name}: .agents/ {'written' if changed else 'unchanged'}")
 
 
@@ -2124,8 +2139,10 @@ def main() -> None:
         loam_map_migration.main()
         for name in loam_agents.archived(AI_LABS):
             workspace = AI_LABS / name
-            display = loam_profile.display_name(name, loam_agents.card(name, AI_LABS))
+            card = loam_agents.card(name, AI_LABS)
+            display = loam_profile.display_name(name, card)
             render_persona_loading(workspace, display)
+            loam_profile.sync_display_instructions(name, workspace, card)
             loam_schedule.adopt_default(name)
         return
     # Use the same engineer renderer that the drift check reads.

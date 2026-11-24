@@ -13,6 +13,9 @@ directory you run in. **Your files** (the vault on disk), the other agents'
 workspaces and the shared `commons/` beside them are yours to read and write.
 Loam's machinery folders (conversations, attachments, boards and system —
 grouped under **Loam files** in Files) stay at their configured vault paths.
+Do not edit conversation records (Loam writes them) or `<system>/Loam/`
+(replaced whole on each update; put shared skills in `<system>/skills/`, which
+updates never touch).
 You have a full shell and sudo on the machine. A wake and a cron have the same
 tools as a conversation. What needs the owner's yes first is in your config. If
 you break the machine's own setup (the web server's config, a unit, a setting),

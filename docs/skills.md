@@ -6,11 +6,12 @@ itself is `docs/library/`.*
 
 ## What was decided
 
-- **A blank install's vault starts small** (decision 2a): `Inbox/` with
-  `Conversations/`, `Projects/`, `Attachments/`, `System/`, and a
-  `README.md` saying what each is for. Plain names; every one is read from
-  `[vault]` in the configuration (`docs/config.md`), so a vault with other
-  names (numbered ones, say) keeps them.
+- **A blank install's vault starts small** (decision 2a; updated 2026-11-23):
+  `Conversations/`, `Projects/`, `Attachments/`, `Boards/`, `System/`,
+  `About me.md`, and `Projects/Loam/Start here.html` (no vault-root `README.md`
+  or `Inbox/`). Plain names; every folder is read from `[vault]` in the
+  configuration (`docs/config.md`), so a vault with other names (numbered ones,
+  say) keeps them.
 - **`System/Loam/` is the one corner of the vault an update owns.** It is a
   copy of this repository's `docs/library/`: skills in the Agent Skills format,
   and the docs written as skills, so every agent finds them the same way.
