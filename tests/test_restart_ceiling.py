@@ -160,9 +160,13 @@ for label, live in (("None (the read failed)", None),
           (rc, restarted(w), "counted as busy" in out), (75, False, True))
 
 # A provider can be idle between two messages in the same conversation.
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+import loam_broker as cfg
 now = datetime(2026, 10, 1, 12, tzinfo=timezone.utc)
-resident = row("ada", "idle", kind="thread", idle_since="2026-10-01T11:50:00Z")
+# Exactly THREAD_IDLE_S quiet: past a thread session's idle window, still
+# within a classic session's longer idle window on every box tier.
+at_thread_idle = (now - timedelta(seconds=cfg.THREAD_IDLE_S)).strftime("%Y-%m-%dT%H:%M:%SZ")
+resident = row("ada", "idle", kind="thread", idle_since=at_thread_idle)
 snapshot = {"sessions": [resident], "turns": [], "opening": 0}
 def allows(view):
     return not loam_live.planned_restart_blockers(view, now)

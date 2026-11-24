@@ -418,7 +418,7 @@ async def main():
     fixture_turn = engine_mod.Turn(*key, 0, "fixture")
     due = engine.summary_due(fixture_turn, new_session)
     check("resident session is due at its planned idle reap", round(due - new_session.last_activity),
-          cfg.THREAD_IDLE_S)
+          max(cfg.THREAD_IDLE_S, cfg.DEFAULT_THREAD_IDLE_S))
     new_session.turns = [{"context": {"used": 150_000}}]
     check("a known rotation is due immediately", engine.summary_due(fixture_turn, new_session)
           <= time.time(), True)

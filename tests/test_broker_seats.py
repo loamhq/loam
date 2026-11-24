@@ -210,15 +210,17 @@ async def main() -> None:
     check("a roomy box takes twelve sessions, three times the old cap",
           (len(broker.live()), all(s.is_live() for s in started)), (12, True))
     check("...and the backstop is far above that",
-          cfg.MAX_SESSIONS >= 30, True)
+          cfg.MAX_SESSIONS == max(16, cfg.BOX_MB // 256) and cfg.MAX_SESSIONS > len(started),
+          True)
     await stop_all(broker)
 
     # -- 3. short of memory, the least recently used idle one goes ------
     broker = broker_mod.Broker()
     seats = fill(broker, [3000 - 100 * n for n in range(4)])
-    # 8 GB with 4 GB used elsewhere: four 450s leave 2,200, under the 2,048
-    # reserve plus a 450 start; one ended leaves 2,650, which fits.
-    box = on(Box(broker, 8000, 4000))
+    # 8 GB box: four sessions leave under the 2,048 reserve plus one start
+    # allowance; ending one leaves room for the fifth.
+    base_mb = 8000 - 2048 - 4 * cfg.SESSION_START_MB - (cfg.SESSION_START_MB // 2)
+    box = on(Box(broker, 8000, base_mb))
     seats[0]._turn_active = True                     # mid-turn
     seats[1].pending["req"] = {"event": {"type": "broker.permission_request"}}
     victim = seats[2]
@@ -282,7 +284,7 @@ async def main() -> None:
           (body.get("reason"), body.get("memory", {}).get("available_mb"),
            body.get("memory", {}).get("reserve_mb"),
            body.get("memory", {}).get("need_mb")),
-          ("memory", 8000 - 5000 - 1800, 2048, cfg.SESSION_START_MB))
+          ("memory", 8000 - 5000 - 4 * cfg.SESSION_START_MB, 2048, cfg.SESSION_START_MB))
     await stop_all(broker)
 
     broker = broker_mod.Broker()

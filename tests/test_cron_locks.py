@@ -114,7 +114,8 @@ import loam_lock  # noqa: E402
 
 PROBES = [f"probe{i}" for i in range(1, 5)]
 ROOMY = 32 * 1024 * 1024     # kB: a simulated 32 GB box, all of it free
-NO_ROOM = 1024 * 1024        # kB: 1 GB available, under the 2 GB reserve
+# Under the box's reserve on every tier (including 2 GB, where reserve is ~487 MB).
+NO_ROOM = max(64, loam_lock.MEMORY_RESERVE_MB - 128) * 1024
 
 
 def meminfo(root: Path, available_kb: int) -> str:

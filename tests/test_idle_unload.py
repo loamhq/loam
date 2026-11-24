@@ -318,20 +318,25 @@ async def main() -> None:
     busy_s = running(broker, "probe3", "wait-busy", idle_s=90, idle_timeout_s=600)
     busy_s._turn_active = True
 
-    # Available is 2300 MB: above 2048 reserve, below 2048 + 450 = 2498 start floor.
-    cfg.memory = lambda: {"available": 2300, "cgroup_room": None, "reserve": 2048}
+    # Available sits strictly between the box's reserve and reserve + start allowance.
+    reserve_mb = loam_lock.MEMORY_RESERVE_MB
+    start_mb = loam_lock.RUN_START_MB
+    mid_avail_mb = reserve_mb + start_mb // 2
+    cfg.memory = lambda: {"available": mid_avail_mb, "cgroup_room": None, "reserve": reserve_mb}
     (loam_lock.LOCK_DIR / loam_lock.ROOM_WANTED_FILE).unlink(missing_ok=True)
-    check("between reserve and reserve+450 with no waiting run, relieve does nothing",
+    check("between reserve and reserve+start with no waiting run, relieve does nothing",
           await broker.relieve(time.time()), None)
 
     # Now simulate a wake/job failing memory admission in loam_lock._try_admit.
     fake_meminfo = Path(loam_lock.LOCK_DIR) / "fake-meminfo"
-    fake_meminfo.write_text("MemTotal: 4096000 kB\nMemAvailable: 2355200 kB\n", encoding="utf-8")
+    fake_meminfo.write_text(
+        f"MemTotal: {(reserve_mb + start_mb + 2048) * 1024} kB\n"
+        f"MemAvailable: {mid_avail_mb * 1024} kB\n", encoding="utf-8")
     old_meminfo = loam_lock.MEMINFO
     loam_lock.MEMINFO = str(fake_meminfo)
     try:
         handle, r = loam_lock._try_admit({"agent": "probe1", "lane": "wake", "pid": os.getpid()})
-        check("loam_lock refuses admission when MemAvailable < reserve + 450",
+        check("loam_lock refuses admission when MemAvailable < reserve + start",
               (handle is None, r["fits"], loam_lock.room_wanted()), (True, False, True))
     finally:
         loam_lock.MEMINFO = old_meminfo
