@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""Ensure tiered swap (zram + local swapfile) on Loam servers without touching
+operator-configured swap.
+
+  loam-swap status [--json]    report current swap state
+  loam-swap ensure [--json]    activate Loam swap now (root; leaves operator swap alone)
+  loam-swap install [--json]   activate Loam swap and install loam-swap.service (root)
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "lib"))
+import loam_swap as swap  # noqa: E402
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    as_json = "--json" in args
+    args = [a for a in args if a != "--json"]
+    cmd = args[0] if args else "status"
+    if cmd in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0
+    if cmd == "status":
+        data = swap.status()
+        if as_json:
+            print(json.dumps(data, indent=2))
+        else:
+            print(f"Swap mode: {data['mode']} ({data['swap_used_mb']}/{data['swap_total_mb']} MB used, "
+                  f"swappiness={data['swappiness']})")
+            for row in data["active"]:
+                print(f"  {row['name']}  {row['type']}  {row['size_mb']} MB  "
+                      f"used={row['used_mb']} MB  pri={row['priority']}")
+        return 0
+    if cmd in ("ensure", "install"):
+        if os.geteuid() != 0:
+            print(f"loam-swap {cmd} requires root (run with sudo)", file=sys.stderr)
+            return 1
+        data = swap.install(ROOT) if cmd == "install" else swap.ensure()
+        if as_json:
+            print(json.dumps(data, indent=2))
+        else:
+            print(data.get("message", ""))
+            for note in data.get("notes") or []:
+                print(f"  note: {note}", file=sys.stderr)
+        return 0
+    print(f"loam-swap: unknown command {cmd!r}\n\n{__doc__.strip()}", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

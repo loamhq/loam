@@ -38,6 +38,7 @@ together**, oldest entries dropped first, no age limit. At 3.5 GB on
 | The provider CLIs at the release's pin (`bin/provider-pin apply`, by hand or as `loam update`'s `providers` step; no timer since 2026-11-19, when the daily follower was retired) | what it did is said on its own output, and in the update's record when the update ran it; Antigravity's week-old conversation files, cleared by `bin/clear-agy-files` in the nightly housekeeping (`loam-tmp-sweep.service`), one line each in `agents/logs/agy-files.jsonl`. The retired follower's `logs/provider-follow.jsonl` and `state/provider-follow/` are left as they were, read by nothing | **forever** | `bin/provider-pin status` · `jq -c . agents/logs/agy-files.jsonl` |
 | The transcript writer | `agents/logs/transcript-capture.log`, a line per capture; the transcripts themselves are in the vault and are not a log | **forever** | `bin/logs transcripts` |
 | **The box's memory and disk history** (box RAM and swap; every `loam-*` unit's cgroup memory, and its MemoryHigh where one is set (no agent run has one since 2026-11-16): the broker, any running wake, cron, engineer job or reviewer; used per mount; once a day the `du` of the big holders) | `agents/logs/memsample.jsonl`, one JSON line per sample (`"v": 2`; the older lines without it are the one-night instrument of 2026-09-02), written every 5 minutes by `bin/memsample` from `loam-memsample.timer` | Rotated by the sampler at 4 MiB to `memsample.jsonl.1`, replacing the last: never more than 8 MiB, which is 9–18 days | `bin/logs memory` · `tail -n1 agents/logs/memsample.jsonl \| jq .units` |
+| **Memory limit events** (every time memory limits bite: `chat_wait`, `chat_timeout`, `chat_evicted`, `run_wait`, `run_skipped`, `job_queued`, `oom_kill`, `pressure_episode`, `sustained_swap`, `summary_deferred`; privacy-safe IDs, duration and box memory snapshot — never message text or private prose) | `<state>/limits/events.jsonl` (on the data disk when `--data-dir` is used), one JSON line per event (`lib/loam_limits.py`) | Rotated at 2 MiB to `events.jsonl.1`, replacing the last: never more than 4 MiB; survives restarts and updates | `loam limits` · `bin/logs limits` · `GET /v1/limit-events` · `mcp__engineer__limits` |
 | **The one check on a clock** (`loam-check.timer`, every 15 minutes, `bin/loam-check`, lib/loam_check.py: a fixed list of facts about Loam; each false or unreadable one is told once to the agent that hears when Loam needs attention, nothing when all are true) | `<state>/check.json`, the last tick's every fact with its evidence, whether agents can run and why not, and a crash of the check itself; its runs in the unit's journal | the last tick only | `bin/logs check` · `bin/loam-check --status` · `bin/loam-check` runs a tick now |
 | The daily drift check (the check's first tick at or after 01:40: `bin/check-drift` whole; each finding is one of the check's facts) | `agents/logs/drift-check.log`, the stamped output and exit code of every run | **forever** (~1.5 KB a day) | `bin/logs drift-check` · `bin/loam-check --daily` runs it now |
 | Image generation, title debugging | `agents/logs/image-gen.jsonl`, `title-debug.log` | **forever** (`title-debug.log` last written 2026-09-03) | `tail agents/logs/<file>` |
@@ -80,9 +81,14 @@ A log rotation can remove today's survey marker and cause one extra survey.
 
 The five-minute samples show trends. The pressure sampler checks every
 minute because swap can approach exhaustion while RAM use is still moderate.
-Three consecutive readings with high RAM use or low free swap open an
-episode. The first reading within both thresholds closes it. The health
-check and capacity plugins read the current episode from `pressure.json`.
+Three consecutive readings with high RAM use (`>= 85%`) or low free swap
+(`< 15%`) open a pressure episode, and the first reading within both
+thresholds closes it and records one `pressure_episode` event in
+`<state>/limits/events.jsonl`. The health check and capacity plugins read
+the current episode from `pressure.json`. Separately, sustained non-alarming
+swap use (at least `max(256, min(1024, RAM/6))` MB and `>= 20%` of total swap
+for 5 consecutive minutes) is tracked without alarming and records one
+`sustained_swap` event when swap drops back down.
 
 ## What a web request line holds, and what it never holds
 
