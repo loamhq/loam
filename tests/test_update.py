@@ -1132,6 +1132,51 @@ try:
     up.restore_container_login_if_older(old_commit)
     check("rolling back to a pre-service commit invokes gen-deploy --restore-container-login",
           len(ran_cmds) == 1 and "--restore-container-login" in ran_cmds[0], True)
+
+    # Rollback across docker-idle-watch -> 0.2.36 (pre-watch) boundary runs inside reset_to()
+    # BEFORE re-execing into 0.2.36's --resume-rollback.
+    write(RB_REPO / "lib" / "loam_deploy.py",
+          "def authelia_unit():\n    return ''\n\ndef docker_idle_watch_timer():\n    return ''\n")
+    git(RB_REPO, "add", "-A")
+    git(RB_REPO, "commit", "-qm", "Docker idle watcher")
+    watch_commit = git(RB_REPO, "rev-parse", "HEAD")
+
+    orig_wtimer = up.loam_deploy.DOCKER_IDLE_WATCH_TIMER
+    orig_wunit = up.loam_deploy.DOCKER_IDLE_WATCH_UNIT
+    try:
+        fake_wtimer = TMP / "loam-docker-idle-watch.timer"
+        fake_wunit = TMP / "loam-docker-idle-watch.service"
+        fake_wtimer.write_text("[Timer]\n", encoding="utf-8")
+        fake_wunit.write_text("[Service]\n", encoding="utf-8")
+        up.loam_deploy.DOCKER_IDLE_WATCH_TIMER = fake_wtimer
+        up.loam_deploy.DOCKER_IDLE_WATCH_UNIT = fake_wunit
+        check("_target_has_docker_idle_watch distinguishes 0.2.36 from 0.2.37",
+              (up._target_has_docker_idle_watch(new_commit),
+               up._target_has_docker_idle_watch(watch_commit)),
+              (False, True))
+        watch_cmds: list[list[str]] = []
+
+        def watch_subproc(argv, **kw):
+            if argv and argv[0] == "sudo":
+                watch_cmds.append(list(argv))
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            return orig_subproc(argv, **kw)
+
+        up.subprocess.run = watch_subproc
+        up.remove_docker_idle_watch_if_older(watch_commit)
+        check("rolling to a commit with docker_idle_watch_timer leaves watcher units untouched",
+              watch_cmds, [])
+        up.remove_docker_idle_watch_if_older(new_commit)
+        check("rolling back to 0.2.36 disables, removes watcher units, and daemon-reloads",
+              (len(watch_cmds) == 3
+               and "disable" in watch_cmds[0]
+               and up.loam_deploy.DOCKER_IDLE_WATCH_TIMER_NAME in watch_cmds[0]
+               and "rm" in watch_cmds[1] and str(fake_wtimer) in watch_cmds[1]
+               and "daemon-reload" in watch_cmds[2]),
+              True)
+    finally:
+        up.loam_deploy.DOCKER_IDLE_WATCH_TIMER = orig_wtimer
+        up.loam_deploy.DOCKER_IDLE_WATCH_UNIT = orig_wunit
 finally:
     up.lc.ROOT = orig_root
     up.subprocess.run = orig_subproc
