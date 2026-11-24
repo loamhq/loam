@@ -385,12 +385,15 @@ a separate mounted disk (`install.sh --data-dir DIR`): configuration, login
 database, vault, agent workspaces, plugins, projects, settings, threads,
 history and provider sign-in files live on that disk while ordinary paths stay
 the same. Loam's own checkout, pinned AI tool binaries, caches, generated
-service units and engineer worktrees stay on the server's local disk. Moving
-that disk to a fresh server and running `install.sh --data-dir DIR` adopts the
-existing Loam without overwriting it, keeping the same login, agents, threads,
-settings and plugins while rebuilding the server-local parts and re-issuing web
-certificates once DNS moves. Without `--data-dir`, everything stays on the
-server's single disk.
+service units and engineer worktrees stay on the server's local disk. At boot,
+`loam-data-disk.service` holds Loam's services (including Docker, Caddy and
+Loam's user manager) until the data disk and all nine bind mounts are verified
+active — keeping SSH reachable and preventing writes to the root disk if the
+volume is detached. Moving that disk to a fresh server and running
+`install.sh --data-dir DIR` adopts the existing Loam without overwriting it,
+keeping the same login, agents, threads, settings and plugins while rebuilding
+the server-local parts and re-issuing web certificates once DNS moves. Without
+`--data-dir`, everything stays on the server's single disk.
 
 **Plugins** add themes, page code, tools and servers. Loam's own ship with
 it; the owner's live in their own folder, which updates never touch (see

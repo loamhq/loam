@@ -47,7 +47,8 @@ def check_data_disk(findings: list) -> None:
     import loam_data_disk as dd  # noqa: PLC0415
     import loam_deploy as dep  # noqa: PLC0415
     findings.extend(dd.drift_findings(
-        lc.DATA_DIR, lc.HOME, etc=lc.CONFIG_FILE.parent, docker_run=dep._sudo))
+        lc.DATA_DIR, lc.HOME, etc=lc.CONFIG_FILE.parent, uid=lc.UID,
+        docker_run=dep._sudo))
 
 
 def check_skills(findings: list) -> None:

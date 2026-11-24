@@ -154,7 +154,7 @@ TRIGGERS = {
     # deployment layer is re-rendered (its unit template among it), then the
     # app is unpacked at the new commit and restarted, and put back on its
     # old release if the new one does not answer.
-    "deploy": {"script": "bin/gen-deploy", "also": ["bin/browser-proxy"],
+    "deploy": {"script": "bin/gen-deploy", "also": ["bin/browser-proxy", "bin/loam-data-disk"],
                "dirs": ["deploy/", "broker/firewall.sh",
                         "systemd/system/loam-claim.service",
                         "systemd/system/loam-broker-firewall.service"]},

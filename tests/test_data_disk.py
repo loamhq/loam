@@ -382,32 +382,172 @@ class TestDockerLoginVolumeAndDrift(unittest.TestCase):
         etc = self.base / "etc-loam"
         local_base = self.base / "local"
         fstab = self.base / "fstab"
+        systemd_dir = self.base / "systemd"
+        fstab.write_text(f"UUID=test-uuid {data_dir} ext4 discard,nofail,defaults 0 0\n")
         specs = dd.mount_specs(data_dir, home, etc=etc, local_base=local_base)
         dd.update_fstab(specs, fstab=fstab)
+        dd.install_boot_ordering(
+            data_dir, home, uid=1000, etc=etc, local_base=local_base,
+            systemd_dir=systemd_dir, enable=False)
 
         good_docker = lambda cmd: subprocess.CompletedProcess(
             cmd, 0, json.dumps({"Options": {"device": str(dd.login_data_dir(data_dir))}}), "")
+        good_systemd = lambda cmd: subprocess.CompletedProcess(cmd, 0, "enabled\n", "")
 
         # All checks green -> 0 findings.
         with patch.object(dd, "is_separate_mount", return_value=True), \
                 patch.object(dd, "is_bind_mounted", return_value=True):
             got = dd.drift_findings(
                 data_dir, home, etc=etc, local_base=local_base, fstab=fstab,
-                docker_run=good_docker)
+                uid=1000, systemd_dir=systemd_dir,
+                docker_run=good_docker, systemd_run=good_systemd)
         self.assertEqual(got, [])
 
-        # Missing bind mount + non-bind Docker volume + same-device root -> reported.
+        # Missing bind mount + non-bind Docker volume + same-device root + disabled gate unit -> reported.
         bad_docker = lambda cmd: subprocess.CompletedProcess(
             cmd, 0, json.dumps({"Options": None, "Mountpoint": "/var/lib/docker/volumes/authelia-data/_data"}), "")
+        bad_systemd = lambda cmd: subprocess.CompletedProcess(cmd, 1, "disabled\n", "")
         with patch.object(dd, "is_separate_mount", return_value=False), \
                 patch.object(dd, "is_bind_mounted", return_value=False):
             got = dd.drift_findings(
                 data_dir, home, etc=etc, local_base=local_base, fstab=fstab,
-                docker_run=bad_docker)
+                uid=1000, systemd_dir=systemd_dir,
+                docker_run=bad_docker, systemd_run=bad_systemd)
         labels = [g[0] for g in got]
         self.assertIn("data disk", labels)
         self.assertIn(f"data disk mount {home}", labels)
         self.assertIn("data disk login volume", labels)
+        self.assertIn(f"data disk boot unit {dd.GATE_UNIT_NAME}", labels)
+
+
+class TestBootOrderingAndVolumeSeam(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_persistent_mount_detection_ignores_managed_block(self):
+        fstab = self.base / "fstab"
+        systemd_dir = self.base / "systemd"
+        systemd_dir.mkdir()
+        data_dir = Path("/mnt/loam-data")
+
+        # Only managed bind-mount block present -> NOT a persistent mount for data_dir itself.
+        specs = dd.mount_specs(data_dir, Path("/home/loam"))
+        dd.update_fstab(specs, fstab=fstab)
+        self.assertFalse(dd.fstab_has_mount(data_dir, fstab=fstab))
+        self.assertFalse(dd.has_persistent_mount(data_dir, fstab=fstab, systemd_dir=systemd_dir))
+
+        # Standard cloud volume fstab entry (Hetzner / DigitalOcean style) -> detected.
+        fstab.write_text(
+            "UUID=1111 / ext4 defaults 0 1\n"
+            "UUID=2222 /mnt/loam-data ext4 discard,nofail,defaults 0 0\n"
+            + fstab.read_text()
+        )
+        self.assertTrue(dd.fstab_has_mount(data_dir, fstab=fstab))
+        self.assertTrue(dd.has_persistent_mount(data_dir, fstab=fstab, systemd_dir=systemd_dir))
+
+        # Systemd .mount unit without fstab entry -> also detected.
+        self.assertEqual(dd.systemd_escape_mount(Path("/mnt/loam-data")), r"mnt-loam\x2ddata.mount")
+        self.assertEqual(dd.systemd_escape_mount(Path("/")), "-.mount")
+        empty_fstab = self.base / "empty-fstab"
+        empty_fstab.write_text("")
+        (systemd_dir / dd.systemd_escape_mount(data_dir)).write_text("[Mount]\nWhere=/mnt/loam-data\n")
+        self.assertTrue(dd.has_persistent_mount(data_dir, fstab=empty_fstab, systemd_dir=systemd_dir))
+
+    def test_boot_ordering_units_and_dropins(self):
+        data_dir = Path("/mnt/loam-data")
+        home = Path("/home/loam")
+        systemd_dir = self.base / "systemd"
+        calls = []
+
+        def fake_run(argv):
+            calls.append(argv)
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        written = dd.install_boot_ordering(
+            data_dir, home, uid=1001, systemd_dir=systemd_dir, run=fake_run, enable=True)
+        self.assertEqual(len(written), 1 + len(dd.ORDERED_UNITS) + 1)
+        self.assertEqual(calls, [
+            ["systemctl", "daemon-reload"],
+            ["systemctl", "enable", dd.GATE_UNIT_NAME],
+            ["systemctl", "start", dd.GATE_UNIT_NAME],
+        ])
+
+        gate = (systemd_dir / dd.GATE_UNIT_NAME).read_text()
+        self.assertIn("After=local-fs.target", gate)
+        self.assertIn("RequiresMountsFor=/mnt/loam-data /etc/loam /home/loam /home/loam/loam", gate)
+        self.assertIn("/var/lib/loam/local/loam/bin/loam-data-disk ready", gate)
+
+        for unit in (*dd.ORDERED_UNITS, "user@1001.service"):
+            dropin = systemd_dir / f"{unit}.d" / dd.DROPIN_NAME
+            self.assertTrue(dropin.is_file(), f"missing drop-in for {unit}")
+            text = dropin.read_text()
+            self.assertIn(f"Requires={dd.GATE_UNIT_NAME}", text)
+            self.assertIn(f"After={dd.GATE_UNIT_NAME}", text)
+
+        # Idempotent second call writes nothing and skips daemon-reload.
+        calls.clear()
+        written2 = dd.install_boot_ordering(
+            data_dir, home, uid=1001, systemd_dir=systemd_dir, run=fake_run, enable=True)
+        self.assertEqual(written2, [])
+        self.assertNotIn(["systemctl", "daemon-reload"], calls)
+
+    def test_ensure_ready_holds_when_unmounted_and_mounts_missing_binds(self):
+        data_dir = self.base / "disk"
+        data_dir.mkdir()
+        (data_dir / "etc").mkdir()
+        (data_dir / "home").mkdir()
+        (data_dir / "etc" / "loam.toml").write_text(li.render_config(
+            name="", domain="loam.example.test", owner="Sam", timezone="UTC",
+            address="203.0.113.10", home="/home/loam", data_dir=str(data_dir)))
+        dd.write_marker(data_dir, user="loam", domain="loam.example.test")
+
+        home = self.base / "home-loam"
+        etc = self.base / "etc-loam"
+        local_base = self.base / "local"
+        for sub, _rel, _mode in dd.LOCAL_OVERLAYS:
+            (local_base / sub).mkdir(parents=True)
+
+        # Volume not mounted separately -> refuses cleanly so Loam services stay held.
+        with patch.object(dd, "is_separate_mount", return_value=False):
+            ok, msg = dd.ensure_ready(data_dir, home, etc=etc, local_base=local_base)
+        self.assertFalse(ok)
+        self.assertIn("not mounted", msg)
+
+        # Volume mounted separately, bind mounts missing -> mounts all 9 cleanly.
+        calls = []
+        mi = self.base / "mountinfo"
+        mi.write_text("21 1 8:1 / / rw - ext4 /dev/sda1 rw\n")
+
+        def fake_run(argv):
+            calls.append(argv)
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        with patch.object(dd, "is_separate_mount", return_value=True):
+            ok, msg = dd.ensure_ready(
+                data_dir, home, etc=etc, local_base=local_base,
+                mountinfo_path=mi, run=fake_run)
+        self.assertTrue(ok, msg)
+        self.assertEqual(len(calls), 2 + len(dd.LOCAL_OVERLAYS))
+        self.assertEqual(calls[0], ["mount", "--bind", str(data_dir / "etc"), str(etc)])
+        self.assertEqual(calls[1], ["mount", "--bind", str(data_dir / "home"), str(home)])
+
+    def test_inbound_firewall_unit_orders_after_data_disk_when_configured(self):
+        import loam_deploy as dep
+        with patch.object(dep.lc, "DATA_DIR", None):
+            plain = dep.inbound_firewall_unit()
+        self.assertIn("Before=network-pre.target", plain)
+        self.assertNotIn(dd.GATE_UNIT_NAME, plain)
+
+        with patch.object(dep.lc, "DATA_DIR", Path("/mnt/loam-data")):
+            with_disk = dep.inbound_firewall_unit()
+        self.assertNotIn("Before=network-pre.target", with_disk)
+        self.assertIn(f"Requires={dd.GATE_UNIT_NAME}", with_disk)
+        self.assertIn(f"After=local-fs.target {dd.GATE_UNIT_NAME}", with_disk)
+        self.assertIn("Before=docker.service caddy.service", with_disk)
 
 
 class TestInstallerAdoptionGuards(unittest.TestCase):

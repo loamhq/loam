@@ -3118,3 +3118,40 @@ listener for immediate notification in an open page.
   exists`) on `POST /user/repos`; `_ensure_share_repo` distinguishes that from
   missing permissions (`administration: write` checked on the live installation
   and on 403) and points every refusal to Settings › Connections › GitHub.
+
+## 2026-11-24 — separate data disk boot ordering and 2 GB engineer-job sizing
+
+- **Why `nofail` breaks `--data-dir` boot ordering.** Standard cloud block
+  volume `/etc/fstab` entries (and Loam's own nine bind mounts) carry `nofail`
+  so a missing volume never drops the host into emergency mode without SSH.
+  In `systemd-fstab-generator`, `nofail` drops `Before=local-fs.target` from
+  every generated `.mount` unit, so units ordered only on `local-fs.target`
+  (`loam-swap`, `loam-inbound-firewall`, `docker`, `caddy`, `loam-app@*`,
+  `loam-claim`, `loam-user-manager`, and lingered `user@<uid>`) race ahead of
+  the bind mounts on normal boot — and start broken against empty rootfs
+  directories when the volume is detached (Docker even creates a bogus rootfs
+  directory at `/etc/loam/authelia/configuration.yml`).
+- **The boot gate lives on the local root disk (`lib/loam_data_disk.py`,
+  `bin/loam-data-disk`, `lib/loam_deploy.py`).** `loam-data-disk.service`
+  carries `RequiresMountsFor=<data_dir>` and runs
+  `/var/lib/loam/local/loam/bin/loam-data-disk ready` (stdlib-only, on the
+  server's own disk) to verify a separate mount, valid `loam-data.json`, and
+  all nine bind mounts before exiting 0. Drop-ins (`10-loam-data-disk.conf`)
+  order and `Requires=`-gate every Loam service plus `docker`, `caddy`, and
+  `user@<uid>` behind it. On `--data-dir` installs, `loam-inbound-firewall.service`
+  also drops `Before=network-pre.target` and runs after `loam-data-disk.service`
+  before any Loam listener starts, so a detached volume never stalls SSH or
+  networking during the 90 s device timeout; after a late post-boot attach and
+  mount, `sudo /var/lib/loam/local/loam/bin/loam-data-disk up` brings the gate
+  and all enabled Loam services up without a reboot.
+- **2 GB box (`1,962 MB` usable RAM, tiered zram + disk swap) with an engineer
+  job.** One resident Claude chat (`~250 MB` PSS) plus one ordinary Python
+  plugin engineer job with tests (`~313–366 MiB` job cgroup peak) runs
+  comfortably on 2 GB with both 2 vCPUs (~83 s, `1,080 MB` peak RAM, `0 MB`
+  swap, `0` limit events) and 1 vCPU (~91 s, `1,021 MB` peak RAM, `0 MB` swap,
+  CPU PSI `some10` up from `2.42` to `10.86`), with mid-job chat turns still
+  answering in `~1.5 s`. Overlapping two chats and two engineer jobs on 2 GB
+  stays OOM-free via memory admission (`chat_evicted`, `job_queued`,
+  `chat_wait`, ~59 MB zram), whereas multi-job concurrency, Node/browser
+  builds, or core-repo landings that run parallel `tests/run-all` are what push
+  past 2 GB into 4 GB territory.

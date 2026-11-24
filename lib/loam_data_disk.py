@@ -34,6 +34,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import time
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,9 +45,33 @@ LOCAL_BASE = Path("/var/lib/loam/local")
 FSTAB = Path("/etc/fstab")
 FSTAB_BEGIN = "# >>> loam:data-disk (managed by Loam; do not edit)"
 FSTAB_END = "# <<< loam:data-disk"
+SYSTEMD_DIR = Path("/etc/systemd/system")
+GATE_UNIT_NAME = "loam-data-disk.service"
+DROPIN_NAME = "10-loam-data-disk.conf"
 MIN_FREE_GB_FRESH = 5.0
 MIN_FREE_GB_ADOPT = 1.0
 IGNORED_ENTRIES = frozenset({"lost+found"})
+
+# System units that read `/etc/loam`, `/home/<user>`, `<data_dir>` or
+# `/home/<user>/loam` and therefore must wait for `loam-data-disk.service`
+# (and never start against empty rootfs directories when the volume is absent).
+# `user@<uid>.service` is added dynamically per install's UID so lingering never
+# starts an empty user manager before the bind mounts and overlays are active.
+# `loam-inbound-firewall.service` carries its dependency directly in its
+# rendered unit (`lib/loam_deploy.inbound_firewall_unit`) so it does not block
+# `network-pre.target` / SSH when the volume is detached at boot.
+ORDERED_UNITS: tuple[str, ...] = (
+    "docker.service",
+    "caddy.service",
+    "loam-app@.service",
+    "loam-claim.service",
+    "loam-user-manager.service",
+    "loam-swap.service",
+    "loam-browser-proxy.service",
+    "loam-docker-idle.service",
+    "loam-await-dns.service",
+    "loam-host-history.service",
+)
 
 # Server-local directories bind-mounted on top inside `/home/<user>` so heavy
 # I/O, Loam's own checkout, pinned provider CLIs, caches and regenerated units
@@ -488,6 +513,220 @@ def docker_volume_path(volume: str = "authelia-data", *, docker: str | None = No
 
 
 # ---------------------------------------------------------------------------
+# Persistent mount check and systemd boot ordering (cloud-agnostic volume seam)
+# ---------------------------------------------------------------------------
+
+def fstab_has_mount(target: Path, *, fstab: Path = FSTAB) -> bool:
+    """True when `fstab` has a non-comment mount entry whose target equals
+    `target` (ignoring Loam's own managed bind-mount block)."""
+    want = os.path.normpath(str(target))
+    try:
+        lines = fstab.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    in_managed = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped == FSTAB_BEGIN:
+            in_managed = True
+            continue
+        if stripped == FSTAB_END:
+            in_managed = False
+            continue
+        if in_managed or not stripped or stripped.startswith("#"):
+            continue
+        parts = stripped.split()
+        if len(parts) >= 2 and os.path.normpath(_unescape_mountinfo(parts[1])) == want:
+            return True
+    return False
+
+
+def systemd_escape_mount(target: Path) -> str:
+    """Convert an absolute mount path to its systemd `.mount` unit filename
+    (matching `systemd-escape --path --suffix=mount`)."""
+    norm = os.path.normpath(str(target)).strip("/")
+    if not norm:
+        return "-.mount"
+    out: list[str] = []
+    for idx, ch in enumerate(norm):
+        if ch == "/":
+            out.append("-")
+        elif ch.isascii() and (ch.isalnum() or ch in ":_"):
+            out.append(ch)
+        elif ch == "." and idx > 0:
+            out.append(ch)
+        else:
+            for b in ch.encode("utf-8"):
+                out.append(f"\\x{b:02x}")
+    return "".join(out) + ".mount"
+
+
+def has_persistent_mount(data_dir: Path, *, fstab: Path = FSTAB,
+                         systemd_dir: Path = SYSTEMD_DIR) -> bool:
+    """True when `data_dir` itself will be mounted at boot via `/etc/fstab` or
+    a systemd `.mount` unit — independent of which cloud provider backs the
+    block volume."""
+    if fstab_has_mount(data_dir, fstab=fstab):
+        return True
+    unit = systemd_dir / systemd_escape_mount(data_dir)
+    return unit.is_file()
+
+
+def ordered_unit_names(uid: int | None = None) -> list[str]:
+    names = list(ORDERED_UNITS)
+    if uid is not None:
+        names.append(f"user@{int(uid)}.service")
+    return names
+
+
+def render_gate_unit(data_dir: Path, home: Path, *, etc: Path = Path("/etc/loam"),
+                     local_base: Path = LOCAL_BASE,
+                     pycache: str = "/var/cache/loam/pycache") -> str:
+    """Render `/etc/systemd/system/loam-data-disk.service`.
+
+    Cloud volumes and Loam's bind mounts carry `nofail` in `/etc/fstab` so a
+    missing volume never drops the server into emergency mode and locks out
+    SSH. Because `nofail` removes `Before=local-fs.target`, Loam's services
+    would otherwise race ahead of the volume and bind mounts (or start against
+    empty rootfs directories when the volume is detached). This gate unit
+    depends on every mount via `RequiresMountsFor=` and runs from the server's
+    local disk (`<local_base>/loam/bin/loam-data-disk`), holding Loam services
+    until the data disk and all nine bind mounts are verified active.
+    """
+    specs = mount_specs(data_dir, home, etc=etc, local_base=local_base)
+    req_mounts = " ".join([str(data_dir), *(str(s.target) for s in specs)])
+    helper = local_base / "loam" / "bin" / "loam-data-disk"
+    return (
+        "# GENERATED by Loam (lib/loam_data_disk.py). Do not edit.\n"
+        "[Unit]\n"
+        "Description=Loam: wait for the data disk and its bind mounts\n"
+        "DefaultDependencies=no\n"
+        "After=local-fs.target\n"
+        f"RequiresMountsFor={req_mounts}\n"
+        "Before=shutdown.target\n"
+        "Conflicts=shutdown.target\n"
+        "\n"
+        "[Service]\n"
+        "Type=oneshot\n"
+        "RemainAfterExit=yes\n"
+        f"Environment=PYTHONPYCACHEPREFIX={pycache}\n"
+        f"ExecStart=/usr/bin/python3 {helper} ready --data-dir {data_dir} "
+        f"--home {home} --etc {etc} --local-base {local_base}\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=multi-user.target\n"
+    )
+
+
+def render_ordering_dropin() -> str:
+    return (
+        "# GENERATED by Loam (lib/loam_data_disk.py). Do not edit.\n"
+        "[Unit]\n"
+        f"Requires={GATE_UNIT_NAME}\n"
+        f"After={GATE_UNIT_NAME}\n"
+    )
+
+
+def boot_ordering_files(data_dir: Path, home: Path, *, uid: int | None = None,
+                        etc: Path = Path("/etc/loam"),
+                        local_base: Path = LOCAL_BASE,
+                        systemd_dir: Path = SYSTEMD_DIR) -> dict[Path, str]:
+    """Every systemd unit and drop-in Loam installs for `--data-dir` boot
+    ordering."""
+    files: dict[Path, str] = {
+        systemd_dir / GATE_UNIT_NAME: render_gate_unit(
+            data_dir, home, etc=etc, local_base=local_base),
+    }
+    dropin = render_ordering_dropin()
+    for unit in ordered_unit_names(uid):
+        files[systemd_dir / f"{unit}.d" / DROPIN_NAME] = dropin
+    return files
+
+
+def _write_atomic(path: Path, content: str, mode: int = 0o644) -> bool:
+    if path.is_file():
+        try:
+            if path.read_text(encoding="utf-8") == content:
+                return False
+        except OSError:
+            pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.loam-", dir=str(path.parent))
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return True
+
+
+def install_boot_ordering(data_dir: Path, home: Path, *, uid: int | None = None,
+                          etc: Path = Path("/etc/loam"),
+                          local_base: Path = LOCAL_BASE,
+                          systemd_dir: Path = SYSTEMD_DIR,
+                          run=None, enable: bool = True) -> list[Path]:
+    """Install or update `loam-data-disk.service` and all ordering drop-ins.
+    Returns the list of files written."""
+    files = boot_ordering_files(
+        data_dir, home, uid=uid, etc=etc, local_base=local_base,
+        systemd_dir=systemd_dir)
+    changed = [p for p, text in files.items() if _write_atomic(p, text, 0o644)]
+    runner = run or (lambda argv: subprocess.run(argv, capture_output=True, text=True, check=False))
+    if enable and (run is not None or (os.geteuid() == 0 and shutil.which("systemctl"))):
+        if changed:
+            res = runner(["systemctl", "daemon-reload"])
+            if res.returncode != 0:
+                raise DataDiskError(f"systemctl daemon-reload failed: {(res.stderr or res.stdout).strip()}")
+        for action in ("enable", "start"):
+            res = runner(["systemctl", action, GATE_UNIT_NAME])
+            if res.returncode != 0:
+                raise DataDiskError(
+                    f"systemctl {action} {GATE_UNIT_NAME} failed: {(res.stderr or res.stdout).strip()}")
+    return changed
+
+
+def ensure_ready(data_dir: Path, home: Path, *, etc: Path = Path("/etc/loam"),
+                 local_base: Path = LOCAL_BASE, wait_seconds: float = 0.0,
+                 root: Path = Path("/"),
+                 mountinfo_path: Path = Path("/proc/self/mountinfo"),
+                 run=None) -> tuple[bool, str]:
+    """Verify the data disk is mounted separately, valid, and all nine bind
+    mounts are active (mounting any missing bind mounts once the data disk is
+    mounted). Returns `(ok, message)`."""
+    deadline = time.monotonic() + max(0.0, float(wait_seconds))
+    while True:
+        if data_dir.is_dir() and is_separate_mount(data_dir, root=root):
+            break
+        if time.monotonic() >= deadline:
+            return (
+                False,
+                f"{data_dir} is not mounted on a separate filesystem "
+                "(volume not attached or not mounted yet); holding Loam services",
+            )
+        time.sleep(min(1.0, max(0.05, deadline - time.monotonic())))
+
+    info = classify(data_dir)
+    if info["kind"] != "existing":
+        return False, f"{data_dir} is not a valid Loam data disk ({info['reason']})"
+
+    specs = mount_specs(data_dir, home, etc=etc, local_base=local_base)
+    mounted_now = 0
+    try:
+        for spec in specs:
+            if ensure_bind_mount(spec.source, spec.target,
+                                 mountinfo_path=mountinfo_path, run=run):
+                mounted_now += 1
+    except DataDiskError as exc:
+        return False, str(exc)
+
+    extra = f" (mounted {mounted_now})" if mounted_now else ""
+    return True, f"data disk {data_dir} and all {len(specs)} bind mounts ready{extra}"
+
+
+# ---------------------------------------------------------------------------
 # Drift and health checks
 # ---------------------------------------------------------------------------
 
@@ -495,10 +734,15 @@ def drift_findings(data_dir: Path, home: Path, *, etc: Path = Path("/etc/loam"),
                    local_base: Path = LOCAL_BASE, fstab: Path = FSTAB,
                    mountinfo_path: Path = Path("/proc/self/mountinfo"),
                    check_docker: bool = True, docker_run=None,
+                   uid: int | None = None,
+                   systemd_dir: Path = SYSTEMD_DIR,
+                   check_systemd: bool = True,
+                   systemd_run=None,
                    root: Path = Path("/")) -> list[tuple[str, str, str]]:
-    """Verify data-disk mount, marker, all bind mounts, `/etc/fstab` block, and
-    the bind-backed `authelia-data` Docker volume. Returns `(label, where, detail)`
-    tuples in `bin/check-drift` format."""
+    """Verify data-disk mount, marker, all bind mounts, `/etc/fstab` block,
+    persistent mount & systemd boot ordering, and the bind-backed
+    `authelia-data` Docker volume. Returns `(label, where, detail)` tuples in
+    `bin/check-drift` format."""
     findings: list[tuple[str, str, str]] = []
     if not data_dir.is_dir():
         findings.append(("data disk", str(data_dir),
@@ -532,6 +776,51 @@ def drift_findings(data_dir: Path, home: Path, *, etc: Path = Path("/etc/loam"),
                 str(fstab),
                 "missing or out-of-date loam:data-disk managed mount block",
             ))
+
+    if check_systemd:
+        if not has_persistent_mount(data_dir, fstab=fstab, systemd_dir=systemd_dir):
+            findings.append((
+                "data disk persistence",
+                str(fstab),
+                f"no persistent mount entry for {data_dir} in {fstab} or {systemd_dir}; "
+                "the volume will not mount automatically after a reboot",
+            ))
+        for path, expected in boot_ordering_files(
+            data_dir, home, uid=uid, etc=etc, local_base=local_base,
+            systemd_dir=systemd_dir,
+        ).items():
+            if not path.is_file():
+                findings.append((
+                    f"data disk boot unit {path.name}",
+                    str(path),
+                    "missing; run `sudo bin/loam-data-disk install` (or `sudo bin/gen-deploy`)",
+                ))
+            else:
+                try:
+                    actual = path.read_text(encoding="utf-8")
+                except OSError as exc:
+                    findings.append((f"data disk boot unit {path.name}", str(path), str(exc)))
+                else:
+                    if actual != expected:
+                        findings.append((
+                            f"data disk boot unit {path.name}",
+                            str(path),
+                            "differs from generator; run `sudo bin/loam-data-disk install`",
+                        ))
+        if systemd_run is not None or (systemd_dir == SYSTEMD_DIR and shutil.which("systemctl")):
+            srunner = systemd_run or (lambda argv: subprocess.run(
+                argv, capture_output=True, text=True, check=False, timeout=10))
+            try:
+                res = srunner(["systemctl", "is-enabled", GATE_UNIT_NAME])
+            except (OSError, subprocess.SubprocessError):
+                res = None
+            if res is not None and (res.stdout or "").strip() != "enabled":
+                state = (res.stdout or res.stderr or "disabled").strip()
+                findings.append((
+                    f"data disk boot unit {GATE_UNIT_NAME}",
+                    f"systemctl is-enabled {GATE_UNIT_NAME}",
+                    f"{state}; run `sudo systemctl enable {GATE_UNIT_NAME}`",
+                ))
 
     if check_docker:
         docker_asleep = False

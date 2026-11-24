@@ -302,6 +302,10 @@ def step_preflight(a, ans: dict) -> None:
         if why or data_dir is None:
             raise Stop(f"Cannot use --data-dir {raw_data_dir}: {why}.",
                        "mount a writable disk at that directory first and run the install command again")
+        if not dd.has_persistent_mount(data_dir):
+            say(f"Note: {data_dir} is mounted now, but has no entry in /etc/fstab. "
+                "Add a persistent mount (with nofail) to /etc/fstab before rebooting "
+                "so the volume mounts automatically at boot.", 2)
 
     if CONFIG.exists():
         cfg = config_values()
@@ -1147,6 +1151,12 @@ def step_units(a, ans: dict) -> None:
     fw = Path(root) / "broker" / "firewall.sh"
     run(["install", "-D", "-o", "root", "-g", "root", "-m", "755", str(fw), str(brk.FIREWALL_SCRIPT)])
     install_system_units(cfg)
+    if cfg.get("data_dir"):
+        with progress("Configuring boot mount ordering for the data disk",
+                      "Data disk boot ordering configured."):
+            uid = pwd.getpwnam(cfg["user"]).pw_uid
+            dd.install_boot_ordering(
+                Path(cfg["data_dir"]), Path(cfg["home"]), uid=uid, etc=CONFIG.parent)
     run(["systemctl", "enable", "--now", brk.WALL_SERVICE])
     # Loam's user manager comes back at boot even where lingering alone does
     # not bring it (found by the 2026-11-16 first-day walk's reboot).

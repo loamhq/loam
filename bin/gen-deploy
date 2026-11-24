@@ -325,6 +325,12 @@ def generate(dry: bool) -> int:
         res = run(["sysctl", "-q", "-p", str(dep.PREVIEW_SYSCTL)])
         print(f"  sysctl: {dep.PREVIEW_SYSCTL_KEY} applied (exit {res.returncode})"
               f"{': ' + res.stderr.strip() if res.stderr.strip() else ''}")
+    if dep.lc.DATA_DIR is not None and os.geteuid() == 0:
+        import loam_data_disk as dd  # noqa: PLC0415
+        dd_changed = dd.install_boot_ordering(
+            dep.lc.DATA_DIR, dep.lc.HOME, uid=dep.lc.UID, etc=dep.ETC)
+        if dd_changed:
+            print(f"  data-disk: updated {len(dd_changed)} boot-ordering unit file(s)")
     # Loam's own app's unit template (2026-11-16). A changed template is
     # loaded, never restarted from here: `bin/deploy <app> up <commit>` is
     # what restarts an app, and it says what it did.
