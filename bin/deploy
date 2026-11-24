@@ -640,8 +640,9 @@ def unit_state(app: dep.App) -> str:
 
 def container_running(name: str) -> bool:
     """Whether a Docker container by the app's name runs: the app before it
-    left Docker (2026-11-16). False on a box without Docker."""
-    if not shutil.which("docker"):
+    left Docker (2026-11-16). False on a box without Docker or while Docker is
+    asleep (never wakes docker.socket)."""
+    if not shutil.which("docker") or not dep.docker_active():
         return False
     res = run(["docker", "ps", "-q", "--filter", f"name=^{name}$"], capture_output=True)
     return res.returncode == 0 and bool(res.stdout.strip())

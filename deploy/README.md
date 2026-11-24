@@ -719,7 +719,7 @@ waking Docker or Chromium, and starts Docker (if asleep), raises the firewalls,
 and starts `loam-browser` on the first `tools/call`. After 10 quiet minutes
 with no open browser session and no call, `loam-browser` stops — and when no
 other container needs Docker, `docker.service` and `containerd.service` sleep
-with it (`loam-docker-idle.service` applies the same check after boot). Every persona has it as the `browser` HTTP MCP server in `.mcp.json`
+with it (`loam-docker-idle.service` applies the same check after boot, and `loam-docker-idle-watch.timer` — bound to `docker.service` so it causes zero wakeups while Docker is asleep — puts Docker and containerd back to sleep after 10 quiet minutes whenever anything else wakes them and no container needs them). Every persona has it as the `browser` HTTP MCP server in `.mcp.json`
 and the server-wide `mcp__browser` in `permissions.allow`; both rendered by
 `bin/provision`. **It is on every lane.** Move 10 dropped it from both
 unattended lanes on the reasoning that a wake has no one to show a page

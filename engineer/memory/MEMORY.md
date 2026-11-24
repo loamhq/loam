@@ -3257,3 +3257,28 @@ listener for immediate notification in an open page.
   Docker fallback; patching `LOGIN_NATIVE_DIR`, `LOGIN_SERVICE_UNIT` and
   `LOGIN_LEGACY_COMPOSE` (matching `tests/test_host_history.py`) keeps the test
   isolated on native-login hosts.
+
+## 2026-11-24 — Keep Docker asleep across updates and after external wakes
+
+- **`bin/deploy` `container_running()` must check `dep.docker_active()` first.**
+  `loam update apply` runs `deploy` (`gen-deploy`, which moves login out of
+  Docker and puts Docker/containerd to sleep) immediately before `app`
+  (`bin/deploy loam-ui up <commit>`). Calling `docker ps` unconditionally in
+  `service_up()` connected to `/run/docker.sock` and woke Docker 1 s after
+  `gen-deploy` stopped it. Guarding `container_running()` behind
+  `dep.docker_active()` keeps service-app deploys completely off the Docker
+  socket while Docker is asleep.
+- **`loam-docker-idle-watch.timer` / `loam-docker-idle-watch.service` bound to
+  `docker.service`.** `loam-docker-idle.service` runs only once at boot, and
+  `loam-browser-proxy.service` only sleeps Docker when it woke `loam-browser`.
+  The watcher timer carries `BindsTo=docker.service` and `WantedBy=docker.service`
+  (zero wakeups while Docker is asleep; starts automatically whenever anything
+  wakes Docker, including `docker ps` over `docker.socket`). Every minute it
+  runs `browser-proxy --sleep-if-idle --after-idle`, which verifies no container
+  needs Docker, no active browser-proxy session exists, no client is connected to
+  `/run/docker.sock` (via `/proc/net/unix` state `03`), and both
+  `docker.service`'s `ActiveEnterTimestampMonotonic` age and the most recent
+  container `State.FinishedAt` age exceed `DOCKER_IDLE_S` (default 600 s) before
+  stopping `docker.service` and `containerd.service`. `lib/loam_update.py`
+  removes the watcher units automatically when rolling back to a release whose
+  `browser-proxy` predates `--after-idle`.

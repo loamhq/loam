@@ -459,6 +459,115 @@ def run_docker_controller_tests() -> None:
                   calls_c)
         finally:
             dep.AUTHELIA_SECRETS, dep.AUTHELIA_COMPOSE = orig_secrets, orig_compose
+
+        # Case D: quiet-period sleep (sleep_docker_if_unused(quiet_s=600)) for Docker
+        # woken outside browser-proxy (e.g. admin's `docker ps` or update step).
+        unix_file = tmp / "proc-net-unix"
+        unix_file.write_text(
+            "Num       RefCount Protocol Flags    Type St Inode Path\n"
+            "00000000: 00000002 00000000 00010000 0001 01 12345 /run/docker.sock\n",
+            encoding="utf-8",
+        )
+        check("docker_clients_connected() is False with only listening socket",
+              bp.docker_clients_connected(unix_file) is False)
+        unix_file.write_text(
+            "Num       RefCount Protocol Flags    Type St Inode Path\n"
+            "00000000: 00000002 00000000 00010000 0001 01 12345 /run/docker.sock\n"
+            "00000001: 00000003 00000000 00000000 0001 03 12346 /run/docker.sock\n",
+            encoding="utf-8",
+        )
+        check("docker_clients_connected() is True when a client is connected to /run/docker.sock",
+              bp.docker_clients_connected(unix_file) is True)
+        unix_file.write_text(
+            "Num       RefCount Protocol Flags    Type St Inode Path\n"
+            "00000000: 00000002 00000000 00010000 0001 01 12345 /run/docker.sock\n",
+            encoding="utf-8",
+        )
+        check("_parse_docker_timestamp ignores zero time and parses nanoseconds",
+              bp._parse_docker_timestamp("0001-01-01T00:00:00Z") is None
+              and bp._parse_docker_timestamp("2026-11-24T17:48:28.123456789Z") is not None)
+
+        state_d = {
+            "docker_up": True,
+            "mono_now": 2000.0,
+            "enter_us": int(1900.0 * 1_000_000),  # 100s active (< 600s quiet)
+            "now_utc": 1795543200.0,
+            "finished_at": "0001-01-01T00:00:00Z",
+            "proxy_active": False,
+        }
+        calls_d: list[list[str]] = []
+
+        def runner_d(argv, timeout=120):
+            calls_d.append(argv)
+            if argv[:3] == ["systemctl", "is-active", "--quiet"]:
+                unit = argv[3]
+                if unit == "docker.service":
+                    return type("R", (), {"returncode": 0 if state_d["docker_up"] else 3, "stdout": "", "stderr": ""})()
+                if unit == dep.BROWSER_PROXY_SERVICE_NAME:
+                    return type("R", (), {"returncode": 0 if state_d["proxy_active"] else 3, "stdout": "", "stderr": ""})()
+            if argv[:2] == ["systemctl", "show"] and "ActiveEnterTimestampMonotonic" in argv:
+                return type("R", (), {"returncode": 0, "stdout": f"{state_d['enter_us']}\n", "stderr": ""})()
+            if argv[:2] == ["docker", "inspect"] and "{{.State.Running}}" in argv:
+                return type("R", (), {"returncode": 0, "stdout": "false\n", "stderr": ""})()
+            if argv == ["docker", "ps", "-aq"]:
+                return type("R", (), {"returncode": 0, "stdout": "abc123\n", "stderr": ""})()
+            if argv[:2] == ["docker", "inspect"] and "RestartPolicy" in argv[3]:
+                return type("R", (), {"returncode": 0, "stdout": "/loam-browser\tfalse\tno\n", "stderr": ""})()
+            if argv[:2] == ["docker", "inspect"] and "{{.State.FinishedAt}}" in argv:
+                return type("R", (), {"returncode": 0, "stdout": f"{state_d['finished_at']}\n", "stderr": ""})()
+            if argv[:2] == ["systemctl", "stop"] and "docker.service" in argv:
+                state_d["docker_up"] = False
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+        ctrl_d = bp.DockerController(
+            lock_path=tmp / "d.lock", state_path=tmp / "d.json", runner=runner_d,
+            monotonic=lambda: state_d["mono_now"], now=lambda: state_d["now_utc"],
+            proc_net_unix=unix_file,
+        )
+        out_d1 = ctrl_d.sleep_docker_if_unused(quiet_s=600)
+        check("quiet-period check: within 600s keeps Docker awake",
+              out_d1["stopped_docker"] is False and out_d1["reason"] == "within_quiet_period"
+              and state_d["docker_up"] is True, out_d1)
+
+        # Past 600s since Docker started, but a container finished 30s ago -> stay awake
+        state_d["mono_now"] = 2600.0  # 700s active
+        state_d["finished_at"] = "2026-11-24T17:59:30.000000000Z"  # 30s before 18:00:00Z
+        out_d2 = ctrl_d.sleep_docker_if_unused(quiet_s=600)
+        check("quiet-period check: recently finished container keeps Docker awake",
+              out_d2["stopped_docker"] is False and out_d2["reason"] == "within_quiet_period"
+              and state_d["docker_up"] is True, out_d2)
+
+        # Connected docker.sock client keeps Docker awake even past quiet period
+        state_d["finished_at"] = "2026-11-24T17:40:00.000000000Z"  # 20 min ago
+        unix_file.write_text(
+            "Num       RefCount Protocol Flags    Type St Inode Path\n"
+            "00000001: 00000003 00000000 00000000 0001 03 12346 /run/docker.sock\n",
+            encoding="utf-8",
+        )
+        out_d3 = ctrl_d.sleep_docker_if_unused(quiet_s=600)
+        check("quiet-period check: connected docker.sock client keeps Docker awake",
+              out_d3["stopped_docker"] is False and out_d3["reason"] == "docker_client_connected"
+              and state_d["docker_up"] is True, out_d3)
+
+        # Client disconnects and quiet period elapsed -> stops Docker and containerd
+        unix_file.write_text(
+            "Num       RefCount Protocol Flags    Type St Inode Path\n"
+            "00000000: 00000002 00000000 00010000 0001 01 12345 /run/docker.sock\n",
+            encoding="utf-8",
+        )
+        out_d4 = ctrl_d.sleep_docker_if_unused(quiet_s=600)
+        check("quiet-period check: once quiet period elapses with no client/container, stops docker+containerd",
+              out_d4["stopped_docker"] is True and out_d4["reason"] == "slept"
+              and state_d["docker_up"] is False
+              and any(c == ["systemctl", "stop", "docker.service", "containerd.service"] for c in calls_d),
+              out_d4)
+
+        # Already asleep -> never calls docker CLI
+        calls_d.clear()
+        out_d5 = ctrl_d.sleep_docker_if_unused(quiet_s=600)
+        check("quiet-period check: already asleep never touches docker CLI",
+              out_d5["stopped_docker"] is False and out_d5["reason"] == "already_asleep"
+              and not any(c[0] == "docker" for c in calls_d), (out_d5, calls_d))
     finally:
         dep.unclaimed = orig_unclaimed
 

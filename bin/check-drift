@@ -901,6 +901,15 @@ def check_deploy(findings: list) -> list[str]:
         findings.append(("deploy browser socket", f"systemctl is-active {dep.BROWSER_PROXY_SOCKET_NAME}",
                          f"{dep.BROWSER_PROXY_SOCKET_NAME} is {sock_active or 'inactive'}, not active; "
                          f"agents cannot wake the browser. `sudo {lc.ROOT}/bin/gen-deploy`"))
+    # The idle Docker watcher timer (active only while docker.service is active; never wakes Docker).
+    watch_enabled = subprocess.run(
+        ["systemctl", "is-enabled", dep.DOCKER_IDLE_WATCH_TIMER_NAME],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
+    if watch_enabled != "enabled":
+        findings.append(("deploy docker idle watch", f"systemctl is-enabled {dep.DOCKER_IDLE_WATCH_TIMER_NAME}",
+                         f"{dep.DOCKER_IDLE_WATCH_TIMER_NAME} is {watch_enabled or 'disabled'}, not enabled; "
+                         f"Docker woken outside the browser will not sleep again. `sudo {lc.ROOT}/bin/gen-deploy`"))
     # The inbound wall (2026-11-19): a family nobody guards is a finding,
     # unless the owner turned it off (`firewall.manage = false`).
     inbound = dep.inbound_wall_status()

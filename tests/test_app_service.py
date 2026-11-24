@@ -140,6 +140,7 @@ check("...a context that climbs out of the checkout is refused",
 deploy = load("deploy_service_mod", ROOT / "bin" / "deploy")
 dep.SERVICE_RELEASES = TMP / "var-lib-loam-app"
 REAL_RUN = deploy.run
+REAL_CONTAINER_RUNNING = deploy.container_running
 
 
 class Box:
@@ -307,6 +308,24 @@ check("the unit template carries the wall, the core's OOM score and its env from
       [n for n in need if n not in unit], [])
 check("...and no memory ceiling", any(k in unit for k in ("MemoryMax=", "MemoryHigh=")), False)
 check("...and gen-deploy renders it with the rest", dep.generated()[dep.SERVICE_UNIT] == unit, True)
+
+# -- container_running() never wakes an asleep Docker ------------------------------------------
+
+docker_calls: list[list[str]] = []
+orig_run = deploy.run
+orig_docker_active = dep.docker_active
+try:
+    deploy.run = lambda argv, **kw: (docker_calls.append(argv) or subprocess.CompletedProcess(argv, 0, "abc123\n", ""))
+    dep.docker_active = lambda: False
+    check("container_running() returns False without calling docker when Docker is asleep",
+          (REAL_CONTAINER_RUNNING("loam-ui"), docker_calls), (False, []))
+    dep.docker_active = lambda: True
+    check("container_running() queries docker ps when Docker is active",
+          (REAL_CONTAINER_RUNNING("loam-ui"), len(docker_calls) == 1 and docker_calls[0][0] == "docker"),
+          (True, True))
+finally:
+    deploy.run = orig_run
+    dep.docker_active = orig_docker_active
 
 print(f"\n{'OK' if all(results) else 'FAILED'}: {results.count(False)} failure(s)")
 sys.exit(0 if all(results) else 1)

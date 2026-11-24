@@ -8,7 +8,9 @@ asleep) on the first `tools/call`, keeps open browser sessions alive, and puts
 the browser (and Docker when unused) back to sleep after a quiet period.
 
   browser-proxy                   run the MCP proxy (adopts systemd fd 3 if present)
-  browser-proxy --sleep-if-idle   stop Docker + containerd when no container needs them
+  browser-proxy --sleep-if-idle [--after-idle [S]]
+                                  stop Docker + containerd when no container needs them
+                                  (with --after-idle, only after the quiet period)
   browser-proxy --status          print browser/Docker state without waking Docker
   browser-proxy --wake            start Docker (if needed) and loam-browser now
   browser-proxy --sleep           stop loam-browser (and Docker if unused) now
