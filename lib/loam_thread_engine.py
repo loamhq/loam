@@ -19,6 +19,7 @@ from itertools import groupby
 import loam_agents
 import loam_config as lc
 import loam_lane_notice as lane_notice
+import loam_limits as limits
 import loam_provider_memory as provider_memory
 import loam_broker as cfg
 from loam_provider_session import configure_thread
@@ -1443,44 +1444,104 @@ class ThreadEngine:
         resume = bool(kept and kept.get("engine") == engine) and not fresh
         deadline = time.monotonic() + CAP_WAIT_S
         said_wait = False
-        while True:
-            try:
-                session = await self.broker.start_session(
-                    turn.persona, kept["session_id"] if resume else None,
-                    resume=resume, provider=engine,
-                    **({"start_key": f"{turn.thread_id}/{turn.persona}/{turn.input_id}/{engine}"}
-                       if getattr(self.broker, "remote", False) else {}),
-                    **({"model": model} if model else {}),
-                    **({"effort": effort} if effort else {}))
-                # In the background: the check never holds a turn up.
-                asyncio.get_running_loop().create_task(
-                    self._memory_pins(turn.thread_id, engine))
-                break
-            except Exception as exc:  # noqa: BLE001
-                status = getattr(exc, "status", None)
-                if status == 429:
-                    detail = getattr(exc, "detail", None) or {}
-                    if time.monotonic() >= deadline:
-                        raise NoSeat(no_seat_sentence(turn.persona, detail)) from exc
-                    if not said_wait:
-                        # Said once, in the thread and on the stream, so the
-                        # wait is something a person can see happening.
-                        said_wait = True
-                        text = waiting_sentence(turn.persona, detail)
-                        active = self.turns.get(turn.key)
-                        if active is not None:
-                            active["waiting"] = text
-                        # State on the turn, never a line in the record
-                        # (2026-11-19): the app draws `waiting`.
-                        self.publish(turn.thread_id, {
-                            "type": "turn.waiting", "persona": turn.persona,
-                            "text": text})
-                    await asyncio.sleep(CAP_RETRY_S)
-                    continue
-                if resume and status in (404, 409):
-                    resume = False
-                    continue
-                raise
+        wait_start: float | None = None
+        wait_started_at: str | None = None
+        wait_retries = 0
+        wait_reason = "memory"
+        wait_mem: dict | None = None
+        recorded_wait = False
+        try:
+            while True:
+                try:
+                    session = await self.broker.start_session(
+                        turn.persona, kept["session_id"] if resume else None,
+                        resume=resume, provider=engine,
+                        **({"start_key": f"{turn.thread_id}/{turn.persona}/{turn.input_id}/{engine}"}
+                           if getattr(self.broker, "remote", False) else {}),
+                        **({"model": model} if model else {}),
+                        **({"effort": effort} if effort else {}))
+                    if wait_retries > 0 and not recorded_wait:
+                        recorded_wait = True
+                        dur = round(time.monotonic() - (wait_start or time.monotonic()), 1)
+                        limits.record_safe(
+                            "chat_wait",
+                            outcome="started",
+                            subject={"agent": turn.persona, "thread": turn.thread_id,
+                                     "session": getattr(session, "id", None)},
+                            duration_s=dur,
+                            started_at=wait_started_at,
+                            memory=wait_mem,
+                            detail={"reason": wait_reason, "retries": wait_retries,
+                                    "provider": engine},
+                        )
+                    # In the background: the check never holds a turn up.
+                    asyncio.get_running_loop().create_task(
+                        self._memory_pins(turn.thread_id, engine))
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    status = getattr(exc, "status", None)
+                    if status == 429:
+                        detail = getattr(exc, "detail", None) or {}
+                        if wait_retries == 0:
+                            wait_start = time.monotonic()
+                            wait_started_at = limits.now_iso()
+                            wait_reason = detail.get("reason") or "memory"
+                            dmem = detail.get("memory") or {}
+                            wait_mem = limits.snapshot_memory(
+                                available_mb=dmem.get("available_mb"),
+                                reserve_mb=dmem.get("reserve_mb"),
+                                start_mb=dmem.get("need_mb"),
+                            )
+                        wait_retries += 1
+                        if time.monotonic() >= deadline:
+                            if not recorded_wait:
+                                recorded_wait = True
+                                dur = round(time.monotonic() - (wait_start or time.monotonic()), 1)
+                                limits.record_safe(
+                                    "chat_timeout",
+                                    outcome="timed_out",
+                                    subject={"agent": turn.persona, "thread": turn.thread_id},
+                                    duration_s=dur,
+                                    started_at=wait_started_at,
+                                    memory=wait_mem,
+                                    detail={"reason": wait_reason, "retries": wait_retries,
+                                            "provider": engine},
+                                )
+                            raise NoSeat(no_seat_sentence(turn.persona, detail)) from exc
+                        if not said_wait:
+                            # Said once, in the thread and on the stream, so the
+                            # wait is something a person can see happening.
+                            said_wait = True
+                            text = waiting_sentence(turn.persona, detail)
+                            active = self.turns.get(turn.key)
+                            if active is not None:
+                                active["waiting"] = text
+                            # State on the turn, never a line in the record
+                            # (2026-11-19): the app draws `waiting`.
+                            self.publish(turn.thread_id, {
+                                "type": "turn.waiting", "persona": turn.persona,
+                                "text": text})
+                        await asyncio.sleep(CAP_RETRY_S)
+                        continue
+                    if resume and status in (404, 409):
+                        resume = False
+                        continue
+                    raise
+        except BaseException:
+            if wait_retries > 0 and not recorded_wait:
+                recorded_wait = True
+                dur = round(time.monotonic() - (wait_start or time.monotonic()), 1)
+                limits.record_safe(
+                    "chat_wait",
+                    outcome="cancelled",
+                    subject={"agent": turn.persona, "thread": turn.thread_id},
+                    duration_s=dur,
+                    started_at=wait_started_at,
+                    memory=wait_mem,
+                    detail={"reason": wait_reason, "retries": wait_retries,
+                            "provider": engine},
+                )
+            raise
         active = self.turns.get(turn.key)
         if active is not None:
             active.pop("waiting", None)

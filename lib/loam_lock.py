@@ -17,25 +17,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import loam_config as lc
+import loam_limits as limits
 
 # Landing tests use a private table so their locks never contend with live runs.
 LOCK_DIR = Path(os.environ.get("LOAM_LOCK_DIR") or lc.STATE / "locks")
 
 
 def _box_mb() -> int:
-    try:
-        for line in Path("/proc/meminfo").read_text().splitlines():
-            if line.startswith("MemTotal:"):
-                return int(line.split()[1]) // 1024
-    except (OSError, ValueError, IndexError):
-        pass
-    return 7750
+    return limits.box_memory_mb()
 
 
-# Keep the reserve and start size in sync with broker admission.
+# Keep the reserve and start size in sync with broker admission via loam_limits.
 BOX_MB = _box_mb()
-MEMORY_RESERVE_MB = max(2048, BOX_MB * 12 // 100)
-RUN_START_MB = 450
+MEMORY_RESERVE_MB = limits.memory_reserve_mb(BOX_MB)
+RUN_START_MB = limits.start_allowance_mb(BOX_MB)
 
 # Charge recent starts until their footprint is visible in MemAvailable.
 ADMIT_GRACE_S = 60
@@ -261,14 +256,45 @@ def _leave(handle) -> None:
 
 
 def _wait_for_room(me: dict, deadline: float, poll: float):
-    """Poll admission until admitted or the deadline passes. (handle, room)."""
+    """Poll admission until admitted or the deadline passes.
+    Returns ``(handle, room, wait_info)``."""
+    waited = False
+    retries = 0
+    wait_start: float | None = None
+    started_at: str | None = None
+    first_mem: dict | None = None
     while True:
         handle, r = _try_admit(me)
         if handle is not None:
-            return handle, r
+            info = {
+                "waited": waited,
+                "retries": retries,
+                "duration_s": round(time.monotonic() - wait_start, 1) if wait_start is not None else 0.0,
+                "started_at": started_at,
+                "first_mem": first_mem,
+            }
+            return handle, r, info
+        if not waited:
+            waited = True
+            wait_start = time.monotonic()
+            started_at = now_iso()
+            first_mem = limits.snapshot_memory(
+                meminfo_path=MEMINFO,
+                available_mb=r.get("available"),
+                reserve_mb=r.get("reserve"),
+                start_mb=r.get("need"),
+            )
+        retries += 1
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            return None, r
+            info = {
+                "waited": waited,
+                "retries": retries,
+                "duration_s": round(time.monotonic() - wait_start, 1) if wait_start is not None else 0.0,
+                "started_at": started_at,
+                "first_mem": first_mem,
+            }
+            return None, r, info
         time.sleep(min(poll, remaining))
 
 
@@ -291,11 +317,34 @@ def hold(agent: str, lane: str, wait_seconds: float | None = None,
             f"time, so this run is skipped rather than overlapped."
         )
     try:
-        run_handle, r = _wait_for_room(me, deadline, poll)
+        run_handle, r, wait_info = _wait_for_room(me, deadline, poll)
         if run_handle is None:
+            limits.record_safe(
+                "run_skipped",
+                outcome="timed_out",
+                subject={"agent": agent, "lane": lane},
+                duration_s=wait_info["duration_s"],
+                started_at=wait_info["started_at"],
+                memory=wait_info["first_mem"],
+                detail={"reason": "memory", "retries": wait_info["retries"]},
+            )
             raise Busy(
                 f"{lane} waited {minutes} minutes for memory on this box and "
                 f"gave up: {short_text(r)}. This run is skipped."
+            )
+        if wait_info["waited"]:
+            limits.record_safe(
+                "run_wait",
+                outcome="started",
+                subject={"agent": agent, "lane": lane},
+                duration_s=wait_info["duration_s"],
+                started_at=wait_info["started_at"],
+                memory=wait_info["first_mem"],
+                detail={
+                    "reason": "memory",
+                    "retries": wait_info["retries"],
+                    "resolved_available_mb": r.get("available"),
+                },
             )
         try:
             yield
@@ -311,7 +360,7 @@ def hold_slot(agent: str, lane: str, wait_seconds: float | None = None,
     """Admit an independent job by memory. Raise Busy if its wait expires."""
     wait = WAIT_SECONDS if wait_seconds is None else wait_seconds
     me = {"agent": agent, "lane": lane, "pid": os.getpid(), "since": now_iso()}
-    handle, r = _wait_for_room(me, time.monotonic() + wait, poll)
+    handle, r, _ = _wait_for_room(me, time.monotonic() + wait, poll)
     if handle is None:
         raise Busy(short_text(r))
     try:

@@ -39,6 +39,7 @@ import loam_codex_job as codex_job  # noqa: E402
 import loam_engineer as eng  # noqa: E402
 import loam_ci  # noqa: E402
 import loam_github  # noqa: E402
+import loam_limits  # noqa: E402
 import loam_lock  # noqa: E402
 import loam_session  # noqa: E402
 import loam_stuck  # noqa: E402
@@ -1306,12 +1307,82 @@ def queued_ahead(job_id: str) -> int:
     return jobs.index(job_id) if job_id in jobs else len(jobs)
 
 
+def _job_limit_subject(project: eng.Project, job_id: str, lane: str,
+                       p: dict[str, Path]) -> dict:
+    subj: dict[str, str] = {"job": job_id, "project": project.name, "lane": lane}
+    try:
+        meta = read_brief_meta(p)
+        if meta.get("briefed_by"):
+            subj["agent"] = str(meta["briefed_by"])
+        if meta.get("thread"):
+            subj["thread"] = str(meta["thread"])
+    except Exception:  # noqa: BLE001
+        pass
+    return subj
+
+
+def record_job_oom(project: eng.Project, job_id: str, lane: str,
+                   p: dict[str, Path], events: dict, returncode: int | None,
+                   runtime: str | None) -> bool:
+    """Record one durable ``oom_kill`` limit event if the job's cgroup saw
+    kernel OOM kills (whether the CLI itself or a child test/build process)."""
+    kills = int((events or {}).get("oom_kill") or 0)
+    if kills <= 0:
+        return False
+    loam_limits.record_safe(
+        "oom_kill",
+        outcome="killed",
+        subject=_job_limit_subject(project, job_id, lane, p),
+        detail={"source": "cgroup_memory_events",
+                "oom_kills": kills,
+                "returncode": returncode,
+                "provider": runtime},
+    )
+    return True
+
+
 def take_slot(project: eng.Project, job_id: str, lane: str, p: dict[str, Path]):
     """Return an acquired admission context, or finalize cancellation if the job was
     cancelled while waiting."""
     joined = None
+    wait_start: float | None = None
+    first_mem: dict | None = None
+    initial_pos: int | None = None
+    retries = 0
+    saw_memory_wait = False
+    waited_for_queue = False
+
+    def _queue_duration() -> float:
+        joined_ts = loam_limits.parse_iso(joined) if joined else None
+        if joined_ts is not None:
+            return round(max(0.0, time.time() - joined_ts), 1)
+        if wait_start is not None:
+            return round(max(0.0, time.monotonic() - wait_start), 1)
+        return 0.0
+
     while True:
         if p["cancelled"].is_file():
+            if joined is None and p["queued"].is_file():
+                try:
+                    joined = json.loads(p["queued"].read_text(encoding="utf-8")).get("joined")
+                except (OSError, ValueError):
+                    pass
+            if joined is not None:
+                loam_limits.record_safe(
+                    "job_queued",
+                    outcome="cancelled",
+                    subject=_job_limit_subject(project, job_id, lane, p),
+                    duration_s=_queue_duration(),
+                    started_at=joined,
+                    memory=first_mem,
+                    detail={
+                        "reason": "memory",
+                        "position": initial_pos,
+                        "retries": retries,
+                        "had_memory_wait": saw_memory_wait,
+                        "waited_for_queue": waited_for_queue,
+                    },
+                )
             p["queued"].unlink(missing_ok=True)
             write_cancelled(p, job_id)
             return None
@@ -1323,20 +1394,48 @@ def take_slot(project: eng.Project, job_id: str, lane: str, p: dict[str, Path]):
                 lock.__enter__()
             except loam_lock.Busy as exc:
                 held_by = f"memory: {exc}"
+                saw_memory_wait = True
             else:
                 if joined is not None:
                     with (p["dir"] / "queue.log").open("a", encoding="utf-8") as handle:
                         handle.write(f"{eng.iso(eng.now_utc())} started, after "
                                      f"waiting since {joined}\n")
+                    loam_limits.record_safe(
+                        "job_queued",
+                        outcome="started",
+                        subject=_job_limit_subject(project, job_id, lane, p),
+                        duration_s=_queue_duration(),
+                        started_at=joined,
+                        memory=first_mem,
+                        detail={
+                            "reason": "memory",
+                            "position": initial_pos,
+                            "retries": retries,
+                            "had_memory_wait": saw_memory_wait,
+                            "waited_for_queue": waited_for_queue,
+                            "resolved_available_mb": loam_lock.available_mb(),
+                        },
+                    )
                     p["queued"].unlink(missing_ok=True)
                 return lock
         else:
             held_by = f"{ahead} job(s) queued ahead of this one"
+            waited_for_queue = True
         if joined is None:
+            wait_start = time.monotonic()
+            initial_pos = ahead + 1
+            r = loam_lock.room()
+            first_mem = loam_limits.snapshot_memory(
+                meminfo_path=loam_lock.MEMINFO,
+                available_mb=r.get("available"),
+                reserve_mb=r.get("reserve"),
+                start_mb=r.get("need"),
+            )
             try:
                 joined = json.loads(p["queued"].read_text(encoding="utf-8"))["joined"]
             except (OSError, ValueError, KeyError):
                 joined = eng.iso(eng.now_utc())
+        retries += 1
         tmp = p["queued"].with_suffix(".tmp")
         tmp.write_text(json.dumps({"joined": joined, "job": job_id,
                                    "project": project.name, "pid": os.getpid(),
@@ -2788,7 +2887,7 @@ def run_inner(project: eng.Project, job_id: str) -> int:
         # The CLI was the process killed (SIGKILL, so -9), or something it
         # depended on was. Named before the generic exit code, which says
         # nothing about why.
-        outcome = (f"killed at its memory ceiling (exited {returncode}; "
+        outcome = (f"killed out of memory (exited {returncode}; "
                    f"{ceiling['oom_kill']} OOM kill(s) in the unit)")
     elif codex_run and (returncode != 0 or codex_run.failed):
         outcome = f"exited {returncode} (codex: {codex_run.failed or 'no error event'})"
@@ -2907,6 +3006,9 @@ def run_inner(project: eng.Project, job_id: str) -> int:
                  f"{agy_run.model or job_engine(p).get('model') or eng.AGY_ENGINEER_MODEL}`"
                  f" (its level is in the id)")
 
+    final_oom = oom_kills()
+    record_job_oom(project, job_id, lane, p, final_oom, returncode, runtime)
+
     facts = {
         "slug": eng.slug_for(meta["title"] or meta["body"]),
         "briefed_by": meta["briefed_by"],
@@ -2938,7 +3040,7 @@ def run_inner(project: eng.Project, job_id: str) -> int:
         "peak_memory": (f"{mib(session_peak)} by the end of the session, "
                         f"{mib(peak)} with the landing (the unit's cgroup "
                         f"`memory.peak`)" if peak else "—")
-                       + memory_events_note(oom_kills()),
+                       + memory_events_note(final_oom),
         "peak_rss_bytes": peak, "session_peak_bytes": session_peak,
         "worktree": f"`{tree}`" + ("" if tree_alive else " (removed)"),
         # On a project that refreshes its mirror from GitHub as a job begins

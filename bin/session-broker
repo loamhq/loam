@@ -1236,6 +1236,24 @@ class Server:
             await writer.drain()
             return
 
+        if parts == ["v1", "limit-events"] and method == "GET":
+            import loam_limits as limits_mod  # noqa: PLC0415
+            nocache = "Cache-Control: no-store\r\n"
+            try:
+                days = float(params.get("days", "7"))
+                limit = int(params.get("limit", "200"))
+                if days < 0 or limit < 0:
+                    raise ValueError("days and limit must be non-negative")
+                kind = params.get("kind") or None
+                body = await asyncio.to_thread(
+                    limits_mod.query, days=days, kind=kind, limit=limit)
+            except ValueError as exc:
+                writer.write(response(400, {"error": str(exc)}, nocache))
+            else:
+                writer.write(response(200, body, nocache))
+            await writer.drain()
+            return
+
         # Return the configured owner ID and the aliases recognized in existing records.
         if parts == ["v1", "owner"] and method == "GET":
             owner = lc.owner()

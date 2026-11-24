@@ -2973,3 +2973,45 @@ listener for immediate notification in an open page.
   floors the private handoff timer at `max(THREAD_IDLE_S, DEFAULT_THREAD_IDLE_S)`
   (600 s) so short small-box idle unloads do not spawn premature forked handoff
   subprocesses on every 90–120 s pause.
+
+## 2026-11-23 — Scaled memory admission, automatic tiered swap, and durable limit events
+
+- **Scaled admission (`lib/loam_limits.py`) shared by broker and run lock.**
+  Benchmarking live Claude Code turns with the stdlib light MCP servers showed
+  240–287 MB PSS idle and 288–301 MB PSS peak across heavy file reads, tests,
+  and subagents (+30–50 MB turn spike). Admission scales via one authority:
+  - `> 12,288 MB` usable RAM (16 GB+): unchanged `max(2048, 12%)` reserve and
+    `450 MB` start allowance (3,760 MB / 450 MB on 31,335 MB).
+  - `<= 12,288 MB` (2–8 GB): `256 + 12%` reserve (~487 MB on 2 GB, ~718 MB on
+    4 GB, ~1,186 MB on 8 GB) and `350 MB` start allowance.
+  - Installer preflight floor (`bin/loam-install`): `MIN_INSTALL_MEM_MB = 1700`
+    (2 GB) with an explicit note below `RECOMMENDED_MEM_MB = 3600` (4 GB).
+  - Lazy-import `loam_config` inside `loam_limits` paths that need `lc.STATE`,
+    because `bin/loam-install` imports `loam_limits` before `/etc/loam/loam.toml`
+    exists.
+- **Automatic tiered swap (`lib/loam_swap.py`, `bin/loam-swap`, `loam-swap.service`).**
+  Runs on every install (steps 3 and 9) and every `loam update` (`swap` step),
+  and is verified by `bin/check-drift`.
+  - If `/proc/swaps` or `/etc/fstab` already contains any non-Loam swap, Loam
+    detects `mode="operator"` and leaves both the swap and `vm.swappiness`
+    completely untouched.
+  - Otherwise Loam activates compressed `/dev/zram0` (`zstd` > `lz4` > `lzo-rle`,
+    priority 100) ahead of local `/var/lib/loam/swapfile` (priority 10, always
+    on root `/` and never on `--data-dir`, preserving >= 5 GiB free), sized
+    `1 GB + 1 GB` on `<= 3,072 MB` RAM and `2 GB + 2 GB` above (or full budget
+    in swapfile if `zram` is unavailable), plus `/etc/sysctl.d/90-loam-swap.conf`
+    (`vm.swappiness=20`, `vm.page-cluster=0`).
+  - OOM kill order (`AGENT=800`, `CORE=100`, system=`0`) and pressure alarm
+    thresholds (`85%` RAM, `< 15%` swap free, 3 min) remain unchanged.
+- **Durable, countable limit-event log (`<state>/limits/events.jsonl`).**
+  Bounded at `2 MiB` rotating to `.1` (4 MiB max) under `fcntl.flock`, living
+  on `lc.STATE` (data disk on `--data-dir` installs). Strict allowlists strip
+  any non-ID fields so message text or private prose can never enter the file.
+  Ten kinds (`chat_wait`, `chat_timeout`, `chat_evicted`, `run_wait`,
+  `run_skipped`, `job_queued`, `oom_kill`, `pressure_episode`, `sustained_swap`,
+  `summary_deferred`), emitted once per occurrence across `loam_thread_engine`,
+  `loam_session_host`, `loam_lock`, `bin/engineer-job`, `bin/wake`, `bin/review`,
+  `bin/wake-failed`, and `lib/loam_pressure`. Ordinary idle timeouts never emit
+  `chat_evicted`; `sustained_swap` tracks non-alarming sustained swap separately
+  from `pressure_episode`. One read path (`loam_limits.query`) backs `loam limits`,
+  `bin/logs limits`, `GET /v1/limit-events`, and `mcp__engineer__limits`.

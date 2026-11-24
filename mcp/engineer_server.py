@@ -152,8 +152,9 @@ mcp = MCPServer("loam-engineer")
         "there is none.\n"
         "\n"
         "**Jobs start by the box's memory, not by a count.** A job starts "
-        "when the box has room for it (the session broker's rule: 2 GB or "
-        "12% of RAM kept free). With no room it queues and starts by itself; "
+        "when the box has room for it (the session broker's rule: 256 MB plus "
+        "12% of RAM kept free on servers under 16 GB, or 2 GB / 12% on 16 GB+). "
+        "With no room it queues and starts by itself; "
         "`status` says what it waits on. Once started, a job has no per-job "
         "memory ceiling; if the box runs out of memory, the kernel ends an "
         "agent run before Loam's own services.\n"
@@ -311,6 +312,7 @@ async def cancel(job_id: str, by: str) -> str:
 
 SITE = str(lc.ROOT / "bin" / "site")
 THREAD = str(lc.ROOT / "bin" / "thread")
+LIMITS = str(lc.ROOT / "bin" / "loam-limits")
 
 
 async def _hand_off(argv: list[str], value_stdin: bytes | None = None) -> str:
@@ -523,6 +525,27 @@ async def settings(action: str = "describe", setting: str = "", value: str = "",
         argv.append(setting)
         if action in ("set", "do") and value != "":
             argv.append(value)
+    return await _hand_off(argv)
+
+
+@mcp.tool(
+    name="limits",
+    description=(
+        "Read durable memory and capacity limit events on this server over the "
+        "last `days` days (default 7; 0 for all kept history): counts by kind "
+        "(`chat_wait`, `chat_timeout`, `chat_evicted`, `run_wait`, "
+        "`run_skipped`, `job_queued`, `oom_kill`, `pressure_episode`, "
+        "`sustained_swap`, `summary_deferred`), any active episode, the box's "
+        "current RAM/reserve/swap summary, and raw events (IDs, durations and "
+        "memory snapshots only; no message content). Optionally filter by "
+        "`kind` (one or comma-separated) or cap raw events with `limit`. "
+        "Read-only; same data as `loam limits --json` and `GET /v1/limit-events`."
+    ),
+)
+async def limits(days: int = 7, kind: str = "", limit: int = 200) -> str:
+    argv = [LIMITS, "--json", "--days", str(days), "--limit", str(limit)]
+    if kind:
+        argv += ["--kind", kind]
     return await _hand_off(argv)
 
 

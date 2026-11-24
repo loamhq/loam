@@ -185,6 +185,19 @@ def main() -> int:
             stage=f"systemd result={result} code={code} status={status}",
             reported_by="wake-failed")
 
+    if result == "oom-kill":
+        import loam_limits  # noqa: PLC0415
+        subj = {"agent": agent, "lane": lane, "unit": unit}
+        if lane.startswith("job:"):
+            subj["job"] = lane[len("job:"):]
+        loam_limits.record_safe(
+            "oom_kill",
+            outcome="killed",
+            subject=subj,
+            detail={"source": "systemd_onfailure", "systemd_result": result,
+                    "returncode": int(status) if status.isdigit() else None},
+        )
+
     # The marker has served its purpose. Leaving it would make the next
     # failure of any kind look like a second unrecorded death.
     marker.unlink(missing_ok=True)

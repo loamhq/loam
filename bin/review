@@ -804,6 +804,16 @@ def run(pinned: str | None) -> int:
     log_line(record)
 
     if not ok:
+        import loam_limits  # noqa: PLC0415
+        oom = loam_limits.cgroup_oom_kills()
+        if oom and returncode != 0:
+            loam_limits.record_safe(
+                "oom_kill",
+                outcome="killed",
+                subject={"agent": AGENT, "lane": LANE},
+                detail={"source": "cgroup_memory_events", "oom_kills": oom,
+                        "returncode": returncode, "provider": PROVIDER},
+            )
         cause = (None if probe or antigravity or on_codex
                  else loam_session.api_error(envelope.get("session_id")))
         notice(f"{LANE} run {run_id}: {outcome}"

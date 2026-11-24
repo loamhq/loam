@@ -655,6 +655,16 @@ def run_codex(project: Path, agent: str, vault: Path, started: str,
             return account_refused(agent, vault, started, lane, "invoke", refused,
                                    finished=finished, codex_thread=out.thread_id,
                                    **spent, **memory)
+        if memory.get("mem_oom_kill"):
+            import loam_limits  # noqa: PLC0415
+            loam_limits.record_safe(
+                "oom_kill",
+                outcome="killed",
+                subject={"agent": agent, "lane": lane},
+                detail={"source": "cgroup_memory_events",
+                        "oom_kills": memory["mem_oom_kill"],
+                        "provider": LANE_PROVIDER},
+            )
         reason = f"{lane}: the Codex turn failed: {(out.error or '')[:400]}"
         print(reason, file=sys.stderr)
         record_failure(agent, vault, reason)
@@ -891,6 +901,17 @@ def run(project: Path, agent: str, vault: Path, started: str,
             return account_refused(agent, vault, started, lane, "invoke",
                                    refused, finished=finished, **spent,
                                    **memory)
+        if memory.get("mem_oom_kill"):
+            import loam_limits  # noqa: PLC0415
+            loam_limits.record_safe(
+                "oom_kill",
+                outcome="killed",
+                subject={"agent": agent, "lane": lane},
+                detail={"source": "cgroup_memory_events",
+                        "oom_kills": memory["mem_oom_kill"],
+                        "returncode": result.returncode,
+                        "provider": LANE_PROVIDER},
+            )
         reason = (
             f"{lane}: claude exited {result.returncode} (subtype={subtype}): "
             f"{(result.stderr or result.stdout or '').strip()[:400]}"
@@ -1031,6 +1052,17 @@ def deliver_attention(project: Path, agent: str, vault: Path) -> str:
                        **cgroup_memory()}
                 if not ok:
                     row["stage"] = "invoke"
+                    if row.get("mem_oom_kill"):
+                        import loam_limits  # noqa: PLC0415
+                        loam_limits.record_safe(
+                            "oom_kill",
+                            outcome="killed",
+                            subject={"agent": agent, "lane": lane},
+                            detail={"source": "cgroup_memory_events",
+                                    "oom_kills": row["mem_oom_kill"],
+                                    "returncode": extra.get("returncode"),
+                                    "provider": LANE_PROVIDER},
+                        )
                     record_failure(agent, vault, (
                         f"{lane}: the run handing over {len(records)} fact(s) about "
                         f"the system failed ({str(extra.get('error') or '')[:300]}); "
@@ -1146,6 +1178,17 @@ def _deliver(project: Path, agent: str, vault: Path, record: dict, lane: str,
            **cgroup_memory()}
     if not ok:
         row["stage"] = "invoke"
+        if row.get("mem_oom_kill"):
+            import loam_limits  # noqa: PLC0415
+            loam_limits.record_safe(
+                "oom_kill",
+                outcome="killed",
+                subject={"agent": agent, "lane": lane, "job": job},
+                detail={"source": "cgroup_memory_events",
+                        "oom_kills": row["mem_oom_kill"],
+                        "returncode": extra.get("returncode"),
+                        "provider": LANE_PROVIDER},
+            )
         record_failure(agent, vault, (
             f"{lane}: the run handing over engineer job {job}'s result failed "
             f"({str(extra.get('error') or '')[:300]}). The receipt is at "

@@ -614,9 +614,10 @@ left in that persona's commons inbox.
   then skips, recording a line in [[loam-wake-failures]]. It never kills the
   holder.
 - **No count of runs across the box.** A run starts when the box has the
-  memory for it (2 GB or 12% of RAM kept free, as the session broker
-  admits a chat); one that finds no room waits 20 minutes and then skips,
-  the same way. No run has a wall clock or a round-trip cap.
+  memory for it (256 MB plus 12% of RAM kept free on servers under 16 GB,
+  or 2 GB / 12% on 16 GB+, as the session broker admits a chat); one that
+  finds no room waits 20 minutes and then skips, the same way. No run has
+  a wall clock or a round-trip cap.
 - Every run loads the agent's soul, config and map when present. A cron adds
   its own instruction file.
 - **Every persona wakes once a day**, by its reflection record: its body is

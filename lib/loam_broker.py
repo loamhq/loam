@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import loam_config as lc
+import loam_limits as limits
 
 import loam_provider_usage as usage_store
 from loam_permissions import PERMISSION_MODE
@@ -136,28 +137,23 @@ SERVICE = "loam-session-broker.service"
 # and what keeps a runaway one from taking the box with it is the OOM order
 # (`CHILD_OOM_SCORE_ADJ`), not a cap (the unit's MemoryMax went 2026-11-16).
 def _box_mb() -> int:
-    try:
-        for line in Path("/proc/meminfo").read_text().splitlines():
-            if line.startswith("MemTotal:"):
-                return int(line.split()[1]) // 1024
-    except (OSError, ValueError, IndexError):
-        pass
-    return 7750
+    return limits.box_memory_mb()
 
 
 BOX_MB = _box_mb()
 
-# What a session needs to start: the CLI plus the persona's stdio MCP
-# servers, ~394-450 MB measured 2026-09-16 and 2026-10-14. A start is the
-# only moment a size is assumed; after it, a session takes what it takes.
-SESSION_START_MB = 450
+# Scaled admission sizing (lib/loam_limits.py):
+# - 16 GB+ servers (> 12,288 MB usable RAM) keep the original max(2048, 12%)
+#   reserve and 450 MB start allowance unchanged (3,760 MB reserve on 31,335 MB;
+#   2,048 MB on 16 GB).
+# - Smaller servers (2, 4, 8 GB) reserve 256 MB + 12% of RAM for kernel, page
+#   cache, in-flight spikes and un-admitted services, with a 350 MB start
+#   allowance matching post-stdlib-MCP session footprints (~250-310 MB PSS).
+memory_reserve_mb = limits.memory_reserve_mb
+session_start_mb = limits.start_allowance_mb
 
-# Kept free for everything that is not a chat: 2 GB, or 12% of RAM on a
-# bigger box. 2,048 MB on the 7,750 MB CX33 (where ~2.6 GB of Remote Control servers,
-# retired 2026-11-19, and ~1.2 GB of docker are already counted out of MemAvailable, and this is the
-# room for a wake, an engineer job at its 1 GiB High and the browser to
-# start), 3,870 MB on the 32 GB CX53.
-MEMORY_RESERVE_MB = max(2048, BOX_MB * 12 // 100)
+SESSION_START_MB = session_start_mb(BOX_MB)
+MEMORY_RESERVE_MB = memory_reserve_mb(BOX_MB)
 
 # Not a limit anybody should meet: a sanity backstop against a loop that
 # starts sessions, at one per 256 MB of RAM. 30 on the CX33 (7,750 MB),

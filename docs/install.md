@@ -11,7 +11,8 @@ table in `lib/loam_deploy.py`. Tests: `tests/test_install.py`,
 ## The command
 
 Run as root on a fresh Debian 12 or 13, or Ubuntu 24.04 or 26.04 server
-with a public IPv4 address, at least 4 GB of memory and 15 GB of free disk.
+with a public IPv4 address, at least 2 GB of memory (4 GB or more
+recommended for parallel work) and 15 GB of free disk.
 
 ```sh
 curl -fsSL https://<where the release is>/install.sh | sudo bash -s -- --domain loam.example.com
@@ -115,11 +116,54 @@ Loam's symlink-refusing guards all behave identically to a single-disk install:
     caches), `.config/systemd/user` and `.config/environment.d` (regenerated
     per server), and `.local/state/loam/worktrees` (engineer job checkouts and
     builds).
-  - System paths on `/`: `/var/lib/loam/{install,edge.json,browser,host-history}`,
+  - System paths on `/`: `/var/lib/loam/{install,edge.json,browser,host-history,swapfile}`,
     `/var/lib/loam-releases/`, `/var/lib/loam-app/`, `/var/lib/docker/`
     (images, containers, ephemeral `authelia-sessions`), `/var/lib/caddy/`
     (TLS certificates, re-issued automatically), `/var/cache/loam/`,
     `/opt/loam/chromium/`, `/tmp/loam-job-*`.
+
+## Memory floor and automatic swap
+
+Preflight (`bin/loam-install`, `lib/loam_limits.py`) accepts servers from
+**2 GB** of RAM (`MemTotal >= 1,700 MB`, allowing for kernel-reserved memory on
+2 GiB and decimal 2 GB VMs) and notes when a box is under the **4 GB**
+(`3,600 MB`) recommendation for parallel work.
+
+Admission scales with usable RAM (`lib/loam_limits.py`):
+
+| Server size | Usable RAM (`MemTotal`) | Reserve (`MEMORY_RESERVE_MB`) | Start allowance |
+|---|---:|---:|---:|
+| 2 GB | ~1,930 MB | `256 + 12%` (~487 MB) | 350 MB |
+| 4 GB | ~3,850 MB | `256 + 12%` (~718 MB) | 350 MB |
+| 8 GB | ~7,750 MB | `256 + 12%` (~1,186 MB) | 350 MB |
+| 16 GB | ~15,600 MB | `max(2048, 12%)` (2,048 MB) | 450 MB |
+| 32 GB | ~31,335 MB | `max(2048, 12%)` (3,760 MB) | 450 MB |
+
+On every fresh install (steps 3 and 9) and every `loam update` (`swap` step),
+`bin/loam-swap` (`lib/loam_swap.py`) ensures tiered swap is active and persists
+across reboots via `loam-swap.service`:
+
+- **Existing operator swap is never touched.** If `/proc/swaps` or `/etc/fstab`
+  already carries any non-Loam swap (a swap partition, a cloud-init `/swapfile`,
+  or another swap tool), `loam-swap` leaves it and the host's `vm.swappiness`
+  completely alone.
+- **Tier 1 — compressed RAM (`zram`, priority 100):** when the kernel provides
+  the `zram` module, Loam activates `/dev/zram0` with `zstd` (falling back to
+  `lz4` then `lzo-rle`) ahead of disk swap so cold heap pages compress in RAM
+  without spending cloud disk IOPS or slowing down metered storage.
+- **Tier 2 — local disk swapfile (`/var/lib/loam/swapfile`, priority 10):**
+  backs overflow beyond zram, or takes the full swap budget on kernels without
+  `zram`. The swapfile always stays on the server's local root disk — never on
+  `--data-dir` — and leaves at least 5 GiB free on `/`.
+- **Sizing:** `<= 3,072 MB` usable RAM gets `1 GB zram + 1 GB swapfile` (or
+  `2 GB` swapfile alone); larger boxes get `2 GB zram + 2 GB swapfile` (or
+  `4 GB` swapfile alone).
+- **Tuning and OOM order:** when Loam manages swap, it writes
+  `/etc/sysctl.d/90-loam-swap.conf` (`vm.swappiness = 20`, `vm.page-cluster = 0`)
+  so the kernel prefers keeping active pages in RAM and reads zram/swap without
+  wasteful multi-page readahead. OOM kill order (`AGENT_OOM_SCORE_ADJ = 800`,
+  `CORE_OOM_SCORE_ADJ = 100`, system services `0`) and the pressure alarm
+  (`85%` RAM or `< 15%` swap free for 3 minutes) stay intact.
 
 ### Moving the disk to a fresh server
 
