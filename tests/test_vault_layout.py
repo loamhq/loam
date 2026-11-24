@@ -46,6 +46,8 @@ proj = eng.Project("widget", vault, vault, platform=False, record={})
 print(json.dumps({
     "failure_log": loam_inbox.FAILURE_LOG,
     "activity_log": str(loam_activity.FAILURE_LOG.relative_to(lc.VAULT)),
+    "engineer_dir": lc.engineer_vault_dir(),
+    "schedule_page": lc.schedule_page(),
     "receipts": str(proj.receipts_dir(vault).relative_to(vault)),
     "pinned": list(loam_files.RENAME_PINNED),
     "system_sources": loam_files.SYSTEM_VAULT_SOURCES,
@@ -107,10 +109,17 @@ def main() -> int:
     check("an install: the failure log is in Loam files (System)",
           (inst["failure_log"], inst["activity_log"]),
           ("System/loam-wake-failures.md", "System/loam-wake-failures.md"))
+    check("an install: engineer files and schedule page live in Loam files (System)",
+          (inst["engineer_dir"], inst["schedule_page"]),
+          ("System/engineer", "System/schedule.md"))
+    check("an install: SYSTEM_VAULT_SOURCES points at System/engineer", inst["system_sources"], {
+        "Engineer/Role.md": "System/engineer/role.md",
+        "Engineer/Platform project.md": "System/engineer/projects/loam.md"})
     check("an install: receipts under Projects", inst["receipts"], "Projects/widget/receipts")
     check("an install: pinned paths are the install's",
-          inst["pinned"][:3], ["System/loam-wake-failures.md", "Inbox/archive",
-                               "Projects/*/receipts"])
+          inst["pinned"][:6], ["System/loam-wake-failures.md", "Inbox/archive",
+                               "Projects/*/receipts", "System/engineer/role.md",
+                               "System/engineer/projects/loam.md", "System/schedule.md"])
     check("an install: the inbox sweep reads the install's folders", inst["sweep"],
           "Inbox/archive")
     check("an install: a failure lands there", inst["written"],

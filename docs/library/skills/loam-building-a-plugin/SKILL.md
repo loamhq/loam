@@ -137,7 +137,7 @@ attention".
 (`paths.plugins` in `bin/loam-config show`), a git repository committed
 every 15 minutes, which updates never touch. A plugin there with the id of
 one Loam ships wins over it. Put a new one there, then turn it on in
-Settings > Plugins or with `mcp__engineer__settings`. A wrong manifest is
+Settings › Plugins or with `mcp__engineer__settings`. A wrong manifest is
 listed as broken with its reason, line by line, and breaks nothing else.
 
 **A theme** is the quickest plugin to make. Copy one Loam ships (in

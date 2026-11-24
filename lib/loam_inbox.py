@@ -26,14 +26,15 @@ FAILURE_LOG_LINK = "[[loam-wake-failures]]"
 FAILURE_LOG_HEADER = """\
 # Loam wake failures
 
-Appended by `agents/bin/wake`, `agents/bin/wake-failed` and
-`agents/bin/lane-check` when a scheduled wake does not complete or the
-nightly lane check finds a broken layer. A run of these starting on the same
-night across agents can indicate the sign-in expired. Failed runs and system
-faults go to the agent selected in Settings › Agents. A persona also hears
-about its own latest failed scheduled run at its next turn. A line that says
-"a warning, not a refusal" is a run that went ahead, written at most once a
-night.
+An append-only history log written by Loam when a scheduled wake does not
+complete or the nightly check finds a broken layer. Older entries stay in this
+log after the underlying issue is fixed — check **Activity** or ask the agent
+chosen in **Settings › Agents** for current status. A cluster of entries on the
+same night across agents usually means a provider sign-in expired. Failed runs
+and system faults go to the agent chosen in Settings › Agents, and a persona
+also hears about its own latest failed scheduled run at its next turn. A line
+that says "a warning, not a refusal" is a run that went ahead, written at most
+once a night.
 
 """
 

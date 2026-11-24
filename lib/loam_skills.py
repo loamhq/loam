@@ -379,31 +379,27 @@ def vault_readme(folders: dict[str, str] | None = None) -> str:
     boards = f["boards"]
     return f"""# Your files
 
-Everything here is yours: plain Markdown and files, readable by you, your agents
-and any editor. Change any of it. Loam finds its own folders by the names in
-its configuration (`/etc/loam/loam.toml`, `[vault]`), so a folder renamed
-there keeps working.
+Everything here belongs to you: plain notes and files that you and your agents
+can read and edit. Add folders, reorganize, or edit and delete this note
+whenever you like.
 
-In Files, this folder is **Your files**; each agent’s own workspace is in
-**Agent files**; and Loam’s machinery folders sit together at the bottom of
-Your files under **Loam files**.
+In Files, this folder is **Your files**, each agent’s own workspace is in
+**Agent files**, and the folders Loam uses to run sit at the bottom under
+**Loam files** (you’ll rarely need to open them).
 
 | File or folder | What it is for |
 |---|---|
-| `{ABOUT_ME}` | What your agents know about you. They add to it as they learn; read it and edit it whenever you like. |
-| `{projects}/` | Your projects and their notes, starting with `{projects}/Loam/{START_HERE}`. |
-| `{f['conversations']}/` | **Loam files** — the record of every chat, written by Loam as you talk. Read it; do not edit it. |
-| `{f['attachments']}/` | **Loam files** — images and files you add to a chat. |
-| `{boards}/` | **Loam files** — each chat’s board. |
-| `{system}/` | **Loam files** — how your agents work: shared skills, docs, conventions. |
-| `{system}/{LOAM_DIR}/` | Loam’s own skills and docs. **Each update replaces this folder**; put your changes somewhere else. |
-| `{system}/{OWN_DIR}/` | Your shared shelf of skills, read by every agent. Updates never touch it. |
+| `{ABOUT_ME}` | What your agents know about you. They add to it as they learn; read or edit it anytime. |
+| `{projects}/` | Your projects and notes. New installs start with a short guide at `{projects}/Loam/{START_HERE}`. |
+| `{f['conversations']}/` | **Loam files** — saved records of your chats, written automatically. Read-only. |
+| `{f['attachments']}/` | **Loam files** — images and files you attach in chats. |
+| `{boards}/` | **Loam files** — chat boards, when you use the Boards plugin. |
+| `{system}/` | **Loam files** — shared skills, dictation terms, and Loam’s own settings and docs. |
+| `{system}/{LOAM_DIR}/` | Loam’s built-in docs and skills, refreshed on each update. |
+| `{system}/{OWN_DIR}/` | Shared skills for all your agents. Updates never touch it. |
 
-Optional folders such as `Inbox/`, `Daily/` or `Images/` are created only when
-you turn on Files quick actions or generate an image, or when you make them yourself.
-
-A skill is a folder with a `SKILL.md` in it. An agent’s own skill, in its
-workspace’s `skills/`, wins over a shared one with the same name.
+Extra folders such as `Inbox/`, `Daily/` or `Images/` appear only if you turn
+on Files quick actions or Images in Settings › Plugins, or make them yourself.
 """
 
 
@@ -411,8 +407,9 @@ OWN_SHELF_README = """# Shared skills
 
 Every agent reads the skills on this shelf, whatever its provider. A skill is
 a folder holding a `SKILL.md` (frontmatter with `name`, matching the folder,
-and `description`; the instructions below it). Marketplace skills install
-here, and so does a skill an agent writes for every agent.
+and `description`; the instructions below it). Put skills here that you want
+every agent to share — ones you or an agent write, or skill folders you copy
+from the Market.
 
 Loam's updates never touch this folder. A skill here wins over one of
 Loam's with the same name, and an agent's own skill (in its workspace's

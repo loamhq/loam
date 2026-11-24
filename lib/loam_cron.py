@@ -57,8 +57,10 @@ UNIT_PREFIX = "loam-cron-"
 # uses another zone.
 TZ = lc.TIMEZONE
 
-# Render the schedule page inside the install's configured projects folder.
-SCHEDULE_PAGE = f"{lc.vault_folder('projects')}/Loam/infrastructure/schedule.md"
+# Render the schedule page inside the install's configured vault location
+# (System/schedule.md on standard installs, or <projects>/Loam/infrastructure/schedule.md
+# on legacy custom vault.projects layouts).
+SCHEDULE_PAGE = lc.schedule_page()
 
 DAYS = {
     "monday": "Mon", "tuesday": "Tue", "wednesday": "Wed",
@@ -356,7 +358,7 @@ def parse_record(agent: str, name: str, text: str,
             f"{path} carries header key(s) a record does not have: "
             f"{', '.join(unknown)}. The keys are {', '.join(HEADER_KEYS[:-1])}"
             f". Tool grants are not a record's to carry: they are {lc.OWNER_NAME}'s, "
-            f"in agents/lib/loam_engineer.py.", key=unknown[0])
+            f"in lib/loam_engineer.py.", key=unknown[0])
     # Size checks report overlong instructions separately from validating or running the
     # record.
     enabled = parse_enabled(header)
@@ -580,28 +582,25 @@ PAGE_TEMPLATE = """\
 ---
 type: infrastructure
 infrastructure_for: schedule
-generated_by: agents/lib/loam_schedule.py
+generated_by: lib/loam_cron.py
 generated_at: {when}
 ---
 # Schedule
 
-Everything that runs on this box unattended, per agent. **Generated — do not
-edit by hand.** It is rewritten by the schedule reconciler
-(`agents/lib/loam_schedule.py`) whenever a record changes, and by
-`agents/bin/provision`; an edit here changes nothing. Companion to
-[[agent-runtime]].
+Everything that runs on this server unattended, per agent. **Generated — do not
+edit by hand.** It is rewritten automatically by Loam's schedule reconciler
+whenever a schedule changes, and by `bin/provision`; an edit here changes
+nothing. View and edit each agent's schedules in **Settings › Agents**.{companion}
 
 {table}
 
-Times are Pacific. Every row is a record under `ai-labs/<agent>/crons/`, the
-nightly reflection included (`crons/reflection.md`), and a record is live
-exactly when it says `enabled: true`: the reconciler installs, moves, pauses
-and removes its timer within a minute of the record changing (since
-2026-10-14; before that a cron needed `approved:` and a hand install). Every
-change and every fire is a line in `agents/state/schedules/events.jsonl`. The
-review lane is the reviewer's (not a persona; Move 11, 2026-09-09): one
-persona's workspace read each night, least recently reviewed first, and a note
-left in that persona's commons inbox.
+Times are {zone_word}. Every row is a record under `{workspaces}/<agent>/crons/`,
+the daily reflection included (`crons/reflection.md`), and a record is live
+while it says `enabled: true`: the reconciler installs, moves, pauses and
+removes its timer within a minute of the record changing. Every change and
+every fire is recorded in `{events_path}`. The review lane (when the reviewer
+plugin is on) reads one agent's workspace each night, least recently reviewed
+first, and leaves a note in that agent's commons inbox.
 
 ## Paused, refused or done
 
@@ -630,6 +629,7 @@ def schedule_page(vault: Path = VAULT, names: list[str] | None = None,
                   stamp: str | None = None) -> str:
     names = names if names is not None else roster()
     when = stamp or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
+    ws_name = AI_LABS.name
     # The page shows what the box will do, so a row is a timer that stands
     # (read off the unit directory) described by its record; a record with no
     # timer is listed below the table with why.
@@ -638,8 +638,9 @@ def schedule_page(vault: Path = VAULT, names: list[str] | None = None,
     for agent in names:
         config = json.loads(
             (AI_LABS / agent / "agent.json").read_text(encoding="utf-8"))
+        display = (config.get("display") or "").strip() or agent.capitalize()
         for cron_agent, cron_name, path in proposals([agent]):
-            rel = f"`ai-labs/{cron_agent}/crons/{cron_name}.md`"
+            rel = f"`{ws_name}/{cron_agent}/crons/{cron_name}.md`"
             try:
                 cron = read_cron(cron_agent, cron_name)
             except CronError as exc:
@@ -652,7 +653,7 @@ def schedule_page(vault: Path = VAULT, names: list[str] | None = None,
             lane = ("reflection" if cron.kind == "reflection"
                     else f"{'one-off' if cron.at else 'cron'} `{cron_name}`")
             if cron.live and timer.is_file():
-                rows.append((config["display"], lane, cron.schedule_text,
+                rows.append((display, lane, cron.schedule_text,
                              f"`{cron.unit}.timer`", rel))
             else:
                 why = (f"done {cron.done}" if cron.done
@@ -678,15 +679,20 @@ def schedule_page(vault: Path = VAULT, names: list[str] | None = None,
         ))
 
     table = [
-        "| Agent | Lane | When (Pacific) | Timer | Definition |",
+        f"| Agent | Lane | When ({lc.ZONE_WORD}) | Timer | Definition |",
         "| :---- | :--- | :------------- | :---- | :--------- |",
     ]
     table += ["| " + " | ".join(row) + " |" for row in rows]
 
     pending = "\n".join(elsewhere) or "_None._"
+    page_parent = (vault / SCHEDULE_PAGE).parent
+    companion = " Companion to [[agent-runtime]]." if (page_parent / "agent-runtime.md").is_file() else ""
+    events_path = str(lc.STATE / "schedules" / "events.jsonl")
 
     return PAGE_TEMPLATE.format(
         when=when, table="\n".join(table), pending=pending,
+        zone_word=lc.ZONE_WORD, workspaces=ws_name,
+        events_path=events_path, companion=companion,
     )
 
 

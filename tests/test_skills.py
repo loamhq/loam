@@ -122,6 +122,12 @@ def main() -> int:
           all(f"`{n}/`" in readme for n in ("Conversations", "Projects",
                                              "Attachments", "Boards", "System", "System/Loam",
                                              "System/skills")), True)
+    check("the README stays plain-spoken (no config paths or SKILL.md jargon)",
+          "/etc/loam/loam.toml" not in readme and "[vault]" not in readme and "SKILL.md" not in readme,
+          True)
+    own_readme = (lc.VAULT / "System" / "skills" / "README.md").read_text()
+    check("System/skills/README.md does not falsely claim Marketplace auto-installs skills",
+          "Marketplace skills install here" not in own_readme, True)
 
     (lc.VAULT / "README.md").write_text("mine\n")
     (lc.VAULT / "System" / "skills" / "README.md").write_text("mine too\n")

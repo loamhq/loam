@@ -558,7 +558,7 @@ def engineers(running: dict | None = None) -> dict:
             deploy_on = eng.deploy_default(lane)
         if project.platform:
             instructions = {"root": "vault",
-                            "path": "40_PROJECTS/Loam/engineer/projects/loam.md",
+                            "path": f"{lc.engineer_vault_dir()}/projects/loam.md",
                             "system": {"root": "system",
                                        "path": "Engineer/Platform project.md"},
                             "host_path": str(eng.ENGINEER / "project.md")}

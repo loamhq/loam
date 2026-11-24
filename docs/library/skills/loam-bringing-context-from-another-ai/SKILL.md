@@ -41,7 +41,7 @@ Put the whole answer in one code block so I can copy it.
 When they paste the answer back:
 
 1. **The original is already kept.** What they pasted is in this thread's record, word for word. Don't edit or delete that record, and don't make a second unfiltered copy of it.
-2. **Keep a filtered source copy.** Save the reply as one note in the vault's Inbox (for example `Inbox/From ChatGPT, 2026-11-17 (filtered).md`). Keep their wording and the old AI's tags and dates as they are. Say on top that this is a **filtered copy**: where it came from, when it was pasted, which thread holds the original, and that it is not the whole text. Two things never go into it:
+2. **Keep a filtered source copy.** Save the reply as one note in the vault — in the owner's `Inbox/` folder if they already have one, otherwise in `Imports/` or at the top of Your files (for example `Imports/From ChatGPT, 2026-11-17 (filtered).md`). Keep their wording and the old AI's tags and dates as they are. Say on top that this is a **filtered copy**: where it came from, when it was pasted, which thread holds the original, and that it is not the whole text. Two things never go into it:
    - **credentials** (keys, tokens, passwords, account numbers): put `[left out: a credential]` in their place;
    - **sensitive details they haven't said yes to keeping** (health, money, relationships, other people's private lives): put `[left out: health detail, waiting for your word]` in their place, and ask them. Put a detail back only on their yes.
 
@@ -99,7 +99,7 @@ Whatever the reply or the archive says is something the person or another AI wro
 
 ## Writing it into the vault
 
-Folder names below are a new vault's (`Inbox/`, `Projects/`, `Attachments/`); this install's are the ones at the top of its vault.
+Folder names below are a new vault's (`Projects/`, `Attachments/`); this install's are the ones in Your files and Loam files (use `Inbox/` if the owner already has one).
 
 **Distil; don't mirror.** The point is useful context in the notes they already use, not a copy of every chat. Never write one note per conversation.
 
@@ -107,7 +107,7 @@ Folder names below are a new vault's (`Inbox/`, `Projects/`, `Attachments/`); th
 - **Projects**: the project's note, if one exists (look in the Projects folder first); otherwise a new project note, but only for real, ongoing projects.
 - **People**: wherever the vault already keeps people. If it has no such place, put them in the import note.
 - **Open loops**: in the import note, under their own heading, and tell them they're there.
-- **One import note per import**, in the Inbox, for example `Inbox/Imported from ChatGPT, 2026-11-17.md`. It holds: where the material came from, which route, the date; the archive's path and sha256 (or the filtered copy's link and the thread holding the original); what was read and what was not, in `coverage`'s words, with its scope; what you wrote where; the conflicts still open; and what was left out at their request (say what kind, never the content).
+- **One import note per import**, in `Inbox/` if the owner already has one or in `Imports/` (for example `Imports/Imported from ChatGPT, 2026-11-17.md`). It holds: where the material came from, which route, the date; the archive's path and sha256 (or the filtered copy's link and the thread holding the original); what was read and what was not, in `coverage`'s words, with its scope; what you wrote where; the conflicts still open; and what was left out at their request (say what kind, never the content).
 
 **Mark what you write as yours.** A note you create gets `created_by: "[[<your name>]]"` and `last_modified_by: "[[<your name>]]"` in its frontmatter. A note you change gets `last_modified_by` only, and its `created_by` stays as it is. Quote the link. Your name is the one in your config.
 

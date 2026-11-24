@@ -79,8 +79,8 @@ def stock_dirt() -> list[str]:
     return json.loads(done.stdout)
 
 
-ROLE = VAULT / "Projects" / "Loam" / "engineer" / "role.md"
-PROJECT = VAULT / "Projects" / "Loam" / "engineer" / "projects" / "loam.md"
+ROLE = VAULT / "System" / "engineer" / "role.md"
+PROJECT = VAULT / "System" / "engineer" / "projects" / "loam.md"
 LIVE_ROLE = INSTALL / "engineer" / "role.md"
 LIVE_PROJECT = INSTALL / "engineer" / "project.md"
 
@@ -109,9 +109,11 @@ try:
 
     # -- a fresh install -------------------------------------------------------
     out = provision()
-    check("fresh: the role is seeded into the vault", ROLE.read_text(), shipped_role)
-    check("fresh: the project file is seeded into the vault",
+    check("fresh: the role is seeded into Loam files (System/engineer)", ROLE.read_text(), shipped_role)
+    check("fresh: the project file is seeded into Loam files (System/engineer)",
           PROJECT.read_text(), shipped_project)
+    check("fresh: Projects/Loam/engineer is not created",
+          (VAULT / "Projects" / "Loam" / "engineer").exists(), False)
     check("fresh: the engineer's role is the shipped one, verbatim",
           LIVE_ROLE.read_text(), shipped_role)
     check("fresh: its project file too", LIVE_PROJECT.read_text(), shipped_project)

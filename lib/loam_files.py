@@ -102,10 +102,10 @@ SYSTEM_FILES = {
     "Reviewer/CLAUDE.md": "reviewer/CLAUDE.md",
 }
 # Generated System documents link back to the editable vault sources copied by provision.
+_ENG_DIR = lc.engineer_vault_dir()
 SYSTEM_VAULT_SOURCES = {
-    "Engineer/Role.md": f"{lc.vault_folder('projects')}/Loam/engineer/role.md",
-    "Engineer/Platform project.md":
-        f"{lc.vault_folder('projects')}/Loam/engineer/projects/loam.md",
+    "Engineer/Role.md": f"{_ENG_DIR}/role.md",
+    "Engineer/Platform project.md": f"{_ENG_DIR}/projects/loam.md",
 }
 
 # Vault machinery folders hidden from the main Your files listing and gathered
@@ -113,7 +113,7 @@ SYSTEM_VAULT_SOURCES = {
 LOAM_FOLDER_DESCRIPTIONS = (
     ("conversations", "The record of every chat, written as you talk."),
     ("attachments", "Images and files added to chats."),
-    ("boards", "Each chat’s board."),
+    ("boards", "Boards for your chats, when the Boards plugin is on."),
     ("system", "How your agents work: skills, conventions, tools."),
 )
 
@@ -360,9 +360,9 @@ RENAME_PINNED = (
     loam_inbox.FAILURE_LOG,
     f"{_INBOX}/archive",
     f"{_PROJECTS}/*/receipts",
-    f"{_PROJECTS}/Loam/engineer/role.md",
-    f"{_PROJECTS}/Loam/engineer/projects/loam.md",
-    f"{_PROJECTS}/Loam/infrastructure/schedule.md",
+    f"{_ENG_DIR}/role.md",
+    f"{_ENG_DIR}/projects/loam.md",
+    lc.schedule_page(),
     f"{_PROJECTS}/Loam/architecture",
     f"{_PROJECTS}/Loam/decisions",
     f"{_PROJECTS}/Loam/reports",
