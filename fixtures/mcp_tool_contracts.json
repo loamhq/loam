@@ -1,0 +1,995 @@
+{
+  "read_epub_server.py": {
+    "serverInfo": {
+      "name": "loam-epub",
+      "version": ""
+    },
+    "capabilities": {
+      "experimental": {},
+      "prompts": {
+        "listChanged": false
+      },
+      "resources": {
+        "listChanged": false,
+        "subscribe": false
+      },
+      "tools": {
+        "listChanged": false
+      }
+    },
+    "tools": [
+      {
+        "name": "read_epub",
+        "description_sha256": "0d809f3dd832b564441dc9ce6e3b06ef288d8d650bf7a030b93156680e165ac0",
+        "inputSchema": {
+          "properties": {
+            "path": {
+              "title": "Path",
+              "type": "string"
+            },
+            "chapter": {
+              "default": null,
+              "title": "Chapter",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "offset": {
+              "default": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          "type": "object",
+          "title": "read_epubArguments",
+          "required": [
+            "path"
+          ]
+        },
+        "outputSchema": {
+          "type": "object",
+          "additionalProperties": true,
+          "title": "read_epubDictOutput"
+        }
+      },
+      {
+        "name": "delete_file",
+        "description_sha256": "175c6445d2a7f36f9c958bbd72d258189e463a99c3aea4602fadefce11b5a8ea",
+        "inputSchema": {
+          "properties": {
+            "path": {
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "title": "delete_fileArguments",
+          "required": [
+            "path"
+          ]
+        },
+        "outputSchema": {
+          "type": "object",
+          "additionalProperties": true,
+          "title": "delete_fileDictOutput"
+        }
+      },
+      {
+        "name": "restore_file",
+        "description_sha256": "56f6b2bcc5f899426464551f4acf9ba1d36a82271190154e3b2f24a083f1087e",
+        "inputSchema": {
+          "properties": {
+            "restore_id": {
+              "title": "Restore Id",
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "title": "restore_fileArguments",
+          "required": [
+            "restore_id"
+          ]
+        },
+        "outputSchema": {
+          "type": "object",
+          "additionalProperties": true,
+          "title": "restore_fileDictOutput"
+        }
+      },
+      {
+        "name": "move_file",
+        "description_sha256": "a9ce82097c240d229a20031eb6560562a9924a1a3e7a7d4a62348456b0f6ff01",
+        "inputSchema": {
+          "properties": {
+            "source": {
+              "title": "Source",
+              "type": "string"
+            },
+            "destination": {
+              "title": "Destination",
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "title": "move_fileArguments",
+          "required": [
+            "source",
+            "destination"
+          ]
+        },
+        "outputSchema": {
+          "type": "object",
+          "additionalProperties": true,
+          "title": "move_fileDictOutput"
+        }
+      }
+    ]
+  },
+  "composition_server.py": {
+    "serverInfo": {
+      "name": "loam-composition",
+      "version": ""
+    },
+    "capabilities": {
+      "experimental": {},
+      "prompts": {
+        "listChanged": false
+      },
+      "resources": {
+        "listChanged": false,
+        "subscribe": false
+      },
+      "tools": {
+        "listChanged": false
+      }
+    },
+    "tools": [
+      {
+        "name": "generate_pdf",
+        "description_sha256": "4c3e1923995e8d1eedc0ecc9123b59763902e3708b25cdcf34dbacc04f470f20",
+        "inputSchema": {
+          "properties": {
+            "source_path": {
+              "title": "Source Path",
+              "type": "string"
+            },
+            "target_path": {
+              "title": "Target Path",
+              "type": "string"
+            },
+            "root": {
+              "default": null,
+              "title": "Root",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "type": "object",
+          "title": "generate_pdfArguments",
+          "required": [
+            "source_path",
+            "target_path"
+          ]
+        },
+        "outputSchema": {
+          "type": "object",
+          "additionalProperties": true,
+          "title": "generate_pdfDictOutput"
+        }
+      },
+      {
+        "name": "typst_fonts",
+        "description_sha256": "3a0b093878be81669576eba790b87bb6b9b6681bfcc947e2707e66dff189151d",
+        "inputSchema": {
+          "properties": {},
+          "type": "object",
+          "title": "typst_fontsArguments"
+        },
+        "outputSchema": {
+          "type": "object",
+          "additionalProperties": true,
+          "title": "typst_fontsDictOutput"
+        }
+      },
+      {
+        "name": "render_typst_pages",
+        "description_sha256": "980e0f677bc5f68e73ab24c64c1b8f1991244bfff185c93510063807b4267657",
+        "inputSchema": {
+          "properties": {
+            "source_path": {
+              "title": "Source Path",
+              "type": "string"
+            },
+            "output_dir": {
+              "title": "Output Dir",
+              "type": "string"
+            },
+            "dpi": {
+              "default": 150,
+              "title": "Dpi",
+              "type": "integer"
+            },
+            "pages": {
+              "default": null,
+              "title": "Pages",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "type": "object",
+          "title": "render_typst_pagesArguments",
+          "required": [
+            "source_path",
+            "output_dir"
+          ]
+        },
+        "outputSchema": {
+          "type": "object",
+          "additionalProperties": true,
+          "title": "render_typst_pagesDictOutput"
+        }
+      }
+    ]
+  },
+  "engineer_server.py": {
+    "serverInfo": {
+      "name": "loam-engineer",
+      "version": ""
+    },
+    "capabilities": {
+      "experimental": {},
+      "prompts": {
+        "listChanged": false
+      },
+      "resources": {
+        "listChanged": false,
+        "subscribe": false
+      },
+      "tools": {
+        "listChanged": false
+      }
+    },
+    "tools": [
+      {
+        "name": "brief",
+        "description_sha256": "a6bde6d34942109796a5e9aa9327f90790fe4be123a880761c6b7909ea26e570",
+        "inputSchema": {
+          "properties": {
+            "project": {
+              "title": "Project",
+              "type": "string"
+            },
+            "title": {
+              "title": "Title",
+              "type": "string"
+            },
+            "brief": {
+              "title": "Brief",
+              "type": "string"
+            },
+            "involvement": {
+              "title": "Involvement",
+              "type": "string"
+            },
+            "max_minutes": {
+              "default": 0,
+              "title": "Max Minutes",
+              "type": "integer"
+            },
+            "continue_job": {
+              "default": "",
+              "title": "Continue Job",
+              "type": "string"
+            },
+            "deploy": {
+              "default": null,
+              "title": "Deploy",
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tier": {
+              "default": "",
+              "title": "Tier",
+              "type": "string"
+            },
+            "scope": {
+              "default": "",
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "title": "briefArguments",
+          "required": [
+            "project",
+            "title",
+            "brief",
+            "involvement"
+          ]
+        },
+        "outputSchema": {
+          "type": "object",
+          "additionalProperties": true,
+          "title": "briefDictOutput"
+        }
+      },
+      {
+        "name": "status",
+        "description_sha256": "67e8c7e03b95354c7add4af8bb66aa713c69b507bae3bf964cc4d4ae980d5977",
+        "inputSchema": {
+          "properties": {},
+          "type": "object",
+          "title": "statusArguments"
+        },
+        "outputSchema": {
+          "properties": {
+            "result": {
+              "title": "Result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "result"
+          ],
+          "type": "object",
+          "title": "statusOutput"
+        }
+      },
+      {
+        "name": "cancel",
+        "description_sha256": "3fe1c1adcc24a1b347e84dafcbf2e43fa5cd523432a54d16eab742084b2edc30",
+        "inputSchema": {
+          "properties": {
+            "job_id": {
+              "title": "Job Id",
+              "type": "string"
+            },
+            "by": {
+              "title": "By",
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "title": "cancelArguments",
+          "required": [
+            "job_id",
+            "by"
+          ]
+        },
+        "outputSchema": {
+          "properties": {
+            "result": {
+              "title": "Result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "result"
+          ],
+          "type": "object",
+          "title": "cancelOutput"
+        }
+      },
+      {
+        "name": "site",
+        "description_sha256": "d94101e5e006a5abcbc744108cd019dd00ba646189e32cb97a850120c0eedb12",
+        "inputSchema": {
+          "properties": {
+            "action": {
+              "default": "list",
+              "title": "Action",
+              "type": "string"
+            },
+            "name": {
+              "default": "",
+              "title": "Name",
+              "type": "string"
+            },
+            "by": {
+              "default": "",
+              "title": "By",
+              "type": "string"
+            },
+            "root": {
+              "default": "",
+              "title": "Root",
+              "type": "string"
+            },
+            "port": {
+              "default": 0,
+              "title": "Port",
+              "type": "integer"
+            },
+            "expires": {
+              "default": "",
+              "title": "Expires",
+              "type": "string"
+            },
+            "duration": {
+              "default": "",
+              "title": "Duration",
+              "type": "string"
+            },
+            "yes": {
+              "default": "",
+              "title": "Yes",
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "title": "siteArguments"
+        },
+        "outputSchema": {
+          "properties": {
+            "result": {
+              "title": "Result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "result"
+          ],
+          "type": "object",
+          "title": "siteOutput"
+        }
+      },
+      {
+        "name": "thread",
+        "description_sha256": "866e6cb4600346e28ab260482c9795f541d0d9e3821973d0402d3baf0c31b9f0",
+        "inputSchema": {
+          "properties": {
+            "action": {
+              "default": "list",
+              "title": "Action",
+              "type": "string"
+            },
+            "thread": {
+              "default": "general",
+              "title": "Thread",
+              "type": "string"
+            },
+            "text": {
+              "default": "",
+              "title": "Text",
+              "type": "string"
+            },
+            "by": {
+              "default": "",
+              "title": "By",
+              "type": "string"
+            },
+            "bulletin": {
+              "default": false,
+              "title": "Bulletin",
+              "type": "boolean"
+            },
+            "title": {
+              "default": "",
+              "title": "Title",
+              "type": "string"
+            },
+            "reply_to": {
+              "default": "",
+              "title": "Reply To",
+              "type": "string"
+            },
+            "message": {
+              "default": "",
+              "title": "Message",
+              "type": "string"
+            },
+            "persona": {
+              "default": "",
+              "title": "Persona",
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "title": "threadArguments"
+        },
+        "outputSchema": {
+          "properties": {
+            "result": {
+              "title": "Result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "result"
+          ],
+          "type": "object",
+          "title": "threadOutput"
+        }
+      },
+      {
+        "name": "market",
+        "description_sha256": "cbbeb9ff828a3f020a389ac393226bffffe8b74d9fa5884e11f565ff7212f34f",
+        "inputSchema": {
+          "properties": {
+            "query": {
+              "default": "",
+              "title": "Query",
+              "type": "string"
+            },
+            "kind": {
+              "default": "",
+              "title": "Kind",
+              "type": "string"
+            },
+            "limit": {
+              "default": 8,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "link": {
+              "default": "",
+              "title": "Link",
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "title": "marketArguments"
+        },
+        "outputSchema": {
+          "properties": {
+            "result": {
+              "title": "Result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "result"
+          ],
+          "type": "object",
+          "title": "marketOutput"
+        }
+      },
+      {
+        "name": "settings",
+        "description_sha256": "436bd22387e26e6cf4f6ebe03ea1229e326ff67d6299b954caf83460ac594bf6",
+        "inputSchema": {
+          "properties": {
+            "action": {
+              "default": "describe",
+              "title": "Action",
+              "type": "string"
+            },
+            "setting": {
+              "default": "",
+              "title": "Setting",
+              "type": "string"
+            },
+            "value": {
+              "default": "",
+              "title": "Value",
+              "type": "string"
+            },
+            "target": {
+              "default": "",
+              "title": "Target",
+              "type": "string"
+            },
+            "member": {
+              "default": "",
+              "title": "Member",
+              "type": "string"
+            },
+            "by": {
+              "default": "",
+              "title": "By",
+              "type": "string"
+            },
+            "reason": {
+              "default": "",
+              "title": "Reason",
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "title": "settingsArguments"
+        },
+        "outputSchema": {
+          "properties": {
+            "result": {
+              "title": "Result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "result"
+          ],
+          "type": "object",
+          "title": "settingsOutput"
+        }
+      }
+    ]
+  },
+  "files_server.py": {
+    "serverInfo": {
+      "name": "loam-files",
+      "version": ""
+    },
+    "capabilities": {
+      "experimental": {},
+      "prompts": {
+        "listChanged": false
+      },
+      "resources": {
+        "listChanged": false,
+        "subscribe": false
+      },
+      "tools": {
+        "listChanged": false
+      }
+    },
+    "tools": [
+      {
+        "name": "list",
+        "description_sha256": "2db46366078402ac9290b894e72b85e539ba475f896f7847704178b551213f78",
+        "inputSchema": {
+          "properties": {
+            "path": {
+              "title": "Path",
+              "type": "string"
+            },
+            "pattern": {
+              "default": null,
+              "title": "Pattern",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "offset": {
+              "default": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          "type": "object",
+          "title": "list_Arguments",
+          "required": [
+            "path"
+          ]
+        },
+        "outputSchema": {
+          "type": "object",
+          "additionalProperties": true,
+          "title": "list_DictOutput"
+        },
+        "annotations": {
+          "readOnlyHint": true
+        }
+      },
+      {
+        "name": "grep",
+        "description_sha256": "0604e89ed9a98ff712b4b09198ca0992df314c0de373fe7d5062056a1efbb4b2",
+        "inputSchema": {
+          "properties": {
+            "pattern": {
+              "title": "Pattern",
+              "type": "string"
+            },
+            "path": {
+              "title": "Path",
+              "type": "string"
+            },
+            "glob": {
+              "default": null,
+              "title": "Glob",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "ignore_case": {
+              "default": false,
+              "title": "Ignore Case",
+              "type": "boolean"
+            },
+            "offset": {
+              "default": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          "type": "object",
+          "title": "grepArguments",
+          "required": [
+            "pattern",
+            "path"
+          ]
+        },
+        "outputSchema": {
+          "type": "object",
+          "additionalProperties": true,
+          "title": "grepDictOutput"
+        },
+        "annotations": {
+          "readOnlyHint": true
+        }
+      }
+    ]
+  },
+  "history_server.py": {
+    "serverInfo": {
+      "name": "loam-history",
+      "version": ""
+    },
+    "capabilities": {
+      "experimental": {},
+      "prompts": {
+        "listChanged": false
+      },
+      "resources": {
+        "listChanged": false,
+        "subscribe": false
+      },
+      "tools": {
+        "listChanged": false
+      }
+    },
+    "tools": [
+      {
+        "name": "log",
+        "description_sha256": "876c1d24cbc9d38ddeeaff463dd1e0ac20e0ef2553c391a5db5921b9953f3c42",
+        "inputSchema": {
+          "properties": {
+            "path": {
+              "title": "Path",
+              "type": "string"
+            },
+            "since": {
+              "default": null,
+              "title": "Since",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "limit": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "offset": {
+              "default": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          "type": "object",
+          "title": "logArguments",
+          "required": [
+            "path"
+          ]
+        },
+        "outputSchema": {
+          "type": "object",
+          "additionalProperties": true,
+          "title": "logDictOutput"
+        },
+        "annotations": {
+          "readOnlyHint": true
+        }
+      },
+      {
+        "name": "diff",
+        "description_sha256": "7ce27ca06266868e70d0cca5e7c25ec0b0e9c8ea0edbee63613a60af1d138142",
+        "inputSchema": {
+          "properties": {
+            "path": {
+              "title": "Path",
+              "type": "string"
+            },
+            "since": {
+              "default": null,
+              "title": "Since",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "from_commit": {
+              "default": null,
+              "title": "From Commit",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "to_commit": {
+              "default": null,
+              "title": "To Commit",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "stat_only": {
+              "default": false,
+              "title": "Stat Only",
+              "type": "boolean"
+            },
+            "offset": {
+              "default": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          "type": "object",
+          "title": "diffArguments",
+          "required": [
+            "path"
+          ]
+        },
+        "outputSchema": {
+          "type": "object",
+          "additionalProperties": true,
+          "title": "diffDictOutput"
+        },
+        "annotations": {
+          "readOnlyHint": true
+        }
+      },
+      {
+        "name": "blame",
+        "description_sha256": "c02c73eed764151f859cd88329aab8d80f919e73a80079b5885c39e9e4e4c6c5",
+        "inputSchema": {
+          "properties": {
+            "path": {
+              "title": "Path",
+              "type": "string"
+            },
+            "start": {
+              "default": null,
+              "title": "Start",
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "end": {
+              "default": null,
+              "title": "End",
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "offset": {
+              "default": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          "type": "object",
+          "title": "blameArguments",
+          "required": [
+            "path"
+          ]
+        },
+        "outputSchema": {
+          "type": "object",
+          "additionalProperties": true,
+          "title": "blameDictOutput"
+        },
+        "annotations": {
+          "readOnlyHint": true
+        }
+      },
+      {
+        "name": "file_at",
+        "description_sha256": "1246bb93911bcf851c6ebbda1ec91bdb72033f0d96a6cacbbf007287e2126de0",
+        "inputSchema": {
+          "properties": {
+            "path": {
+              "title": "Path",
+              "type": "string"
+            },
+            "commit": {
+              "default": null,
+              "title": "Commit",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "since": {
+              "default": null,
+              "title": "Since",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "offset": {
+              "default": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          "type": "object",
+          "title": "file_atArguments",
+          "required": [
+            "path"
+          ]
+        },
+        "outputSchema": {
+          "type": "object",
+          "additionalProperties": true,
+          "title": "file_atDictOutput"
+        },
+        "annotations": {
+          "readOnlyHint": true
+        }
+      }
+    ]
+  }
+}

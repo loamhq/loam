@@ -87,6 +87,18 @@ through `contributes:`. The whole interface, field by field, is
 `docs/examples/plugins/echo/`, and a real one with keys, an agent tool and
 settings is Images, built into Loam at `plugins/images/`.
 
+**Keep `agent.tool` servers light.** Every live conversation spawns its own
+copy of every enabled `agent.tool` stdio MCP server, so memory multiplies by
+open chats. Run the tool on plain `python3` and speak JSON-RPC 2.0 over
+stdin/stdout with only the Python standard library (~5–10 MB PSS at rest) —
+copy the pattern in `plugins/images/tools/images_mcp.py` or
+`plugins/sharing/tools/sharing_mcp.py`. Do not import the `mcp` / `pydantic`
+SDK (or run under `bin/mcp-python` just for it): that adds ~45 MB of private
+memory per chat before a tool is ever called. Defer heavy per-call imports
+(HTTP clients, parsers, SDKs) inside the tool handler so idle servers stay
+under ~10 MB, and run slow tool calls in a worker thread so `ping` and
+concurrent calls do not block each other.
+
 **How it introduces itself.** `description:` is its promise, one plain line
 about what someone gets from it; `screenshots:` are up to six pictures of it
 at work in its folder (`{src, src_dark, caption}`); a theme's `palette:`

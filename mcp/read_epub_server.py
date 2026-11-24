@@ -26,7 +26,6 @@ outside them is refused before the archive is opened.
 
 from __future__ import annotations
 
-import asyncio
 import errno
 import os
 import re
@@ -37,11 +36,21 @@ from typing import Any
 import sys as _sys
 _sys.path.append(str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_config as lc  # noqa: E402  constants only; nothing here holds state
-from loam_settings import SettingsError, call as broker_call  # noqa: E402
+from loam_mcp import MCPServer  # noqa: E402
 
-from bs4 import BeautifulSoup
-from ebooklib import ITEM_DOCUMENT, epub
-from mcp.server import MCPServer
+
+def broker_call(*args: Any, **kwargs: Any) -> Any:
+    """Deferred import so idle servers do not pull in loam_settings/urllib."""
+    from loam_settings import call as _call  # noqa: PLC0415
+    return _call(*args, **kwargs)
+
+
+def __getattr__(name: str) -> Any:
+    if name == "SettingsError":
+        from loam_settings import SettingsError  # noqa: PLC0415
+        globals()["SettingsError"] = SettingsError
+        return SettingsError
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 MAX_EPUB_BYTES = 50 * 1024 * 1024
 CHAR_BUDGET = 80_000
@@ -75,6 +84,8 @@ def _error(error: str, detail: str | None = None) -> dict[str, Any]:
 
 
 async def _vault_file_operation(action: str, **fields) -> dict[str, Any]:
+    import asyncio  # noqa: PLC0415
+    from loam_settings import SettingsError  # noqa: PLC0415
     try:
         return await asyncio.to_thread(broker_call, "POST", f"/v1/files/{action}",
                                        {"root": "vault", **fields})
@@ -137,6 +148,7 @@ def _title_by_href(book: epub.EpubBook) -> dict[str, str]:
 
 
 def _extract_text(item) -> str:
+    from bs4 import BeautifulSoup  # noqa: PLC0415  deferred so idle servers stay light
     soup = BeautifulSoup(item.get_content(), "html.parser")
     for tag in soup(["script", "style"]):
         tag.decompose()
@@ -145,7 +157,7 @@ def _extract_text(item) -> str:
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
-def _build_chapters(book: epub.EpubBook) -> list[dict[str, Any]]:
+def _build_chapters(book: Any) -> list[dict[str, Any]]:
     """One chapter per spine document, in reading order, 1-based.
 
     Spine order is the book's own reading order and is the only ordering
@@ -153,6 +165,7 @@ def _build_chapters(book: epub.EpubBook) -> list[dict[str, Any]]:
     deliberately not attempted -- epubs split text wildly and a wrong
     merge is worse than a faithful split.
     """
+    from ebooklib import ITEM_DOCUMENT  # noqa: PLC0415
     titles = _title_by_href(book)
     chapters: list[dict[str, Any]] = []
     for spine_id, _linear in book.spine:
@@ -252,6 +265,7 @@ def read_epub(
         )
 
     try:
+        from ebooklib import epub  # noqa: PLC0415  deferred so idle servers stay light
         book = epub.read_epub(str(resolved))
     except Exception as exc:
         return _error(

@@ -5,7 +5,6 @@ so the caller can diagnose failures even when structured diagnostics are unavail
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import os
 import re
@@ -17,8 +16,7 @@ from typing import Any
 import sys as _sys
 _sys.path.append(str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_config as lc  # noqa: E402  constants only; nothing here holds state
-
-from mcp.server import MCPServer
+from loam_mcp import MCPServer  # noqa: E402
 
 AGENT = os.environ.get("LOAM_AGENT", "unknown")
 WORKSPACE = Path(os.environ.get("LOAM_AGENT_WORKSPACE", "/nonexistent")).resolve()
@@ -109,6 +107,7 @@ def _decode(raw: bytes) -> str:
 
 
 async def _run_typst(args: list[str], timeout: float):
+    import asyncio  # noqa: PLC0415  deferred so idle servers stay light
     proc = await asyncio.create_subprocess_exec(
         _typst_bin(), *args,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -120,6 +119,11 @@ async def _run_typst(args: list[str], timeout: float):
             proc.kill()
         await proc.wait()
         return None, "", "", True
+    except asyncio.CancelledError:
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
+        await proc.wait()
+        raise
     return proc.returncode, _decode(out), _decode(err), False
 
 

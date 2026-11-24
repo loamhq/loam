@@ -34,7 +34,7 @@ import sys as _sys
 _sys.path.append(str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_config as lc  # noqa: E402  constants only; nothing here holds state
 
-from mcp.server import MCPServer
+from loam_mcp import MCPServer  # noqa: E402
 
 REPO = Path(os.environ.get("LOAM_HISTORY_REPO") or lc.WORKSPACES).resolve()
 CHAR_BUDGET = 60_000

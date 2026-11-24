@@ -16,7 +16,7 @@ from pathlib import Path
 
 AGENTS = Path(__file__).resolve().parent.parent
 SERVER = AGENTS / "mcp" / "engineer_server.py"
-VENV_PYTHON = AGENTS / "mcp" / ".venv" / "bin" / "python"
+SERVER_PYTHON = Path(sys.executable)
 
 # Older than the library's newest revision on purpose: it is the handshake
 # era Claude Code speaks to this server (initialize, then the tool call).
@@ -193,10 +193,6 @@ def main() -> int:
         print(f"{'PASS' if ok else 'FAIL'}  {label:52} {got!r}"
               + ("" if ok else f"   want {want!r}"))
 
-    if not VENV_PYTHON.is_file():
-        print(f"SKIP  no venv python at {VENV_PYTHON}; nothing to drive")
-        return 0
-
     # Both lines arrive in one write while the producer stays alive. A
     # buffered readline may consume both from the OS even though it returns
     # only the first; the next read must still see the second immediately.
@@ -228,7 +224,7 @@ def main() -> int:
         # cwd off the repo: `import mcp` from inside `agents/` would find the
         # repo's own `mcp/` directory as a namespace package, which a persona's
         # session, started from its workspace, never does.
-        server = Server([str(VENV_PYTHON), "-c", bootstrap(stand_in)], env, str(root))
+        server = Server([str(SERVER_PYTHON), "-c", bootstrap(stand_in)], env, str(root))
         try:
             init = server.initialize()
             check("initialize answered with a server name",

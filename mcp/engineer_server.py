@@ -20,14 +20,15 @@ persona in a conversation opened a week ago gets today's behaviour on its
 next call, for everything except a tool's own signature and description.
 The one thing done here is to say so when the hand-off itself fails.
 
-Every call is awaited with `anyio.run_process`, never blocked on: the
-library serves calls concurrently only as far as a handler lets go of the
+Every call is awaited with ``asyncio.create_subprocess_exec``, never blocked on:
+the server serves calls concurrently only as far as a handler lets go of the
 loop (found 2026-09-07, when two briefs from one conversation ran one after
 the other).
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sys as _sys
 from pathlib import Path
@@ -35,13 +36,29 @@ from typing import Any
 
 _sys.path.append(str(Path(__file__).resolve().parent.parent / "lib"))
 import loam_config as lc  # noqa: E402  constants only; nothing here holds state
-
-import anyio
-from mcp.server import MCPServer
+from loam_mcp import MCPServer  # noqa: E402
 
 # The launcher, by path. Not imported from lib/ -- this file imports nothing
 # of this repo's, so there is nothing of this repo's for it to hold stale.
 LAUNCHER = str(lc.ROOT / "bin" / "engineer-job")
+
+
+async def _run_process(argv: list[str], input: bytes | None = None) -> tuple[int, bytes, bytes]:
+    import asyncio  # noqa: PLC0415  deferred so idle servers stay light
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        stdin=asyncio.subprocess.PIPE if input is not None else asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await proc.communicate(input=input)
+    except asyncio.CancelledError:
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
+        await proc.wait()
+        raise
+    return proc.returncode or 0, stdout, stderr
 
 
 def _site_domain() -> str:
@@ -137,8 +154,9 @@ mcp = MCPServer("loam-engineer")
         "**Jobs start by the box's memory, not by a count.** A job starts "
         "when the box has room for it (the session broker's rule: 2 GB or "
         "12% of RAM kept free). With no room it queues and starts by itself; "
-        "`status` says what it waits on. Each job is capped at 20% of the "
-        "box's RAM.\n"
+        "`status` says what it waits on. Once started, a job has no per-job "
+        "memory ceiling; if the box runs out of memory, the kernel ends an "
+        "agent run before Loam's own services.\n"
         "\n"
         "**`continue_job` — when a job was cut off, do not start over.** A "
         "receipt whose outcome says *cut off* (at a ceiling its brief set) "
@@ -215,7 +233,7 @@ async def brief(
 ) -> dict[str, Any]:
     # Awaited, never blocked on: see the docstring. The launcher returns
     # once the job is launched or queued.
-    result = await anyio.run_process(
+    returncode, raw_out, raw_err = await _run_process(
         [LAUNCHER, "--brief"],
         input=json.dumps({
             "project": project,
@@ -228,17 +246,16 @@ async def brief(
             "tier": tier,
             "scope": scope,
         }).encode("utf-8"),
-        check=False,
     )
-    stdout = result.stdout.decode("utf-8", errors="replace")
-    stderr = result.stderr.decode("utf-8", errors="replace")
+    stdout = raw_out.decode("utf-8", errors="replace")
+    stderr = raw_err.decode("utf-8", errors="replace")
     try:
         return json.loads(stdout)
     except ValueError:
         return {
             "ok": False,
             "error": (
-                f"The launcher returned no verdict (exit {result.returncode}). "
+                f"The launcher returned no verdict (exit {returncode}). "
                 f"That is a defect in the runtime rather than an outcome of "
                 f"your job. stdout: {stdout.strip()[:400]!r}; "
                 f"stderr: {stderr.strip()[:400]!r}"
@@ -263,12 +280,12 @@ async def brief(
 async def status() -> str:
     # The launcher's own view, rendered by the launcher (`box_status`), so
     # this and `engineer-job --status` are one text.
-    result = await anyio.run_process([LAUNCHER, "--status"], check=False)
-    stdout = result.stdout.decode("utf-8", errors="replace")
-    if result.returncode == 0 and stdout.strip():
+    returncode, raw_out, raw_err = await _run_process([LAUNCHER, "--status"])
+    stdout = raw_out.decode("utf-8", errors="replace")
+    if returncode == 0 and stdout.strip():
         return stdout
-    stderr = result.stderr.decode("utf-8", errors="replace")
-    return (f"The launcher returned no status (exit {result.returncode}). "
+    stderr = raw_err.decode("utf-8", errors="replace")
+    return (f"The launcher returned no status (exit {returncode}). "
             f"That is a defect in the runtime. stderr: {stderr.strip()[:400]!r}")
 
 
@@ -285,11 +302,11 @@ async def status() -> str:
     ),
 )
 async def cancel(job_id: str, by: str) -> str:
-    result = await anyio.run_process(
-        [LAUNCHER, "--cancel", job_id, "--by", by or "unknown"], check=False)
-    stdout = result.stdout.decode("utf-8", errors="replace").strip()
-    stderr = result.stderr.decode("utf-8", errors="replace").strip()
-    return stdout or stderr or f"the launcher said nothing (exit {result.returncode})"
+    returncode, raw_out, raw_err = await _run_process(
+        [LAUNCHER, "--cancel", job_id, "--by", by or "unknown"])
+    stdout = raw_out.decode("utf-8", errors="replace").strip()
+    stderr = raw_err.decode("utf-8", errors="replace").strip()
+    return stdout or stderr or f"the launcher said nothing (exit {returncode})"
 
 
 SITE = str(lc.ROOT / "bin" / "site")
@@ -299,13 +316,13 @@ THREAD = str(lc.ROOT / "bin" / "thread")
 async def _hand_off(argv: list[str], value_stdin: bytes | None = None) -> str:
     # The same rule as `brief`: a fresh process per call, today's code, and
     # its one JSON object back as it came.
-    result = await anyio.run_process(argv, input=value_stdin, check=False)
-    stdout = result.stdout.decode("utf-8", errors="replace").strip()
+    returncode, raw_out, raw_err = await _run_process(argv, input=value_stdin)
+    stdout = raw_out.decode("utf-8", errors="replace").strip()
     if stdout:
         return stdout
-    stderr = result.stderr.decode("utf-8", errors="replace")
+    stderr = raw_err.decode("utf-8", errors="replace")
     return json.dumps({"ok": False, "error": (
-        f"{argv[0]} printed nothing (exit {result.returncode}); a runtime "
+        f"{argv[0]} printed nothing (exit {returncode}); a runtime "
         f"defect. stderr: {stderr.strip()[-400:]!r}")})
 
 

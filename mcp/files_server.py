@@ -36,7 +36,9 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from mcp.server import MCPServer
+import sys as _sys
+_sys.path.append(str(Path(__file__).resolve().parent.parent / "lib"))
+from loam_mcp import MCPServer  # noqa: E402
 
 CHAR_BUDGET = 60_000
 LIST_MAX = 5_000

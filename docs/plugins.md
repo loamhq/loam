@@ -500,6 +500,18 @@ server trusts what it is told on loopback the way the box trusts its own
 user: a tool says which agent it is with a header of the plugin's own
 (`sharing` and `comments`: `X-Loam-Agent`).
 
+**Write `agent.tool` servers with the standard library, not the `mcp` SDK.**
+Each live conversation spawns its own stdio tool server process, so idle
+memory multiplies across open chats. Run the server with plain `python3` and
+speak newline-delimited JSON-RPC 2.0 directly using only the standard library
+(~5–10 MB PSS at rest; see `plugins/images/tools/images_mcp.py`,
+`plugins/sharing/tools/sharing_mcp.py`, or `lib/loam_mcp.py` for Loam's own
+core servers). Importing `mcp.server` / `pydantic` costs ~45 MB of private
+memory per process before any tool is called. Defer heavy libraries (parsers,
+HTTP/SDK clients, `asyncio`) into the tool handler so idle servers stay light,
+and dispatch slow calls off the stdin reader loop so `ping`, cancellation
+(`notifications/cancelled`), and concurrent calls stay responsive.
+
 **Lanes.** `persona` covers a persona's conversation, wakes and crons: the
 three share one workspace, and so one set of tools and one `CLAUDE.md`.
 `engineer` and `reviewer` are the other two. A conversation and a wake are
