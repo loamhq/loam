@@ -1,0 +1,16 @@
+[Unit]
+Description=Loam: configure tiered swap (zram + local swapfile)
+# Ensures swap is active on every boot when Loam manages swap. Leaves any
+# operator-configured swap untouched (lib/loam_swap.py).
+DefaultDependencies=no
+After=local-fs.target
+Before=docker.service loam-user-manager.service multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=PYTHONPYCACHEPREFIX=@PYCACHE@
+ExecStart=/usr/bin/python3 @ROOT@/bin/loam-swap ensure
+
+[Install]
+WantedBy=multi-user.target

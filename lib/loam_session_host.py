@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import loam_adopt as adoption
+import loam_limits as limits
 import loam_lock
 import loam_session_fence as fence
 import loam_broker as cfg
@@ -106,6 +107,9 @@ class SessionHost:
         self._announced_live = 0
         # Reject new starts once shutdown begins.
         self.stopping = False
+        # Track this unit's cgroup oom_kill counter so unexpected SIGKILLs can
+        # be attributed to kernel OOM without false positives.
+        self._oom_kills = limits.cgroup_oom_kills()
         cfg.SESSION_DIR.mkdir(parents=True, exist_ok=True)
 
     def live(self) -> list[Session]:
@@ -147,9 +151,52 @@ class SessionHost:
             queue.put_nowait(event)
 
     def adopt(self, session: Session) -> Session:
-        """Wire a session's record writes to the live list."""
+        """Wire a session's record writes and unexpected exits to the host."""
         session.on_record_change = self.record_changed
+        session.on_unexpected_exit = self.session_exited
         return session
+
+    def _thread_for_session(self, session_id: str) -> str | None:
+        try:
+            bindings = loam_threads.load_state("sessions.json")
+        except (OSError, ValueError):
+            return None
+        if not isinstance(bindings, dict):
+            return None
+        for tid, members in bindings.items():
+            if not isinstance(members, dict):
+                continue
+            for row in members.values():
+                if isinstance(row, dict) and row.get("session_id") == session_id:
+                    return tid
+        return None
+
+    def session_exited(self, session: Session, exit_code: int | None,
+                       pid: int | None) -> None:
+        """Record an OOM kill when a chat process is SIGKILLed by the kernel."""
+        if exit_code not in (-9, 137):
+            return
+        source = None
+        cur_oom = limits.cgroup_oom_kills()
+        if cur_oom is not None:
+            if self._oom_kills is not None and cur_oom > self._oom_kills:
+                source = "cgroup_memory_events"
+            self._oom_kills = cur_oom
+        if source is None and limits.journal_oom_pid(pid):
+            source = "kernel_journal"
+        if source is None:
+            return
+        subj = {"agent": session.agent, "session": session.id}
+        tid = self._thread_for_session(session.id)
+        if tid:
+            subj["thread"] = tid
+        limits.record_safe(
+            "oom_kill",
+            outcome="killed",
+            subject=subj,
+            detail={"source": source, "returncode": exit_code,
+                    "provider": getattr(session, "provider", None)},
+        )
 
     def close_record_streams(self) -> None:
         """End every live-list stream: the broker is stopping.
@@ -323,7 +370,25 @@ class SessionHost:
     async def private_summary(self, sid, prompt):
         """Reserve without reclaiming a seat. Disconnecting the API cancels its private child."""
         session = self.load(sid)
-        if self.stopping or session.busy() or sid in self._summaries or not self.room()["ok"]:
+        if self.stopping or session.busy() or sid in self._summaries:
+            raise BrokerError(429, "private summary deferred")
+        room = self.room()
+        if not room["ok"]:
+            subj = {"agent": session.agent, "session": session.id}
+            tid = self._thread_for_session(session.id)
+            if tid:
+                subj["thread"] = tid
+            limits.record_safe(
+                "summary_deferred",
+                outcome="deferred",
+                subject=subj,
+                detail={"reason": room.get("reason") or "memory"},
+                memory=limits.snapshot_memory(
+                    available_mb=room.get("available_mb"),
+                    reserve_mb=room.get("reserve_mb"),
+                    start_mb=room.get("need_mb"),
+                ),
+            )
             raise BrokerError(429, "private summary deferred")
         task = asyncio.current_task()
         self._summaries[sid] = task
@@ -430,7 +495,26 @@ class SessionHost:
                 return
             if self._summaries:
                 # Foreground work gets the seat before any resident is evicted.
-                task = next(iter(self._summaries.values()))
+                sum_sid, task = next(iter(self._summaries.items()))
+                sum_sess = self.sessions.get(sum_sid)
+                subj = {"session": sum_sid}
+                if sum_sess is not None:
+                    subj["agent"] = sum_sess.agent
+                tid = self._thread_for_session(sum_sid)
+                if tid:
+                    subj["thread"] = tid
+                limits.record_safe(
+                    "summary_deferred",
+                    outcome="cancelled",
+                    subject=subj,
+                    detail={"trigger": "chat_start", "for_agent": agent,
+                            "reason": room.get("reason") or "memory"},
+                    memory=limits.snapshot_memory(
+                        available_mb=room.get("available_mb"),
+                        reserve_mb=room.get("reserve_mb"),
+                        start_mb=room.get("need_mb"),
+                    ),
+                )
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
                 continue
@@ -443,10 +527,28 @@ class SessionHost:
             if not idle:
                 raise self.cap_error(agent, room, protected)
             victim = idle[0]
+            idle_s = round(now - victim.last_activity, 1)
             print(f"room: ending {victim.agent}/{victim.id} (idle "
-                  f"{int(now - victim.last_activity)} s) for {agent}: "
+                  f"{int(idle_s)} s) for {agent}: "
                   f"{room['reason']}, {room['available_mb']} MB available, "
                   f"reserve {room['reserve_mb']}", file=sys.stderr, flush=True)
+            subj = {"agent": victim.agent, "session": victim.id}
+            tid = self._thread_for_session(victim.id)
+            if tid:
+                subj["thread"] = tid
+            limits.record_safe(
+                "chat_evicted",
+                outcome="evicted",
+                subject=subj,
+                detail={"trigger": "chat_start", "for_agent": agent,
+                        "reason": room.get("reason") or "memory",
+                        "idle_s": idle_s},
+                memory=limits.snapshot_memory(
+                    available_mb=room.get("available_mb"),
+                    reserve_mb=room.get("reserve_mb"),
+                    start_mb=room.get("need_mb"),
+                ),
+            )
             await victim.stop(reason="room")
 
     def cap_error(self, agent: str, room: dict | None = None,
@@ -553,17 +655,35 @@ class SessionHost:
                       key=lambda s: s.last_activity)
         if not idle:
             return None
+        victim = idle[0]
+        idle_s = round(now - victim.last_activity, 1)
         if for_waiter:
-            print(f"pressure: ending {idle[0].agent}/{idle[0].id} for waiting run, "
+            print(f"pressure: ending {victim.agent}/{victim.id} for waiting run, "
                   f"{available} MB available against a {reserve} MB reserve + "
                   f"{cfg.SESSION_START_MB} MB start",
                   file=sys.stderr, flush=True)
         else:
-            print(f"pressure: ending {idle[0].agent}/{idle[0].id}, {available} MB "
+            print(f"pressure: ending {victim.agent}/{victim.id}, {available} MB "
                   f"available against a {reserve} MB reserve",
                   file=sys.stderr, flush=True)
-        await idle[0].stop(reason="pressure")
-        return idle[0]
+        subj = {"agent": victim.agent, "session": victim.id}
+        tid = self._thread_for_session(victim.id)
+        if tid:
+            subj["thread"] = tid
+        limits.record_safe(
+            "chat_evicted",
+            outcome="evicted",
+            subject=subj,
+            detail={"trigger": "waiting_run" if for_waiter else "under_reserve",
+                    "reason": "memory", "idle_s": idle_s},
+            memory=limits.snapshot_memory(
+                available_mb=available,
+                reserve_mb=reserve,
+                start_mb=cfg.SESSION_START_MB,
+            ),
+        )
+        await victim.stop(reason="pressure")
+        return victim
 
     def prepare_records(self) -> None:
         """Repair and adopt the catalog once at host startup, before serving."""

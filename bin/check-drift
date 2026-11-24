@@ -674,7 +674,8 @@ def check_broker(findings: list) -> list[str]:
                              f"Starting docker.service recreates {brk.NETWORK}."))
     notes.append(f"  broker {brk.BIND_ADDR}:{brk.PORT} on {brk.NETWORK} "
                  f"({brk.SUBNET}), admission by memory (reserve "
-                 f"{brk.MEMORY_RESERVE_MB} MB, backstop {brk.MAX_SESSIONS} sessions)")
+                 f"{brk.MEMORY_RESERVE_MB} MB, start {brk.SESSION_START_MB} MB, "
+                 f"backstop {brk.MAX_SESSIONS} sessions)")
     notes.append(f"  previews http://<app>.{dep.PREVIEW_SUFFIX}:{dep.PREVIEW_PORT} on "
                  f"{dep.PREVIEW_ADDR}, behind the same wall")
     return notes
@@ -1229,6 +1230,12 @@ def main() -> int:
             f"{timer_on or 'unknown'}: the host's setup is not being kept, so "
             f"`loam host restore` has nothing newer to put back. "
             f"`sudo loam host install`"))
+    # Tiered swap (lib/loam_swap.py): leaves operator-configured swap untouched,
+    # checks Loam-managed swap unit/sysctl when Loam manages swap, and flags a
+    # server with no swap at all.
+    import loam_swap  # noqa: PLC0415
+    findings.extend(loam_swap.drift_findings(AGENTS))
+
     # Remote Control was retired on 2026-11-19 (the owner: "I don't use it
     # through app anymore"). A unit of it left on the box -- a per-agent
     # server or the nightly recycle -- has no generator and no owner, and

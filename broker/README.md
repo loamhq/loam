@@ -71,7 +71,9 @@ servers.
 Until 2026-11-09 this measurement set a count: `MAX_SESSIONS = 4` against a
 unit sized for four. Since then sessions are admitted by the box's memory and
 the number is a high backstop — "Admission by memory, not by count" below.
-The ~450 MB is still what a start is assumed to take (`SESSION_START_MB`).
+Since 2026-11-23 both `MEMORY_RESERVE_MB` and `SESSION_START_MB` scale with
+the server's RAM (`lib/loam_limits.py`): 350 MB a start on 2–8 GB servers and
+450 MB on 16 GB+ servers.
 
 ## How a container reaches it
 
@@ -134,6 +136,7 @@ on everything but `/up`.
 | `GET /up` | `{"ok": true}`. No token. |
 | `GET /v1/agent-availability` | Installation-wide `agents_can_run`, `why` (plain sentences in display order), and an optional owner `action`. Before the first tick on a newly seeded install, availability is unknown (null) for up to one period. The bearer-protected read checks the freshness of `check.json`, then reads the current active roster, its providers' login state and recent wake outcomes. |
 | `GET /v1/limits` | `attachment_max_bytes`, `video_attachment_max_bytes`, `inline_image_max_bytes`, `attachment_types` and the Files upload limits. See “Attachments” below. |
+| `GET /v1/limit-events[?days=N][&kind=<kind>][&limit=N]` | Durable memory limit-event counts by kind, active pressure/swap episodes, box memory snapshot, and recent raw events for the last `days` (default 7, `0` = all) from `<state>/limits/events.jsonl` (`lib/loam_limits.py`). `400` on unknown `kind` or invalid number. |
 | `GET /v1/agents` | the personas, derived from disk, each with its name and uploaded face |
 | `GET /v1/providers[?agent=<name>]` | the four providers, which are connected, the quota, when the login expires (`login`), and what each offers a chat: its `models` and its `efforts`. `?agent=` only decides whose default is ticked. |
 | `POST /v1/providers/claude-code/login` | begins a fresh Claude Code sign-in → **`201`** with `{state: "pending", url, code: null, instructions, login}`. Idempotent: a second POST while one is pending answers `200` with the same URL. "Making the login again" below. |
@@ -797,11 +800,23 @@ sessions can grow to have as much RAM and size as they need."
   "hint": "4 sessions are running and every one is busy, and the box has 2210 MB available against a 2048 MB reserve and 450 MB to start one. Try again when one finishes, or end one with DELETE /v1/sessions/<id>; its id still resumes." }
 ```
 
-| | CX33, 7,750 MB | CX53, ~31,600 MB |
-|---|---|---|
-| `MEMORY_RESERVE_MB` = max(2048, 12% of RAM) | 2,048 | 3,792 |
-| `MAX_SESSIONS` (backstop) = max(16, RAM / 256) | 30 | 123 |
-| simulated, every session busy (tests/test_broker_seats.py) | 3 admitted with 4,100 MB used elsewhere | 48 admitted with 6,000 MB used elsewhere |
+| | 2 GB (~1,930 MB) | 4 GB (~3,850 MB) | 8 GB (~7,750 MB) | 16 GB (~15,600 MB) | 32 GB (~31,335 MB) |
+|---|---:|---:|---:|---:|---:|
+| `MEMORY_RESERVE_MB` (`lib/loam_limits.py`) | 487 (`256 + 12%`) | 718 (`256 + 12%`) | 1,186 (`256 + 12%`) | 2,048 (`max(2048, 12%)`) | 3,760 (`max(2048, 12%)`) |
+| `SESSION_START_MB` / `RUN_START_MB` | 350 | 350 | 350 | 450 | 450 |
+| `MAX_SESSIONS` (backstop) = `max(16, RAM / 256)` | 16 | 16 | 30 | 60 | 122 |
+
+*Scaled 2026-11-23 (`lib/loam_limits.py`): before then `MEMORY_RESERVE_MB = max(2048, 12%)` and `SESSION_START_MB = 450` on every box, which refused every start on a 2 GB server and left less than 1.5 GB for active work on 4 GB. Servers above `12,288 MB` usable RAM (16 GB+) are unchanged.*
+
+**Durable limit events (`GET /v1/limit-events`, `loam limits`, `mcp__engineer__limits`).**
+Every time memory admission or pressure actually bites, Loam appends one
+privacy-safe JSON line to `<state>/limits/events.jsonl` (rotated at 2 MiB to
+`.1`, 4 MiB max; never carries message text or private prose): `chat_wait`,
+`chat_timeout`, `chat_evicted` (pressure/`make_room`/`relieve` evictions only,
+distinct from ordinary idle timeouts), `run_wait`, `run_skipped`, `job_queued`,
+`oom_kill`, `pressure_episode`, `sustained_swap`, and `summary_deferred`.
+`GET /v1/limit-events?days=7&kind=&limit=200` returns `{days, since, until,
+total, counts, active, box, events, truncated}` through `lib/loam_limits.py`.
 
 **Idle sessions leave memory.** `THREAD_IDLE_S` and `CLASSIC_IDLE_S` are
 derived from the server's usable RAM (`MemTotal`) at broker/host start —

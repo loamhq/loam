@@ -58,6 +58,8 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE / "lib"))
 import loam_data_disk as dd  # noqa: E402
 import loam_install as li  # noqa: E402  (no loam_config yet: the file may not exist)
+import loam_limits as limits  # noqa: E402
+import loam_swap as swap  # noqa: E402
 
 WIDTH = 72
 step_started = 0.0
@@ -266,9 +268,13 @@ def step_preflight(a, ans: dict) -> None:
                    f"{osr.get('PRETTY_NAME', 'something else')}.",
                    "make a new server with one of those versions and run the install command on it")
     mem_mb = int(re.search(r"MemTotal:\s+(\d+)", Path("/proc/meminfo").read_text()).group(1)) // 1024
-    if mem_mb < 3600:
-        raise Stop(f"Loam needs a server with at least 4 GB of memory; this one has "
+    if mem_mb < limits.MIN_INSTALL_MEM_MB:
+        raise Stop(f"Loam needs a server with at least 2 GB of memory; this one has "
                    f"{mem_mb / 1024:.1f} GB.", "choose a bigger server size and run it again")
+    if mem_mb < limits.RECOMMENDED_MEM_MB:
+        say(f"Note: this server has {mem_mb / 1024:.1f} GB of memory — enough for one active "
+            f"chat at a time (wakes and engineer jobs wait their turn); 4 GB or more is "
+            f"recommended for parallel work.", 2)
     free_gb = shutil.disk_usage("/").free / 1e9
     if free_gb < 15:
         raise Stop(f"Loam needs at least 15 GB of free disk; this server has {free_gb:.0f} GB.",
@@ -716,6 +722,9 @@ def step_packages(a, ans: dict) -> None:
         apt("caddy", "docker-ce", "docker-ce-cli", "containerd.io", "docker-compose-plugin", "nodejs")
         run(["systemctl", "enable", "--now", "docker", "caddy"])
     ensure_preview_browser(distro)
+    with progress("Setting up swap space", "Swap check finished."):
+        sw = swap.ensure()
+        logline(f"SWAP {sw.get('mode')}: {sw.get('message')}")
     with progress("Checking the server's clock", "Clock check finished."):
         ensure_clock()
 
@@ -1171,6 +1180,9 @@ def step_units(a, ans: dict) -> None:
     with progress("Reconciling schedules and plugins", "Schedules and plugins reconciled."):
         as_user(cfg, ["python3", f"{root}/bin/schedule", "reconcile"], check=False)
         as_user(cfg, ["python3", f"{root}/bin/plugin-servers", "reconcile"], check=False)
+    # Ensure swap persists across reboots (leaves existing operator swap alone).
+    with progress("Checking swap persistence", "Swap persistence checked."):
+        run([sys.executable, f"{root}/bin/loam-swap", "install"], check=False)
     # The host's own setup is kept from here on, and can be put back with
     # `loam host restore` (lib/loam_host.py, docs/host-history.md).
     with progress("Saving the server's setup", "Server setup saved."):

@@ -34,11 +34,16 @@ is served read-only at `vault.<domain>`, and the commons' `www/` folder at
 
 **No limits on runs.** A job, a wake, a cron, the reviewer and a
 conversation have no count, no clock and no memory ceiling. A run starts
-when the box has memory for it; a job with no room waits and starts by
+when the box has memory for it (scaled to the server’s RAM: `256 MB + 12%`
+reserve and `350 MB` start allowance on 2–8 GB servers, `max(2 GB, 12%)`
+and `450 MB` on 16 GB+); a job with no room waits and starts by
 itself (`mcp__engineer__status` says what it waits on). Once started it
 takes what it needs; if the box itself runs out, the kernel ends an agent
 run before Loam's own services. `max_minutes` on a brief is an optional
-ceiling.
+ceiling. Every time memory limits actually bite (waits, timeouts, pressure
+evictions, deferred summaries, OOM kills, pressure episodes or sustained swap),
+Loam records one durable event; read counts and recent events with
+`mcp__engineer__limits` (or `loam limits`).
 
 **Your own subdomains.** `mcp__engineer__site` puts what you build (a
 mockup, slides, a prototype and its backend) on `<name>.<domain>` in under

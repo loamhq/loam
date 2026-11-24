@@ -466,6 +466,7 @@ class Session:
         # list. A Session built without one (a test, a probe) simply has no
         # listeners, which is not an error.
         self.on_record_change = None
+        self.on_unexpected_exit = None
         self._write_lock = asyncio.Lock()
         cfg.SESSION_DIR.mkdir(parents=True, exist_ok=True)
         # Resume the existing journal sequence and turn list so replay cursors remain valid
@@ -1571,8 +1572,14 @@ class Session:
 
     async def _reap(self) -> None:
         assert self.proc is not None
+        pid = getattr(self.proc, "pid", None)
         self.exit_code = await self.proc.wait()
         self.state = "exited"
+        if not self._stop_requested and self.on_unexpected_exit is not None:
+            try:
+                self.on_unexpected_exit(self, self.exit_code, pid)
+            except Exception:  # noqa: BLE001
+                pass
         # A turn cut off here is failed below on its own account; what it
         # could not write down is not carried into the next process.
         self._unsaved = None
@@ -2664,7 +2671,13 @@ class AntigravitySession(Session):
         is the next process. A process that ended with no ``result`` closes
         the turn as a failed one."""
         assert self.proc is not None
+        pid = getattr(self.proc, "pid", None)
         code = await self.proc.wait()
+        if not self._stop_requested and self.on_unexpected_exit is not None:
+            try:
+                self.on_unexpected_exit(self, code, pid)
+            except Exception:  # noqa: BLE001
+                pass
         if not self._agy.done:
             await Session._handle(self, self._agy.result(
                 {"status": "INTERRUPTED" if self._stop_requested else "ERROR",

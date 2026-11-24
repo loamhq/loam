@@ -165,11 +165,15 @@ async def main() -> None:
         check(f"{box_mb} MB box yields {want} (tick {want_tick}s)",
               (got, cfg.reap_interval_s(*got)), (want, want_tick))
 
-    # Admission reserve & start cost remain untouched.
-    check("admission reserve formula untouched",
-          cfg.MEMORY_RESERVE_MB, max(2048, cfg.BOX_MB * 12 // 100))
-    check("session/run start cost untouched",
-          (cfg.SESSION_START_MB, loam_lock.RUN_START_MB), (450, 450))
+    # Admission reserve & start cost match loam_limits scaling (and stay
+    # identical to today's max(2048, 12%) / 450 on 16 GB+ boxes).
+    import loam_limits  # noqa: PLC0415
+    check("admission reserve matches loam_limits",
+          cfg.MEMORY_RESERVE_MB, loam_limits.memory_reserve_mb(cfg.BOX_MB))
+    check("session/run start cost matches loam_limits",
+          (cfg.SESSION_START_MB, loam_lock.RUN_START_MB),
+          (loam_limits.start_allowance_mb(cfg.BOX_MB),
+           loam_limits.start_allowance_mb(cfg.BOX_MB)))
 
     # -- 2. Config overrides (unit + real loam.toml subprocess load) ---------
     overrides = {"sessions.thread_idle_s": 75, "sessions.classic_idle_s": 240}

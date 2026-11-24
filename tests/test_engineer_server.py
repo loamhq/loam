@@ -60,6 +60,7 @@ def bootstrap(launcher: Path) -> str:
         m.SETTINGS = {str(launcher.parent / "settings-echo")!r}
         m.THREAD = {str(launcher.parent / "settings-echo")!r}
         m.MARKET = {str(launcher.parent / "settings-echo")!r}
+        m.LIMITS = {str(launcher.parent / "settings-echo")!r}
         import logging
         logging.getLogger().setLevel(logging.DEBUG)
         m.mcp.run()
@@ -234,8 +235,16 @@ def main() -> int:
             rid = server.send("tools/list")
             tools = (server.replies({rid}, 30).get(rid) or {}).get("result", {}).get("tools", [])
             brief = next((t for t in tools if t["name"] == "brief"), None)
-            check("the tools are `brief`, `cancel`, `market`, `status`, `settings`, `site`, `thread` (capacity and sandboxes are plugins' since 2026-11-14; `market` since 2026-11-18)",
-                  sorted(t["name"] for t in tools), ["brief", "cancel", "market", "settings", "site", "status", "thread"])
+            check("the tools are `brief`, `cancel`, `limits`, `market`, `status`, `settings`, `site`, `thread`",
+                  sorted(t["name"] for t in tools),
+                  ["brief", "cancel", "limits", "market", "settings", "site", "status", "thread"])
+            rid = server.send("tools/call", {"name": "limits", "arguments": {
+                "days": 14, "kind": "oom_kill", "limit": 50}})
+            got = tool_result(server.replies({rid}, 30).get(rid) or {})
+            if isinstance(got.get("result"), str):
+                got = json.loads(got["result"])
+            check("`limits` hands bin/loam-limits its flags",
+                  got.get("argv"), ["--json", "--days", "14", "--limit", "50", "--kind", "oom_kill"])
             # Separate search terms from flags so a leading dash is literal.
             rid = server.send("tools/call", {"name": "market", "arguments": {
                 "query": "sync with -my phone", "kind": "extension"}})

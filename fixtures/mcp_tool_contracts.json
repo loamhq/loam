@@ -272,7 +272,7 @@
     "tools": [
       {
         "name": "brief",
-        "description_sha256": "a6bde6d34942109796a5e9aa9327f90790fe4be123a880761c6b7909ea26e570",
+        "description_sha256": "7820683f8c2af0b75cbef4560c2dbbaa2d08e447eb689e718585a97b2e9d2ed2",
         "inputSchema": {
           "properties": {
             "project": {
@@ -626,6 +626,44 @@
           ],
           "type": "object",
           "title": "settingsOutput"
+        }
+      },
+      {
+        "name": "limits",
+        "description_sha256": "805560fa07b914d5c981f36dc43ae2af948410af4ec9e32b08d8cdfaaa626baf",
+        "inputSchema": {
+          "properties": {
+            "days": {
+              "default": 7,
+              "title": "Days",
+              "type": "integer"
+            },
+            "kind": {
+              "default": "",
+              "title": "Kind",
+              "type": "string"
+            },
+            "limit": {
+              "default": 200,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          "type": "object",
+          "title": "limitsArguments"
+        },
+        "outputSchema": {
+          "properties": {
+            "result": {
+              "title": "Result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "result"
+          ],
+          "type": "object",
+          "title": "limitsOutput"
         }
       }
     ]

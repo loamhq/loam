@@ -21,6 +21,8 @@ usage: logs                          the list of names, and where each lives
   transcripts          the transcript writer's own log
   memory               the box's memory and disk history, one JSON line per
                        5-minute sample (bin/memsample)
+  limits               when memory or capacity limits bit, one JSON line each
+                       (loam limits for counts and filtering)
   drift-check          the daily check-drift runs (bin/loam-check)
   check                the one check on a clock: its state file now
   authelia | browser   the login's and the persona browser's containers
@@ -111,6 +113,9 @@ def command(name: str, arg: str | None, n: int, follow: bool) -> list[str]:
         return tail(LOGS / "transcript-capture.log", n, follow)
     if name == "memory":
         return tail(LOGS / "memsample.jsonl", n, follow)
+    if name == "limits":
+        import loam_limits  # noqa: PLC0415
+        return tail(loam_limits.events_path(), n, follow)
     if name == "check":
         import loam_check  # noqa: PLC0415
         print(f"$ cat {loam_check.STATE_FILE}", file=sys.stderr)

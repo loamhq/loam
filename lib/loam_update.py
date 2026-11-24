@@ -149,6 +149,9 @@ TRIGGERS = {
                         "systemd/system/loam-claim.service",
                         "systemd/system/loam-broker-firewall.service"]},
     "app": {"script": "bin/deploy", "dirs": ["app/", "deploy/"]},
+    # Tiered swap (zram + local swapfile, lib/loam_swap.py): leaves operator
+    # swap untouched, ensures swap on installs that had none.
+    "swap": {"script": "bin/loam-swap", "dirs": ["systemd/system/loam-swap.service"]},
     # The host history's timer (2026-11-19, lib/loam_host.py): root's, so
     # gen-units does not install it; `loam host install` does.
     "host": {"script": "bin/loam-host", "dirs": ["systemd/system/loam-host-history."]},
@@ -169,6 +172,7 @@ STEP_WORDS = {
     "gateway": "Restarting the plugin gateway",
     "deploy": "Regenerating the web front and the app's unit",
     "app": "Starting the app on the release now in place",
+    "swap": "Checking swap space",
     "host": "Installing the host history's timer",
     "views": "Refreshing the agents' skill views",
     "undo-move": "Putting the previous release's code back",
@@ -182,6 +186,7 @@ STEP_WORDS = {
     "undo-gateway": "Restarting the plugin gateway on the previous release",
     "undo-deploy": "Regenerating the web front from the previous release",
     "undo-app": "Starting the app on the previous release",
+    "undo-swap": "Leaving swap state intact",
     "undo-host": "Putting the host history's timer back as the previous release had it",
 }
 
@@ -1298,6 +1303,14 @@ class Box:
             said.append(f"{name} on {commit[:7]}")
         return ", ".join(said) or "no app runs from this checkout"
 
+    def swap(self) -> str:
+        """Ensure swap is set up (zram + local swapfile) when the operator has
+        none. On rollback to a release predating `bin/loam-swap`, leave active
+        swap alone rather than tearing it down mid-rollback."""
+        if (runtime() / "bin" / "loam-swap").is_file():
+            return self._root(self.bin("loam-swap"), "install")
+        return "this release has no swap helper; existing swap left alone"
+
     def host(self) -> str:
         """The host history's timer, as the release now in place has it; a
         release from before it (an undo) has none, so the timer is stopped
@@ -1495,7 +1508,7 @@ def verify(version: str) -> str:
 
 
 REGEN = ("units", "agents", "providers", "provider-memory", "broker", "gateway",
-         "deploy", "app", "host")
+         "deploy", "app", "swap", "host")
 
 
 def _regenerate(run: Run, box: Box, old: str, new: str, changed: list[str],
@@ -1576,7 +1589,9 @@ def _apply(target, accept_library_edits, box, run_id, by) -> dict:
         done.append("library")
         changed = changed_files(cur["commit"], new)
         run.rec["changed_files"] = len(changed)
-        by_hand = [f for f in changed if f.startswith(prefix() + "systemd/system/")]
+        by_hand = [f for f in changed
+                   if f.startswith(prefix() + "systemd/system/")
+                   and not f.endswith("/loam-swap.service")]
         if by_hand:
             run.rec["warnings"] = [f"system units changed and are installed by hand "
                                    f"(root): {', '.join(by_hand)}"]
