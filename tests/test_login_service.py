@@ -657,9 +657,11 @@ class TestDriftStatusLogsAndClaim(unittest.TestCase):
     def test_loam_claim_writes_native_users_without_docker(self):
         claim = load_cmd("loam-claim")
         data_dir = self.tmp / "authelia-data"
+        unit = self.tmp / "no-loam-authelia.service"
         compose_f = self.tmp / "no-compose.yaml"
 
         with patch.object(claim.dep, "authelia_data_dir", return_value=data_dir), \
+                patch.object(claim.dep, "AUTHELIA_UNIT", unit), \
                 patch.object(claim.dep, "AUTHELIA_COMPOSE", compose_f), \
                 patch.object(claim.dep, "domain", return_value="sam.example.test"):
             self.assertEqual(claim.volume_dir(), data_dir)
@@ -671,6 +673,52 @@ class TestDriftStatusLogsAndClaim(unittest.TestCase):
         parsed = yaml.safe_load(users_file.read_text(encoding="utf-8"))
         self.assertIn("sam", parsed["users"])
         self.assertEqual(parsed["users"]["sam"]["groups"], ["admins"])
+
+    def test_loam_claim_volume_dir_follows_active_login(self):
+        import loam_data_disk as dd  # noqa: PLC0415
+
+        claim = load_cmd("loam-claim")
+        native_dir = self.tmp / "native-authelia"
+        native_dir.mkdir()  # leftover dir after a rolled-back cutover
+        docker_vol = self.tmp / "docker-authelia-data"
+        docker_vol.mkdir()
+        unit = self.tmp / dep.AUTHELIA_SERVICE_NAME
+        compose_f = self.tmp / "compose.yaml"
+        compose_f.write_text("services: {}\n", encoding="utf-8")
+
+        # Rolled-back cutover: compose.yaml stands, native unit is absent, and
+        # native_dir exists from the failed attempt -> must follow Docker volume.
+        with patch.object(claim.dep, "authelia_data_dir", return_value=native_dir), \
+                patch.object(claim.dep, "AUTHELIA_UNIT", unit), \
+                patch.object(claim.dep, "AUTHELIA_COMPOSE", compose_f), \
+                patch.object(claim.dep, "docker_active", return_value=True), \
+                patch.object(dd, "docker_volume_path", return_value=docker_vol) as vol_mock:
+            self.assertEqual(claim.volume_dir(), docker_vol)
+        vol_mock.assert_called_once()
+
+        # Rolled-back cutover with Docker stopped -> returns None (not stale native dir).
+        with patch.object(claim.dep, "authelia_data_dir", return_value=native_dir), \
+                patch.object(claim.dep, "AUTHELIA_UNIT", unit), \
+                patch.object(claim.dep, "AUTHELIA_COMPOSE", compose_f), \
+                patch.object(claim.dep, "docker_active", return_value=False):
+            self.assertIsNone(claim.volume_dir())
+
+        # Native unit in place (even while compose.yaml still exists mid-cutover)
+        # -> prefers native dir without touching Docker.
+        unit.write_text("[Unit]\n", encoding="utf-8")
+        with patch.object(claim.dep, "authelia_data_dir", return_value=native_dir), \
+                patch.object(claim.dep, "AUTHELIA_UNIT", unit), \
+                patch.object(claim.dep, "AUTHELIA_COMPOSE", compose_f), \
+                patch.object(claim.dep, "docker_active", side_effect=AssertionError("should not probe docker")):
+            self.assertEqual(claim.volume_dir(), native_dir)
+
+        # Native unit in place, compose.yaml removed -> native dir, no Docker probe.
+        compose_f.unlink()
+        with patch.object(claim.dep, "authelia_data_dir", return_value=native_dir), \
+                patch.object(claim.dep, "AUTHELIA_UNIT", unit), \
+                patch.object(claim.dep, "AUTHELIA_COMPOSE", compose_f), \
+                patch.object(claim.dep, "docker_active", side_effect=AssertionError("should not probe docker")):
+            self.assertEqual(claim.volume_dir(), native_dir)
 
 
 if __name__ == "__main__":

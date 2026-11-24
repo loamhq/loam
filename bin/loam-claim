@@ -92,16 +92,17 @@ def run(argv: list[str], **kw) -> subprocess.CompletedProcess:
 
 def volume_dir() -> Path | None:
     """Host directory holding users_database.yml and notification.txt:
-    authelia_data_dir() directly on native installs (zero Docker), falling back
-    to Docker's authelia-data volume only while a legacy compose file still
-    stands and Docker is already running."""
+    authelia_data_dir() directly when the native login unit is in place (or on
+    a fresh install with no legacy compose file), falling back to Docker's
+    authelia-data volume while a legacy compose file stands without the native
+    unit and Docker is already running."""
     native = dep.authelia_data_dir()
-    if native.is_dir() or not dep.AUTHELIA_COMPOSE.exists():
+    if dep.AUTHELIA_UNIT.exists() or not dep.AUTHELIA_COMPOSE.exists():
         return native
     if dep.docker_active():
         import loam_data_disk as dd  # noqa: PLC0415
         return dd.docker_volume_path("authelia-data", run=run)
-    return native
+    return None
 
 
 def users() -> dict:
