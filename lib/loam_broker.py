@@ -12,6 +12,7 @@ import secrets
 import signal
 import stat
 import subprocess
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -209,28 +210,82 @@ def memory() -> dict:
             "reserve": MEMORY_RESERVE_MB}
 
 
+# Idle unload timeouts (seconds) for resident provider sessions.
+# Large boxes (16 GB+ usable RAM) keep the original 10 min / 30 min windows.
+# Smaller boxes unload idle processes sooner because a cold resume costs under
+# a second on Claude Code (~0.6 s) and Codex (~0.5-1.0 s) while keeping the
+# full durable conversation and prompt cache, whereas an idle process holds
+# 220-830 MB of RAM that wakes and engineer jobs need.
+# Operators can override either value in `/etc/loam/loam.toml` via
+# `sessions.thread_idle_s` and `sessions.classic_idle_s`.
+DEFAULT_THREAD_IDLE_S = 600
+DEFAULT_CLASSIC_IDLE_S = 1800
+
+# Upper usable MemTotal (MB) -> (thread_idle_s, classic_idle_s).
+# Boundaries sit midway between nominal box sizes (2, 4, 8, 16 GB) so both
+# decimal-GB and GiB VMs land in the intended tier.
+IDLE_TIERS_MB: tuple[tuple[int, int, int], ...] = (
+    (3072, 90, 180),     # 2 GB box (~1.8-2.0 GB usable)
+    (6144, 120, 300),    # 4 GB box (~3.7-4.0 GB usable)
+    (12288, 300, 900),   # 8 GB box (~7.6-8.0 GB usable)
+)
+
+
+def _parse_idle_override(key: str, raw, fallback: int) -> int:
+    if raw is None:
+        return fallback
+    if isinstance(raw, int) and not isinstance(raw, bool) and raw > 0:
+        return raw
+    print(f"config: ignoring invalid {key}={raw!r}; using {fallback} s",
+          file=sys.stderr, flush=True)
+    return fallback
+
+
+def idle_timeouts(box_mb: int | None = None,
+                  config_get=None) -> tuple[int, int]:
+    """Return ``(thread_idle_s, classic_idle_s)`` for a box of ``box_mb`` MB,
+    applying ``sessions.thread_idle_s`` and ``sessions.classic_idle_s``
+    overrides from config when set and valid."""
+    mb = BOX_MB if box_mb is None else box_mb
+    thread_s, classic_s = DEFAULT_THREAD_IDLE_S, DEFAULT_CLASSIC_IDLE_S
+    for limit_mb, t_s, c_s in IDLE_TIERS_MB:
+        if mb <= limit_mb:
+            thread_s, classic_s = t_s, c_s
+            break
+    getter = lc.get if config_get is None else config_get
+    thread_s = _parse_idle_override(
+        "sessions.thread_idle_s", getter("sessions.thread_idle_s"), thread_s)
+    classic_s = _parse_idle_override(
+        "sessions.classic_idle_s", getter("sessions.classic_idle_s"), classic_s)
+    return thread_s, classic_s
+
+
+def reap_interval_s(thread_s: int | None = None,
+                    classic_s: int | None = None) -> int:
+    """How often the session host's idle reaper ticks (seconds): 60 s on
+    16+ GB boxes, faster on smaller boxes so shorter idle windows unload
+    promptly."""
+    t_s = THREAD_IDLE_S if thread_s is None else thread_s
+    c_s = CLASSIC_IDLE_S if classic_s is None else classic_s
+    return min(60, max(15, min(t_s, c_s) // 4))
+
+
 # A classic chat nobody has spoken to in this long, and that is not busy,
-# leaves memory (2026-11-09; it was the hour below until then). Its id
-# resumes, so ending it costs its next message a respawn of a few seconds;
-# under pressure an idle chat is ended sooner, by `make_room`.
-CLASSIC_IDLE_S = 1800
-
+# leaves memory (2026-11-09; scaled by box RAM since 2026-11-23). Its id
+# resumes, so ending it costs its next message a respawn of under a second;
+# under pressure an idle chat is ended sooner, by `make_room` or `relieve`.
+#
 # No session is ended for its age (2026-11-10, the owner: "I don't want any
-# limitations at all"). Until then a session with no sign of life for an
-# hour was ended whatever it was doing -- mid-turn, waiting on its children
-# -- as the backstop for a wedged turn; a two-hour command or a long
-# subagent looks the same as a wedge from here, so the backstop went. The
-# idle stops above and below end only a session with nothing outstanding,
-# and a turn that has truly wedged is ended by a person from the app.
-
-# A thread member's session is ended this long after its turn (2026-11-09).
-# One person in two threads with two members each was the whole cap for an
-# hour; a thread turn resumes its member's session by id on the next turn,
-# and a resume is a spawn and a re-read of the CLI's own file, a few seconds,
-# against the prompt cache's hour, which a fresh process still hits. A thread
-# session mid-turn, waiting on its children or asking is never ended by this,
-# however long it has been.
-THREAD_IDLE_S = 600
+# limitations at all"). The idle stops end only a session with nothing
+# outstanding (no active turn, pending approval, background task, queued
+# thread input, or finished engineer job result on its way back).
+#
+# A thread member's session is ended after `THREAD_IDLE_S` (2026-11-09;
+# scaled by box RAM since 2026-11-23). A thread turn resumes its member's
+# session by id on the next turn, reloading the CLI's durable history and
+# still hitting the prompt cache.
+THREAD_IDLE_S, CLASSIC_IDLE_S = idle_timeouts(BOX_MB)
+REAP_INTERVAL_S = reap_interval_s(THREAD_IDLE_S, CLASSIC_IDLE_S)
 
 # Short of memory, a start ends the least recently used idle session to make
 # room instead of refusing (2026-11-09). One active within this many seconds

@@ -2938,3 +2938,38 @@ listener for immediate notification in an open page.
   refreshes `System/Loam/`, re-provisions live agents, and runs `bin/schedule
   reconcile` and `bin/plugin-servers reconcile` in step 9 so timers and plugins
   come up immediately with zero drift.
+
+## 2026-11-23 — Memory-scaled idle session unload & waiting-run relief
+
+- **Measured cold-resume cost is under a second, while idle sessions hold 220–830 MB.**
+  Benchmarking real workspaces (14 MCP servers vs 0 MCP servers) showed:
+  - Claude Code (`claude` 2.1.328): warm TTFT ~0.58–0.72 s vs cold `--resume`
+    TTFT ~1.18–1.36 s (+0.60 s local CLI spawn + JSONL reload; MCPs connect
+    asynchronously), prompt cache hits across restart, verbatim recall, RSS
+    674–837 MB with 14 MCPs (219–234 MB with 0 MCPs).
+  - Codex (`codex` 0.170.0 `app-server`): warm TTFT ~2.03–2.76 s vs cold
+    `thread/resume` TTFT ~2.92–3.77 s (~0.25 s local spawn + resume, ~0.5–0.7 s
+    with broker hooks/model init), 84–99% cached input hit across restart, RSS
+    763–779 MB with 13 MCPs.
+  - Antigravity (`agy` 1.5.12): already process-per-turn (0 MB resident between
+    turns; resumes via `--conversation <id>`).
+- **Tiered idle timeouts (`lib/loam_broker.py`) + config overrides (`docs/config.md`).**
+  `idle_timeouts(box_mb)` scales `(THREAD_IDLE_S, CLASSIC_IDLE_S)` by usable
+  `MemTotal`: `<= 3072 MB` (2 GB) → `90 / 180 s`; `<= 6144 MB` (4 GB) →
+  `120 / 300 s`; `<= 12288 MB` (8 GB) → `300 / 900 s`; `> 12288 MB` (16 GB+) →
+  `600 / 1800 s`. Overridable via `sessions.thread_idle_s` and
+  `sessions.classic_idle_s` in `/etc/loam/loam.toml`. `reap_interval_s()` keeps
+  60 s on 8 GB+ and scales down to 30 s (4 GB) / 22 s (2 GB).
+- **Waiting-run relief without changing admission or reserve (`lib/loam_lock.py`, `lib/loam_session_host.py`).**
+  When `loam_lock._try_admit` rejects for memory, it touches `LOCK_DIR/room-wanted`
+  (30 s TTL). `SessionHost.relieve()` evicts the oldest idle session (>15 s)
+  when `room_wanted()` is active and `available < reserve + SESSION_START_MB`.
+- **Non-idle guards & private handoff floor.**
+  `SessionHost.hold_reason()` protects active turns, pending approvals/questions,
+  background tasks/subagents, active dispatches, finished owed engineer job
+  results (`loam_waiters.owed(by="thread")`), and queued thread inputs
+  (`loam_thread_inputs.pending()`), while leaving unfinished/queued jobs
+  unblocked so idle chats can free memory for them. `ThreadEngine.summary_due()`
+  floors the private handoff timer at `max(THREAD_IDLE_S, DEFAULT_THREAD_IDLE_S)`
+  (600 s) so short small-box idle unloads do not spawn premature forked handoff
+  subprocesses on every 90–120 s pause.

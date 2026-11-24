@@ -803,15 +803,22 @@ sessions can grow to have as much RAM and size as they need."
 | `MAX_SESSIONS` (backstop) = max(16, RAM / 256) | 30 | 123 |
 | simulated, every session busy (tests/test_broker_seats.py) | 3 admitted with 4,100 MB used elsewhere | 48 admitted with 6,000 MB used elsewhere |
 
-**Idle sessions leave memory.** A thread member's after `THREAD_IDLE_S`
-(600 s), a classic chat after `CLASSIC_IDLE_S` (1,800 s; it was an hour),
-both only when not busy -- not mid-turn, not asking, nothing it launched
-still out -- and never for age alone: the hour backstop (`IDLE_TIMEOUT_S`)
-that ended every session went 2026-11-10 (*A turn has no clock*, under
-Threads). **Under pressure** -- `MemAvailable` below the
-reserve because sessions grew -- the reaper also ends the least recently
-used idle session, one per minute's pass (`Broker.relieve`), before the
-kernel has to choose.
+**Idle sessions leave memory.** `THREAD_IDLE_S` and `CLASSIC_IDLE_S` are
+derived from the server's usable RAM (`MemTotal`) at broker/host start —
+90 / 180 s on 2 GB boxes, 120 / 300 s on 4 GB, 300 / 900 s on 8 GB, and
+600 / 1,800 s on 16 GB+ — and can be overridden with `sessions.thread_idle_s`
+and `sessions.classic_idle_s` in `/etc/loam/loam.toml` (`lib/loam_broker.py`,
+`docs/config.md`). Antigravity runs one process per turn and already holds
+no idle process between turns. Both idle stops end only a session with nothing
+outstanding — never mid-turn, never asking, never waiting on background work,
+never with a queued thread input or a finished engineer job result on its way
+back — and never for age alone: the hour backstop (`IDLE_TIMEOUT_S`) that
+ended every session went 2026-11-10 (*A turn has no clock*, under Threads).
+**Under pressure** — `MemAvailable` below the reserve, or below `reserve +
+SESSION_START_MB` while a wake, cron, reviewer or engineer job is waiting for
+memory (`loam_lock.room_wanted`) — the reaper also ends the least recently
+used idle session, one per pass (`SessionHost.relieve`), before the kernel has
+to choose.
 
 **No ceiling, and an order.** A session grows as large as it needs, and
 since 2026-11-16 nothing bounds the chats together either:

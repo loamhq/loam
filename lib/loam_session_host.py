@@ -13,9 +13,13 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import loam_adopt as adoption
+import loam_lock
 import loam_session_fence as fence
 import loam_broker as cfg
 import loam_private_summary
+import loam_thread_inputs
+import loam_threads
+import loam_waiters
 from loam_provider_session import BrokerError, Session, first_words, parse_iso, session_class
 from loam_session_records import backfill_records, normalise, prune_fork_duplicates, sync_titles
 
@@ -346,6 +350,65 @@ class SessionHost:
                 "reserve_mb": reserve, "starting": len(self._starting),
                 "need_mb": need}
 
+    def protected_sessions(self) -> dict[str, str]:
+        """Session ids that must not be unloaded because a finished engineer job
+        result or queued thread input is on its way back to them right now.
+        Unfinished/queued jobs are intentionally excluded so idle chats can free
+        memory for waiting jobs."""
+        held: dict[str, str] = {}
+        try:
+            bindings = loam_threads.load_state("sessions.json")
+        except (OSError, ValueError):
+            bindings = {}
+        if not isinstance(bindings, dict):
+            bindings = {}
+
+        def bound_sid(tid: str | None, persona: str | None) -> str | None:
+            if not tid or not persona:
+                return None
+            row = (bindings.get(tid) or {}).get(persona)
+            return row.get("session_id") if isinstance(row, dict) else None
+
+        try:
+            for record in loam_waiters.owed(by="thread"):
+                caller = record.get("caller_session")
+                if isinstance(caller, str) and caller:
+                    held[caller] = "job_result"
+                sid = bound_sid(record.get("thread"), record.get("persona"))
+                if isinstance(sid, str) and sid:
+                    held[sid] = "job_result"
+        except (OSError, ValueError):
+            pass
+
+        try:
+            for tid, persona, items in loam_thread_inputs.pending():
+                sid = bound_sid(tid, persona)
+                if isinstance(sid, str) and sid:
+                    held.setdefault(sid, "queued_input")
+                for item in items:
+                    dispatch = item.get("dispatch")
+                    if isinstance(dispatch, dict):
+                        dsid = dispatch.get("session_id")
+                        if isinstance(dsid, str) and dsid:
+                            held.setdefault(dsid, "queued_input")
+        except (OSError, ValueError):
+            pass
+        return held
+
+    def hold_reason(self, session: Session,
+                    protected: dict[str, str] | None = None) -> str | None:
+        """Why this resident session cannot be unloaded as idle, or None when it can."""
+        busy = session.busy()
+        if busy is not None:
+            return busy
+        if session.id in self._opening:
+            return "starting"
+        if any(not task.done()
+               for task in getattr(session, "_dispatches", {}).values()):
+            return "working"
+        held = self.protected_sessions() if protected is None else protected
+        return held.get(session.id)
+
     async def make_room(self, agent: str) -> None:
         """While admission is short of memory, reclaim the least recently active idle session
         outside the grace period. Its ID can resume. If all remaining sessions are busy,
@@ -362,11 +425,13 @@ class SessionHost:
                 await asyncio.gather(task, return_exceptions=True)
                 continue
             now = time.time()
-            idle = sorted((s for s in self.live() if s.busy() is None
+            protected = self.protected_sessions()
+            idle = sorted((s for s in self.live()
+                           if self.hold_reason(s, protected) is None
                            and now - s.last_activity >= cfg.EVICT_GRACE_S),
                           key=lambda s: s.last_activity)
             if not idle:
-                raise self.cap_error(agent, room)
+                raise self.cap_error(agent, room, protected)
             victim = idle[0]
             print(f"room: ending {victim.agent}/{victim.id} (idle "
                   f"{int(now - victim.last_activity)} s) for {agent}: "
@@ -374,10 +439,16 @@ class SessionHost:
                   f"reserve {room['reserve_mb']}", file=sys.stderr, flush=True)
             await victim.stop()
 
-    def cap_error(self, agent: str, room: dict | None = None) -> BrokerError:
+    def cap_error(self, agent: str, room: dict | None = None,
+                  protected: dict[str, str] | None = None) -> BrokerError:
         room = room or self.room()
-        busy = [{"session_id": s.id, "agent": s.agent,
-                 "status": s.busy() or "starting"} for s in self.live()]
+        held = self.protected_sessions() if protected is None else protected
+        status_map = {"job_result": "waiting", "queued_input": "working"}
+        busy = []
+        for s in self.live():
+            why = self.hold_reason(s, held)
+            busy.append({"session_id": s.id, "agent": s.agent,
+                         "status": status_map.get(why, why) or "starting"})
         reason = room.get("reason") or "memory"
         return BrokerError(
             429, cap_sentence(agent, busy, reason),
@@ -417,7 +488,7 @@ class SessionHost:
 
     async def reap_idle(self) -> None:
         while True:
-            await asyncio.sleep(60)
+            await asyncio.sleep(cfg.reap_interval_s())
             with fence.admission() as admitted:
                 if admitted:
                     await self.reap_once(time.time())
@@ -426,6 +497,7 @@ class SessionHost:
         """Preserve sessions waiting on a decision. Deny an expired request and restart its
         idle clock from the answer. Log each session's failure and continue the pass.
         """
+        protected = self.protected_sessions()
         for session in self.live():
             try:
                 if session.pending:
@@ -435,9 +507,10 @@ class SessionHost:
                               file=sys.stderr, flush=True)
                     continue
                 idle = now - session.last_activity
-                # Reap only idle sessions. Quiet time cannot expire active work.
+                # Reap only idle sessions. Quiet time cannot expire active work,
+                # queued inputs, or finished engineer job results on their way back.
                 short = session.idle_timeout_s or cfg.CLASSIC_IDLE_S
-                if idle > short and session.busy() is None:
+                if idle > short and self.hold_reason(session, protected) is None:
                     print(f"idle: ending {session.agent}/{session.id}",
                           file=sys.stderr, flush=True)
                     await session.stop()
@@ -450,21 +523,35 @@ class SessionHost:
             print(f"pressure: {exc!r}", file=sys.stderr, flush=True)
 
     async def relieve(self, now: float) -> Session | None:
-        """Under memory pressure, release at most one session per pass. Choose the least
-        recently active idle one.
-        """
+        """Under memory pressure (or when a wake, cron, reviewer or engineer job
+        is waiting for room), release at most one session per pass. Choose the
+        least recently active idle one."""
         mem = cfg.memory()
         available = mem.get("available")
-        if available is None or available >= mem.get("reserve", cfg.MEMORY_RESERVE_MB):
+        if available is None:
             return None
-        idle = sorted((s for s in self.live() if s.busy() is None
+        reserve = mem.get("reserve", cfg.MEMORY_RESERVE_MB)
+        under_reserve = available < reserve
+        for_waiter = (not under_reserve and loam_lock.room_wanted(now)
+                      and available < reserve + cfg.SESSION_START_MB)
+        if not under_reserve and not for_waiter:
+            return None
+        protected = self.protected_sessions()
+        idle = sorted((s for s in self.live()
+                       if self.hold_reason(s, protected) is None
                        and now - s.last_activity >= cfg.EVICT_GRACE_S),
                       key=lambda s: s.last_activity)
         if not idle:
             return None
-        print(f"pressure: ending {idle[0].agent}/{idle[0].id}, {available} MB "
-              f"available against a {mem.get('reserve')} MB reserve",
-              file=sys.stderr, flush=True)
+        if for_waiter:
+            print(f"pressure: ending {idle[0].agent}/{idle[0].id} for waiting run, "
+                  f"{available} MB available against a {reserve} MB reserve + "
+                  f"{cfg.SESSION_START_MB} MB start",
+                  file=sys.stderr, flush=True)
+        else:
+            print(f"pressure: ending {idle[0].agent}/{idle[0].id}, {available} MB "
+                  f"available against a {reserve} MB reserve",
+                  file=sys.stderr, flush=True)
         await idle[0].stop()
         return idle[0]
 
