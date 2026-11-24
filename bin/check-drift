@@ -648,19 +648,30 @@ def check_broker(findings: list) -> list[str]:
                          f"{dep.PREVIEW_ADDR}, and at boot it may not. `sudo sysctl -p "
                          f"{dep.PREVIEW_SYSCTL}`"))
 
-    net = dep._sudo(["docker", "network", "inspect", brk.NETWORK, "--format",
-                     "{{(index .IPAM.Config 0).Subnet}}"])  # noqa: SLF001
-    if net.returncode != 0:
-        findings.append(("broker network", f"docker network inspect {brk.NETWORK}",
-                         f"the network does not exist; the app has nothing to join. "
-                         f"`sudo docker network create --subnet {brk.SUBNET} --gateway "
-                         f"{brk.BIND_ADDR} -o com.docker.network.bridge.name="
-                         f"br-loambroker {brk.NETWORK}`"))
-    elif net.stdout.strip() != brk.SUBNET:
-        findings.append(("broker network", f"docker network inspect {brk.NETWORK}",
-                         f"subnet is {net.stdout.strip()}, not {brk.SUBNET}; the wall "
-                         f"is written against the subnet and would let the wrong "
-                         f"containers through."))
+    if dep.docker_active():
+        net = dep._sudo(["docker", "network", "inspect", brk.NETWORK, "--format",
+                         "{{(index .IPAM.Config 0).Subnet}}"])  # noqa: SLF001
+        if net.returncode != 0:
+            findings.append(("broker network", f"docker network inspect {brk.NETWORK}",
+                             f"the network does not exist; the app has nothing to join. "
+                             f"`sudo docker network create --subnet {brk.SUBNET} --gateway "
+                             f"{brk.BIND_ADDR} -o com.docker.network.bridge.name="
+                             f"br-loambroker {brk.NETWORK}`"))
+        elif net.stdout.strip() != brk.SUBNET:
+            findings.append(("broker network", f"docker network inspect {brk.NETWORK}",
+                             f"subnet is {net.stdout.strip()}, not {brk.SUBNET}; the wall "
+                             f"is written against the subnet and would let the wrong "
+                             f"containers through."))
+    else:
+        # Docker is asleep: verify the kernel bridge directly without waking docker.socket.
+        prefix = brk.SUBNET.split("/", 1)[1] if "/" in brk.SUBNET else "24"
+        want_cidr = f"{brk.BIND_ADDR}/{prefix}"
+        ip_res = subprocess.run(["ip", "-4", "-o", "addr", "show", "dev", "br-loambroker"],
+                                capture_output=True, text=True, check=False)
+        if ip_res.returncode != 0 or want_cidr not in (ip_res.stdout or ""):
+            findings.append(("broker network", "ip -4 addr show dev br-loambroker",
+                             f"Docker is asleep and br-loambroker does not carry {want_cidr}. "
+                             f"Starting docker.service recreates {brk.NETWORK}."))
     notes.append(f"  broker {brk.BIND_ADDR}:{brk.PORT} on {brk.NETWORK} "
                  f"({brk.SUBNET}), admission by memory (reserve "
                  f"{brk.MEMORY_RESERVE_MB} MB, start {brk.SESSION_START_MB} MB, "
@@ -876,6 +887,15 @@ def check_deploy(findings: list) -> list[str]:
                              f"kernel. `sudo systemctl restart {dep.SIGHT_WALL_SERVICE}` "
                              f"raises it (after `systemctl restart docker` if a ufw reload "
                              f"took Docker's chains too):\n" + "\n".join("  " + m for m in missing)))
+    # The agents' browser lazy-wake socket (never wakes the browser or Docker).
+    sock_active = subprocess.run(
+        ["systemctl", "is-active", dep.BROWSER_PROXY_SOCKET_NAME],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
+    if sock_active != "active":
+        findings.append(("deploy browser socket", f"systemctl is-active {dep.BROWSER_PROXY_SOCKET_NAME}",
+                         f"{dep.BROWSER_PROXY_SOCKET_NAME} is {sock_active or 'inactive'}, not active; "
+                         f"agents cannot wake the browser. `sudo {lc.ROOT}/bin/gen-deploy`"))
     # The inbound wall (2026-11-19): a family nobody guards is a finding,
     # unless the owner turned it off (`firewall.manage = false`).
     inbound = dep.inbound_wall_status()

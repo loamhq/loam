@@ -347,9 +347,33 @@ The checkout's identity is the fallback when Loam has no effective owner
 identity. Job commits omit provider attribution.
 
 **Temporary storage.** The launcher clears an engineer job's scratch when
-the job ends. Nightly housekeeping sweeps leftovers and removes generated
-Python bytecode for vanished source directories, along with bytecode left
-idle for 14 days.
+the job ends and reaps any leftover processes carrying the job's environment
+(including helpers started in a transient user scope outside the job's cgroup);
+the recovery sweep also reaps orphans from jobs whose unit ended abruptly.
+Nightly housekeeping sweeps leftovers and removes generated Python bytecode
+for vanished source directories, along with bytecode left idle for 14 days.
+
+**Sleeping until needed.** To fit smaller servers without losing capability,
+the agents' shared browser and on-demand plugin servers sleep when idle and
+wake automatically on the first request that needs them:
+- **Agents' browser (`loam-browser`) and Docker.** A socket-activated proxy
+  (`loam-browser-proxy.socket`) holds `127.0.0.1:8931` and answers session
+  handshake and tool-listing calls (`initialize`, `tools/list`, SSE) locally
+  without waking Docker or Chromium. On the first browser tool call, it starts
+  Docker (if asleep), ensures the browser firewall is raised, starts
+  `loam-browser` on its internal port, and replays the session handshake
+  transparently. Open browser sessions are never stopped mid-use; after ten
+  quiet minutes with no open session and no call, `loam-browser` stops — and
+  when no other container needs Docker, Docker and containerd sleep with it.
+  Saved files in `/var/lib/loam/browser` remain on disk.
+- **Plugin servers.** Server plugins sleep by default until their first
+  request arrives on `/x/<id>/`, the unauthenticated share door `/s/<token>`,
+  or their loopback `LOAM_PLUGIN_URL`, and go back to sleep after ten quiet
+  minutes with no active request, stream, or WebSocket in flight. Plugins that
+  need to stay running continuously declare `server.always_on: true` (and
+  plugins declaring an external `box.listener` stay on by default). Health
+  checks, Settings › Plugins, Apps and updates treat sleeping servers as
+  healthy without waking them.
 
 **Data on its own disk.** A fresh install can place all of the owner's data on
 a separate mounted disk (`install.sh --data-dir DIR`): configuration, login

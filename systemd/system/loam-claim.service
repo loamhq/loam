@@ -5,8 +5,7 @@ Description=Loam claim page and login-code relay (loopback 8934)
 # signed-in owner after. Caddy reaches it on two paths of the app's host and
 # on nothing else; see bin/loam-claim and docs/install.md. Root, because both
 # halves touch the login's own files in its Docker volume.
-After=docker.service
-Requires=docker.service
+After=network-online.target
 
 [Service]
 Type=simple

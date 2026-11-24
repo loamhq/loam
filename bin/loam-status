@@ -47,6 +47,8 @@ def user_systemctl(*args: str) -> str:
 
 
 def container_health(name: str) -> str:
+    if not dep.docker_active():
+        return "asleep"
     res = run(["docker", "inspect", "-f",
                "{{.State.Status}}{{if .State.Health}} {{.State.Health.Status}}{{end}}", name])
     return res.stdout.strip() if res.returncode == 0 else "absent"
@@ -158,10 +160,10 @@ def gather() -> dict:
     part("app", "App", OK if app.endswith("healthy") and "unhealthy" not in app else BAD,
          "running" if app == "running healthy" else app,
          "" if app == "running healthy" else f"sudo {lc.ROOT}/bin/deploy {app_name} logs 40")
-    login = container_health(dep.AUTHELIA_PROJECT)
     if dep.unclaimed():
         part("login", "Sign-in", WAIT, "starts when you claim this Loam with the link below")
     else:
+        login = container_health(dep.AUTHELIA_PROJECT)
         up = login.startswith("running") and "unhealthy" not in login and "starting" not in login
         part("login", "Sign-in", OK if up else BAD, "running" if up else login,
              "" if up else f"sudo {lc.ROOT}/bin/gen-deploy")
@@ -174,9 +176,15 @@ def gather() -> dict:
                  "claimed, but the web still shows the claim page",
                  "sudo systemctl restart loam-claim.service (it finishes the claim)")
     browser = container_health("loam-browser")
-    part("browser", "Agents' browser", OK if browser.startswith("running") else BAD,
-         "running" if browser.startswith("running") else browser,
-         "" if browser.startswith("running") else f"sudo {lc.ROOT}/bin/gen-deploy")
+    proxy_sock = run(["systemctl", "is-active", dep.BROWSER_PROXY_SOCKET_NAME]).stdout.strip()
+    if browser.startswith("running"):
+        part("browser", "Agents' browser", OK, "running")
+    elif proxy_sock == "active":
+        part("browser", "Agents' browser", OK, "asleep (starts on first use)")
+    else:
+        part("browser", "Agents' browser", BAD,
+             f"not listening ({proxy_sock or browser})",
+             f"sudo {lc.ROOT}/bin/gen-deploy")
     if edge:
         claim = run(["systemctl", "is-active", "loam-claim.service"]).stdout.strip()
         part("claim-service", "Sign-in helper", OK if claim == "active" else BAD,

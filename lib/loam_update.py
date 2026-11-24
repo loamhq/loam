@@ -139,12 +139,15 @@ TRIGGERS = {
     "broker": {"script": "bin/session-broker", "also": ["bin/session-host"],
                "dirs": ["broker/", "plugins/", "lib/loam_pins.py", "systemd/session/",
                         "systemd/loam-session-broker.service"]},
-    "gateway": {"script": "bin/plugin-gateway", "dirs": []},
+    "gateway": {"script": "bin/plugin-gateway", "also": ["bin/plugin-servers"], "dirs": []},
     # Loam's own app runs from a release of this checkout (2026-11-16): the
     # deployment layer is re-rendered (its unit template among it), then the
     # app is unpacked at the new commit and restarted, and put back on its
     # old release if the new one does not answer.
-    "deploy": {"script": "bin/gen-deploy", "dirs": ["deploy/", "broker/firewall.sh"]},
+    "deploy": {"script": "bin/gen-deploy", "also": ["bin/browser-proxy"],
+               "dirs": ["deploy/", "broker/firewall.sh",
+                        "systemd/system/loam-claim.service",
+                        "systemd/system/loam-broker-firewall.service"]},
     "app": {"script": "bin/deploy", "dirs": ["app/", "deploy/"]},
     # Tiered swap (zram + local swapfile, lib/loam_swap.py): leaves operator
     # swap untouched, ensures swap on installs that had none.
@@ -1254,6 +1257,12 @@ class Box:
                               capture_output=True, text=True, check=False)
         if done.returncode:
             raise RuntimeError(done.stderr.strip() or f"exit {done.returncode}")
+        # Reconcile plugin servers after restarting the gateway: on upgrade
+        # this stops pre-sleep units still holding front ports; on rollback
+        # to an older release it starts always-on units back on those ports.
+        if (runtime() / "bin" / "plugin-servers").is_file():
+            subprocess.run([sys.executable, self.bin("plugin-servers"), "reconcile"],
+                           capture_output=True, text=True, check=False, env=self.env)
         return "restarted"
 
     def _root(self, *argv: str, timeout: float | None = 3600) -> str:
@@ -1268,6 +1277,18 @@ class Box:
         return done.stdout.strip()[-1500:]
 
     def deploy(self) -> str:
+        # On rollback to a release without the lazy browser proxy, release
+        # port 8931 and start Docker before the older gen-deploy brings
+        # loam-browser back up directly on 8931.
+        if not (runtime() / "bin" / "browser-proxy").is_file():
+            subprocess.run(
+                ["sudo", "-n", "systemctl", "disable", "--now",
+                 "loam-browser-proxy.socket", "loam-browser-proxy.service",
+                 "loam-docker-idle.service"],
+                capture_output=True, text=True, check=False,
+            )
+            subprocess.run(["sudo", "-n", "systemctl", "start", "docker.service"],
+                           capture_output=True, text=True, check=False)
         self._root(self.bin("gen-deploy"))
         return "rendered"
 

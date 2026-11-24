@@ -242,6 +242,193 @@ def remove_scratch(job_id: str, root: Path | None = None) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Process reaping for finished or orphaned engineer jobs.
+#
+# A job runs inside `loam-engineer-<job_id>.service`, whose cgroup systemd
+# tears down at exit. A command launched with `systemd-run --user --scope`
+# (for example a browser test rig under a memory cap) moves into a sibling
+# transient `run-*.scope` unit outside the job's cgroup, so any helper it
+# leaves running outlives the job and keeps deleted scratch open. Every child
+# process — including across `--scope` — inherits `LOAM_WAKE=engineer:<id>`
+# (and `LOAM_JOB_DIR`), so scanning `/proc` by job id catches both cgroup
+# stragglers before scratch removal and escaped transient scopes.
+# ---------------------------------------------------------------------------
+
+def _ancestor_pids(start: int, proc_root: Path = Path("/proc")) -> set[int]:
+    anc: set[int] = set()
+    cur = start
+    while cur > 1 and cur not in anc:
+        anc.add(cur)
+        try:
+            text = (proc_root / str(cur) / "status").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            break
+        ppid = 0
+        for line in text.splitlines():
+            if line.startswith("PPid:"):
+                try:
+                    ppid = int(line.split(":", 1)[1].strip())
+                except ValueError:
+                    ppid = 0
+                break
+        if ppid <= 1:
+            break
+        cur = ppid
+    return anc
+
+
+def _is_persistent_loam_unit(cgroup_text: str) -> bool:
+    """True when a process belongs to a non-engineer Loam service unit (never reaped)."""
+    for line in cgroup_text.splitlines():
+        unit = line.rsplit("/", 1)[-1].strip()
+        if unit.startswith("loam-") and unit.endswith(".service") and not unit.startswith("loam-engineer-"):
+            return True
+    return False
+
+
+def job_id_of_pid(pid: int, proc_root: Path = Path("/proc")) -> str | None:
+    """Return the engineer job id carried by `pid`'s environment, or None."""
+    try:
+        raw = (proc_root / str(pid) / "environ").read_bytes()
+    except OSError:
+        return None
+    job_dir_id: str | None = None
+    for entry in raw.split(b"\0"):
+        if entry.startswith(b"LOAM_WAKE=engineer:"):
+            cand = entry[len(b"LOAM_WAKE=engineer:"):].decode("utf-8", errors="replace").strip()
+            if JOB_ID_RE.match(cand):
+                return cand
+        elif entry.startswith(b"LOAM_JOB_DIR="):
+            cand = Path(entry[len(b"LOAM_JOB_DIR="):].decode("utf-8", errors="replace")).name
+            if JOB_ID_RE.match(cand):
+                job_dir_id = cand
+    return job_dir_id
+
+
+def find_job_processes(
+    job_id: str | None = None,
+    *,
+    proc_root: Path = Path("/proc"),
+    exclude_pids: set[int] | None = None,
+    uid: int | None = None,
+) -> list[dict]:
+    """List processes belonging to `job_id` (or all engineer jobs if `job_id` is None),
+    excluding our own ancestor chain and any persistent non-engineer Loam service."""
+    my_uid = os.getuid() if uid is None else uid
+    skip = _ancestor_pids(os.getpid(), proc_root) | set(exclude_pids or ())
+    found: list[dict] = []
+    try:
+        entries = list(proc_root.iterdir())
+    except OSError:
+        return found
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        pid = int(entry.name)
+        if pid in skip:
+            continue
+        try:
+            if entry.stat().st_uid != my_uid:
+                continue
+        except OSError:
+            continue
+        jid = job_id_of_pid(pid, proc_root)
+        if jid is None or (job_id is not None and jid != job_id):
+            continue
+        try:
+            cgroup = (entry / "cgroup").read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            cgroup = ""
+        if _is_persistent_loam_unit(cgroup):
+            continue
+        try:
+            cmd = (entry / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", errors="replace").strip()
+        except OSError:
+            cmd = ""
+        found.append({"pid": pid, "job_id": jid, "cgroup": cgroup, "cmd": cmd[:200]})
+    return found
+
+
+def _terminate_pids(targets: list[dict], *, grace: float = 3.0) -> list[dict]:
+    import signal  # noqa: PLC0415
+    import time  # noqa: PLC0415
+
+    if not targets:
+        return []
+    alive: dict[int, dict] = {}
+    for item in targets:
+        pid = item["pid"]
+        try:
+            os.kill(pid, signal.SIGTERM)
+            alive[pid] = {**item, "killed": False}
+        except ProcessLookupError:
+            continue
+        except PermissionError:
+            continue
+    deadline = time.monotonic() + max(0.0, grace)
+    while alive and time.monotonic() < deadline:
+        for pid in list(alive):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                alive.pop(pid, None)
+        if alive:
+            time.sleep(0.05)
+    for pid, item in list(alive.items()):
+        try:
+            os.kill(pid, signal.SIGKILL)
+            item["killed"] = True
+        except (ProcessLookupError, PermissionError):
+            pass
+    reaped = []
+    for item in targets:
+        pid = item["pid"]
+        rec = alive.get(pid)
+        reaped.append(rec if rec is not None else {**item, "killed": False})
+    return reaped
+
+
+def reap_job_processes(
+    job_id: str,
+    *,
+    grace: float = 3.0,
+    proc_root: Path = Path("/proc"),
+    exclude_pids: set[int] | None = None,
+) -> list[dict]:
+    """Terminate any process still carrying `job_id`'s environment (including
+    helpers that escaped into a sibling transient `systemd-run --scope`)."""
+    if not JOB_ID_RE.match(job_id):
+        return []
+    targets = find_job_processes(job_id, proc_root=proc_root, exclude_pids=exclude_pids)
+    return _terminate_pids(targets, grace=grace)
+
+
+def reap_orphaned_job_processes(
+    is_active,
+    *,
+    grace: float = 3.0,
+    proc_root: Path = Path("/proc"),
+    exclude_pids: set[int] | None = None,
+) -> list[dict]:
+    """Reap leftover processes for any engineer job whose unit is no longer active."""
+    all_procs = find_job_processes(None, proc_root=proc_root, exclude_pids=exclude_pids)
+    if not all_procs:
+        return []
+    active_cache: dict[str, bool] = {}
+    orphans: list[dict] = []
+    for item in all_procs:
+        jid = item["job_id"]
+        if jid not in active_cache:
+            try:
+                active_cache[jid] = bool(is_active(jid))
+            except Exception:
+                active_cache[jid] = True  # fail safe: never kill if state is unknown
+        if not active_cache[jid]:
+            orphans.append(item)
+    return _terminate_pids(orphans, grace=grace)
+
+
+# ---------------------------------------------------------------------------
 # The session id. Minted here, per job, and written into the job directory
 # before the CLI is started.
 #

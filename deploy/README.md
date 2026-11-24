@@ -693,8 +693,17 @@ that file. A name in the file with no record emits nothing but a comment.
 
 `loam-browser` is one headless Chromium (the Playwright MCP image) in a
 container on its own Docker network (`loam-sight`, `172.30.0.0/24`),
-published on `127.0.0.1:8931`, 1 GB, no capabilities, restarting like an
-app. Every persona has it as the `browser` HTTP MCP server in `.mcp.json`
+published on its internal loopback port `127.0.0.1:8937`, 1 GB, no
+capabilities, `restart: no`. A socket-activated MCP wake proxy
+(`loam-browser-proxy.socket` / `loam-browser-proxy.service`, `bin/browser-proxy`)
+holds `127.0.0.1:8931` at zero standing RAM when no agent session is connected:
+it answers `initialize`, `tools/list`, `ping`, `GET /mcp` SSE, and `DELETE /mcp`
+locally from the pinned tool schema (`deploy/browser-tools.json`) without
+waking Docker or Chromium, and starts Docker (if asleep), raises the firewalls,
+and starts `loam-browser` on the first `tools/call`. After 10 quiet minutes
+with no open browser session and no call, `loam-browser` stops — and when no
+other container needs Docker, `docker.service` and `containerd.service` sleep
+with it (`loam-docker-idle.service` applies the same check after boot). Every persona has it as the `browser` HTTP MCP server in `.mcp.json`
 and the server-wide `mcp__browser` in `permissions.allow`; both rendered by
 `bin/provision`. **It is on every lane.** Move 10 dropped it from both
 unattended lanes on the reasoning that a wake has no one to show a page

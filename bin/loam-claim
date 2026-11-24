@@ -90,7 +90,14 @@ def run(argv: list[str], **kw) -> subprocess.CompletedProcess:
 # The login's files, in its data volume
 # ---------------------------------------------------------------------------
 
+def ensure_docker() -> None:
+    if not dep.docker_active():
+        run(["systemctl", "start", "docker.service"], timeout=90)
+
+
 def volume_dir() -> Path | None:
+    if dep.unclaimed() and not dep.docker_active():
+        return None
     import loam_data_disk as dd  # noqa: PLC0415
     return dd.docker_volume_path("authelia-data", run=run)
 
@@ -111,6 +118,7 @@ def hash_password(password: str) -> str:
     """argon2id by Authelia's own CLI, as `gen-deploy --init-login` does. The
     password goes in on stdin through the container's environment-free
     shell, so it is in no argv on the host."""
+    ensure_docker()
     res = run(["docker", "run", "--rm", "-i", "--network", "none",
                "--entrypoint", "sh", dep.AUTHELIA_IMAGE, "-c",
                'IFS= read -r PW; exec authelia crypto hash generate argon2 --password "$PW"'],
@@ -122,6 +130,7 @@ def hash_password(password: str) -> str:
 
 
 def write_users(username: str, display: str, digest: str) -> None:
+    ensure_docker()
     domain = dep.domain()
     text = (
         "# The login's users. Written by the claim (bin/loam-claim); Authelia\n"
