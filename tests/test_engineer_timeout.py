@@ -230,7 +230,7 @@ try:
                  ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "start"]):
         subprocess.run(["git", "-C", str(repo), *argv], check=True)
     project = eng.Project("Loam", repo / "engineer", root / "jobs", platform=True)
-    job_id = "20260930-120000-feedface"
+    job_id = f"20260930-120000-{os.getpid() & 0xffffff:06x}fe"
     inner = job_paths(f"jobs/{job_id}")
     inner["brief"].write_text("---\ntitle: Stub timeout\nbriefed_by: ada\n---\n\nx\n")
 

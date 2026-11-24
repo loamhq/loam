@@ -8,6 +8,7 @@ import contextlib
 import importlib.machinery
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -61,7 +62,7 @@ try:
     project = eng.Project("walled", repo, root / "jobs", platform=False,
                           record={"test_command": "true", "vault_folder": "Walled",
                                   "vault_write": True})
-    job_id = "20261002-130000-0a11ed00"
+    job_id = f"20261002-130000-{os.getpid() & 0xffffff:06x}00"
     jdir = root / "jobs" / job_id
     jdir.mkdir(parents=True)
     (jdir / "brief.md").write_text(

@@ -81,7 +81,8 @@ saved = (job.STATE_DIR, eng.VAULT, eng.log_line, eng.job_dir, eng.projects,
          job.land_job, os.environ.get(job.PROBE_SECONDS_VAR))
 try:
     project, repo = make_project("slotrel")
-    job_id = "20261013-210000-5e1ea5e0"
+    pid_hex = f"{os.getpid() & 0xffffff:06x}"
+    job_id = f"20261013-210000-{pid_hex}e0"
     jdir = write_brief(job_id, "Slot release probe")
     job.STATE_DIR = root / "state"
     eng.VAULT = root / "vault"
@@ -140,7 +141,7 @@ try:
     job.land_job = real_land_job
     bad = eng.Project("gone", root / "no-such-repo", root / "jobs", platform=False,
                       record={})
-    bad_id = "20261013-210100-5e1ea5e1"
+    bad_id = f"20261013-210100-{pid_hex}e1"
     write_brief(bad_id, "Refused")
     job.run_inner(bad, bad_id)
     check("once: a refused job exits its slot once",

@@ -278,8 +278,8 @@ async def run_tests() -> None:
             s_vic = make_sess("iris", "s-vic-chat", 120)
             orig_stop = s_vic.stop
 
-            async def freeing_stop():
-                await orig_stop()
+            async def freeing_stop(reason=None):
+                await orig_stop(reason=reason)
                 avail[0] = 1200
 
             s_vic.stop = freeing_stop

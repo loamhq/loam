@@ -119,7 +119,8 @@ try:
     # -- queued ------------------------------------------------------------
     project, repo = make_project("cancelq")
     projects[project.name] = project
-    qid = "20261110-190000-c0000001"
+    pid_hex = f"{os.getpid() & 0xffffff:06x}"
+    qid = f"20261110-190000-{pid_hex}01"
     qdir = write_brief(qid, "Queued cancel")
     (qdir / "queued").write_text(json.dumps({"joined": "2026-11-10T19:00:00Z"}))
     units[job.unit_name(qid)] = "active"
@@ -135,7 +136,7 @@ try:
 
     # -- running -----------------------------------------------------------
     os.environ[job.PROBE_SECONDS_VAR] = "60"
-    rid = "20261110-190100-c0000002"
+    rid = f"20261110-190100-{pid_hex}02"
     rdir = write_brief(rid, "Running cancel")
     units[job.unit_name(rid)] = "active"
     main_before = git(repo, "rev-parse", "main")
@@ -185,7 +186,7 @@ try:
 
     # -- landing: a cancel during the landing ------------------------------
     os.environ[job.PROBE_SECONDS_VAR] = "1"
-    lid = "20261110-190200-c0000003"
+    lid = f"20261110-190200-{pid_hex}03"
     ldir = write_brief(lid, "Landing cancel")
     units[job.unit_name(lid)] = "active"
     real_land_job = job.land_job
@@ -227,7 +228,7 @@ try:
     late, late_repo = make_project("cancellate")
     projects.clear()
     projects[late.name] = late
-    tid = "20261110-190300-c0000004"
+    tid = f"20261110-190300-{pid_hex}04"
     tdir = write_brief(tid, "Late cancel")
     late.record["test_command"] = (
         f"printf '%s' '{{\"at\": \"2026-11-10T19:03:30Z\", \"by\": \"owner\"}}' "
@@ -249,7 +250,7 @@ try:
            result["landing_reason"], result["stage"]), (True, "cancelled", "cancelled"))
 
     # -- status ------------------------------------------------------------
-    sid = "20261110-190400-c0000005"
+    sid = f"20261110-190400-{pid_hex}05"
     sdir = write_brief(sid, "Status cancel")
     held = job.loam_lock._try_take(  # noqa: SLF001
         job.loam_lock.LOCK_DIR / f"run-{os.getpid()}-99.lock",

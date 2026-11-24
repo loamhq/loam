@@ -120,7 +120,8 @@ try:
         k["tree_note"]) or saved[-1].format(**k)})()
 
     # A job that succeeds, with a dead run's scratch already in the way.
-    ok_id = "20261021-180000-5c7a7c01"
+    pid_hex = f"{os.getpid() & 0xffffff:06x}"
+    ok_id = f"20261021-180000-{pid_hex}01"
     stale = scratch_root / f"loam-job-{ok_id}"
     stale.mkdir()
     (stale / "left-behind").write_text("x")
@@ -141,7 +142,7 @@ try:
 
     # A job whose session raises.
     seen.clear()
-    bad_id = "20261021-180100-5c7a7c02"
+    bad_id = f"20261021-180100-{pid_hex}02"
     write_brief(bad_id, "Scratch failure")
     job.time = Session(fail=True)
     raised = None
@@ -156,7 +157,7 @@ try:
     job.time = time
 
     # Recovery: a killed unit ran no `finally`.
-    dead_id = "20261021-180200-5c7a7c03"
+    dead_id = f"20261021-180200-{pid_hex}03"
     write_brief(dead_id, "Scratch killed")
     dead = eng.make_scratch(dead_id)
     (dead / "big").write_text("x" * 1000)
