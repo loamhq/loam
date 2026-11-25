@@ -218,7 +218,7 @@ async function api(method, path, body, { signal } = {}) {
   if (!res.ok) {
     // The broker's own words, whatever it refused for — a cap, a provider that
     // is not wired, a session it does not have. Never one of this app's.
-    const err = new Error(failureSentence(sentenceOf(parsed) ?? text ?? `${method} ${path} failed`))
+    const err = new Error(failureSentence(sentenceOf(parsed) ?? text ?? `${method} ${path} failed`, res.status))
     err.status = res.status
     err.body = parsed
     throw err

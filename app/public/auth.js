@@ -62,6 +62,8 @@ export async function authenticatedFetch(input, options = {}) {
   expireAuth()
   throw refused()
 }
-export function failureSentence(text) {
-  return /\/v1\/|\bDELETE\b/.test(String(text)) ? 'Couldn’t start — the box is busy; try again in a moment.' : text
+export function failureSentence(text, status = null) {
+  if (!/\/v1\/|\bDELETE\b/.test(String(text))) return text
+  if (status === 404) return 'This file or folder isn’t there.'
+  return 'Couldn’t start — the box is busy; try again in a moment.'
 }

@@ -36,6 +36,7 @@ const fileOptions = {
   onResolveTo: (root, path, isFile, row) => goFiles(root, path, { isFile, row }),
   // Through `put()`, the one place that can say how far an upload has got.
   sendForm: (href, form, onProgress) => host.put(href, form, onProgress),
+  panelPref: { get: () => host.store.filePanel, set: (value) => { host.store.filePanel = value } },
 }
 const files = createFiles(fileOptions)
 // An explicit directory link (for example, a profile's workspace) is a panel

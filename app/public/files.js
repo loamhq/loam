@@ -33,6 +33,7 @@ import { ownerInitial } from './owner.js'
 import { emptyState } from './empty-state.js'
 import { copyText } from './clipboard.js'
 import { markdown, safeHref, anchorOf, toggleTask } from './markdown.js'
+import { createPanelState, resetPanelState, resolveFilePanels, renderHostedPanels } from './file-panel.js'
 
 export { anchorOf }
 export const FILES_LOCATION_HIDDEN = 'That location is no longer shown.'
@@ -549,6 +550,7 @@ export function createFiles({
   urls = globalThis.URL,
   sendForm = fetchForm,
   triggerDownload = triggerBrowserDownload,
+  panelPref = null,
 }) {
   let uploads = 0
   let copyNoticeTimer = null
@@ -564,6 +566,7 @@ export function createFiles({
     listing: { key: '', rows: [], folder: null, cursor: null, total: null, loading: false, error: '', status: null },
     // The open file, or null.
     file: null,
+    panel: createPanelState(),
     renaming: null,
     // The "+" sheet, the name sheet, a choice between files, a leave question.
     sheet: null,
@@ -802,6 +805,7 @@ export function createFiles({
     if (f?.timer) timers.clear(f.timer)
     if (f?.blobUrl) urls?.revokeObjectURL?.(f.blobUrl)
     st.file = null
+    resetPanelState(st.panel)
   }
 
   // Go to an address — a folder, or a file in its folder. `isFile` is known
@@ -1745,7 +1749,7 @@ export function createFiles({
     }
   }
 
-  return { registry, st, pluginRoot, pathLabels, itemsMenu, stat, readText, ago: when, beginRename, cancelRename, editRename, rename, applyRename, focusRename, beginMove, browseMove, confirmMove, canDeleteFile, beginDelete, confirmDelete, holdSavesForDelete, removeDeletedFile, refreshContainingFolder, revealOpen, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, downloadArchive, loadRoots, loadRecent, setRecentWho, showMoreRecent, toggleRecentGroup, togglePinsExpanded, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, resumeOwner, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
+  return { registry, st, schedule, panelPref, pluginRoot, pathLabels, itemsMenu, stat, readText, ago: when, beginRename, cancelRename, editRename, rename, applyRename, focusRename, beginMove, browseMove, confirmMove, canDeleteFile, beginDelete, confirmDelete, holdSavesForDelete, removeDeletedFile, refreshContainingFolder, revealOpen, shortcutMenu, openShortcut, loadLive, copyLink, resourceMenu, downloadArchive, loadRoots, loadRecent, setRecentWho, showMoreRecent, toggleRecentGroup, togglePinsExpanded, loadFolder, show, openFile, closeFile, edit, save, tick, askOverwrite, reload, setMode, create, dirty, guard, own, resumeOwner, q, setUploadLimits, upload, retryUpload, openUploaded, openDaily, newInbox }
 }
 
 function triggerBrowserDownload(href, filename) {
@@ -2200,6 +2204,7 @@ export function folderView(files, { go, wide, collapse = null, historyBack = nul
         : st.path === '' ? (rootRow?.desc ?? ROOT_LOOK[st.root]?.desc ?? '')
           : [rootName, ...path].join(' › ')
   const pinned = !atRoot && !atLoam && !own && home?.isShortcut ? home.isShortcut(st.root, st.path) : false
+  const listingNotFound = Boolean(!atRoot && !atLoam && !own && st.listing.error && st.listing.status === 404)
 
   // The home's header is the Chats header, class for class, so the two tabs
   // start at the same place: no back row above it and no line under it.
@@ -2226,7 +2231,7 @@ export function folderView(files, { go, wide, collapse = null, historyBack = nul
         )
       : null,
     h('div', { class: 'headspace' }),
-    home?.toggleShortcut && !own && !atLoam
+    home?.toggleShortcut && !own && !atLoam && !listingNotFound
       ? h('button', { class: 'iconbtn fs-menu', title: 'This folder', 'aria-label': 'This folder', onclick: () => { if (!st.archive?.busy) st.archive = null; st.sheet = { kind: 'folder', resource: folderRow, renameSlot: 'folder', name: title, on: pinned, toggle: () => home.toggleShortcut(st.root, st.path) }; go.redraw?.() } }, icon.dots(18))
       : null,
     canAdd
@@ -2310,6 +2315,8 @@ export function folderView(files, { go, wide, collapse = null, historyBack = nul
   } else if (own) {
     if (st.listing.error) body.push(errorBox(st.listing.error, st.listing.status, () => files.loadFolder()))
     else body.push(files.registry.invoke(own, 'render', { files, go: fromList(go, st.root), wide, home, entry: (row, extras = {}) => fileEntry(files, row, { ...extras, go: fromList(go, st.root), home }) }))
+  } else if (listingNotFound) {
+    body.push(notFoundBox({ kind: 'folder', wide, go, files }))
   } else if (st.listing.error) {
     body.push(errorBox(st.listing.error, st.listing.status, () => files.loadFolder()))
   } else if (st.listing.loading && st.listing.rows.length === 0) {
@@ -2365,10 +2372,22 @@ export function folderView(files, { go, wide, collapse = null, historyBack = nul
     'div',
     { class: `fs-folder${wide ? ' wide' : ''}${atRoot ? ' athome' : ''}`, key: 'fs:folder' },
     head,
-    atRoot ? null : h('div', { class: 'fs-titles' }, renameField(files, folderRow, 'folder') ?? h('div', { class: 'display fs-title', text: title }), sub ? h('div', { class: 'fs-sub', text: sub }) : null),
+    atRoot || listingNotFound ? null : h('div', { class: 'fs-titles' }, renameField(files, folderRow, 'folder') ?? h('div', { class: 'display fs-title', text: title }), sub ? h('div', { class: 'fs-sub', text: sub }) : null),
     wide && st.file ? null : noticeLine(files),
     h('div', { class: 'scroll fs-scroll' }, ...body.filter(Boolean)),
   )
+}
+
+function notFoundBox({ kind = 'folder', wide = false, go = null, files = null }) {
+  const back = () => (go ? go('vault', '', { isFile: false }) : files?.show?.('vault', ''))
+  return emptyState({
+    object: kind === 'file' ? 'page' : 'folder',
+    size: wide ? 'small' : 'pane',
+    title: 'Not found',
+    body: 'This file or folder isn’t there. It may have moved, or the address may be wrong.',
+    action: h('button', { type: 'button', class: 'pillbtn secondary fs-notfound-back', text: 'Back to Your files', onclick: back }),
+    props: { class: 'fs-notfound', role: 'status' },
+  })
 }
 
 // Host failures retain their sentence. Text size/type refusals are explained
@@ -2399,6 +2418,12 @@ export function saveState(f, changed) {
   if (changed) return { word: 'Edited', tone: 'quiet' }
   if (f.flash.startsWith('Saved')) return { word: f.flash, tone: 'good' }
   return null
+}
+
+export function filePanelActions(files, options = {}) {
+  const f = files?.st?.file
+  if (!f || f.loading || f.error) return []
+  return resolveFilePanels(files, f, options).actions
 }
 
 export function fileView(files, options) {
@@ -2459,9 +2484,7 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, s
         )
       : null
 
-  const panels = files.registry.draw('files.viewer', { slot: 'panel', files, file: f, options: { wide, side, close, go, home } })
-  const panelActions = panels.map(p => (p && typeof p === 'object' && !p.nodeType ? p.action : null)).filter(Boolean)
-  const panelNodes = panels.map(p => (p?.nodeType ? p : p?.node ?? null)).filter(Boolean)
+  const { actions: panelActions, hosted: hostedPanels } = resolveFilePanels(files, f, { wide, side, close, go, home })
   const extraActions = [...files.registry.draw('files.action', { slot: 'action', file: f, files }), ...panelActions]
 
   const head = side ? null : files.registry.reduce('files.action', { slot: 'toolbar', file: f, files, defaultView: () => h(
@@ -2505,18 +2528,22 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, s
   let body
   if (f.loading && !htmlPreview) body = h('div', { class: 'fs-quiet', text: 'Opening…' })
   else if (f.error && !htmlPreview) {
-    const limited = f.status === 415 || f.status === 413
-    const size = f.errorBody?.size, max = f.errorBody?.max
-    const detail = f.status === 415 ? 'This file can’t be shown as text.'
-      : Number.isFinite(size) && Number.isFinite(max) ? `This file is ${bytes(size)}. The text view supports up to ${bytes(max)}.`
-      : 'This file is larger than the text view supports.'
-    const extra =
-      limited
-        ? h('div', { class: 'fs-error-detail' }, h('p', { text: detail }),
-            f.view === 'html' ? h('button', { class: 'fs-error-action', text: 'Back to preview', onclick: () => files.setMode('preview') }) : null,
-            f.caps.download ? downloadButton(f, 'Download', 'fs-error-action fs-dlbtn') : null)
-        : null
-    body = errorBox(limited ? f.view === 'html' ? 'Source unavailable' : 'Text view unavailable' : f.error, f.status, limited ? null : () => files.openFile(f.root, f.path, f.row, { mode: f.mode }), extra)
+    if (f.status === 404) {
+      body = notFoundBox({ kind: 'file', wide, go, files })
+    } else {
+      const limited = f.status === 415 || f.status === 413
+      const size = f.errorBody?.size, max = f.errorBody?.max
+      const detail = f.status === 415 ? 'This file can’t be shown as text.'
+        : Number.isFinite(size) && Number.isFinite(max) ? `This file is ${bytes(size)}. The text view supports up to ${bytes(max)}.`
+        : 'This file is larger than the text view supports.'
+      const extra =
+        limited
+          ? h('div', { class: 'fs-error-detail' }, h('p', { text: detail }),
+              f.view === 'html' ? h('button', { class: 'fs-error-action', text: 'Back to preview', onclick: () => files.setMode('preview') }) : null,
+              f.caps.download ? downloadButton(f, 'Download', 'fs-error-action fs-dlbtn') : null)
+          : null
+      body = errorBox(limited ? f.view === 'html' ? 'Source unavailable' : 'Text view unavailable' : f.error, f.status, limited ? null : () => files.openFile(f.root, f.path, f.row, { mode: f.mode }), extra)
+    }
   } else if (f.view === 'image' && f.blobUrl) body = h('div', { class: 'fs-media' }, h('img', { class: 'fs-img', src: f.blobUrl, alt: name }))
   else if (f.view === 'pdf' && f.pdfUrl)
     body = h(
@@ -2596,16 +2623,13 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, s
     body,
   ]
 
+  const hasOpenPanel = hostedPanels.some(p => p.open)
   return h(
     'div',
-    { class: `fs-file${wide ? ' wide' : ''}${htmlPreview ? ' html-live' : ''}${panelNodes.length ? ' has-panel' : ''}`, key: `fs:file:${f.root}:${f.path}` },
+    { class: `fs-file${wide ? ' wide' : ''}${htmlPreview ? ' html-live' : ''}${hostedPanels.length ? ' has-panel' : ''}${hasOpenPanel ? ' panel-open' : ''}`, key: `fs:file:${f.root}:${f.path}` },
     htmlPreview ? liveHead : head,
     audioBar,
-    ...(panelNodes.length
-      ? [h('div', { class: 'fs-split', key: 'fs:split' },
-          h('div', { class: 'fs-main-col', key: 'fs:main-col' }, ...contentParts),
-          ...panelNodes.map((node, i) => h('aside', { class: 'fs-side-panel', key: `fs:panel:${i}` }, node)))]
-      : contentParts),
+    ...renderHostedPanels(hostedPanels, { wide, contentParts }),
   )
 }
 

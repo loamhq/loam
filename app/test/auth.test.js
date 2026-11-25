@@ -66,6 +66,7 @@ test('a refusal the probe calls fine but that is refused again does end the page
 test('route-bearing failures read as a sentence in classic and thread views', () => {
   assert.equal(failureSentence('End one with DELETE /v1/sessions/id'), 'Couldn’t start — the box is busy; try again in a moment.')
   assert.equal(failureSentence('Capacity 429 at /v1/sessions'), 'Couldn’t start — the box is busy; try again in a moment.')
+  assert.equal(failureSentence("no root called 'missing'; GET /v1/files/roots names them", 404), 'This file or folder isn’t there.')
   assert.equal(failureSentence('Please try again shortly.'), 'Please try again shortly.')
 })
 

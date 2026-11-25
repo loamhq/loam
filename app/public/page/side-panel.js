@@ -9,7 +9,7 @@ import { createProfiles, mountProfile } from '../agent-profile.js'
 import { createSchedules } from '../schedules.js'
 import { createActivity } from '../activity.js'
 import { createMessageState } from '../chat-ui.js'
-import { fileView, folderView, nameOf, parentOf, splitPath, ROOT_LOOK } from '../files.js'
+import { fileView, filePanelActions, folderView, nameOf, parentOf, splitPath, ROOT_LOOK } from '../files.js'
 import { agentLook } from '../sessions.js'
 import { h, icon, blob } from '../ui.js'
 import { copyText } from '../clipboard.js'
@@ -167,10 +167,13 @@ export function mountSidePanel(base, activityOptions) {
     const f = host.files.st.file
     const fileTools = f ? host.fileDictation() : null
     const at = item()
-    const fileToolbar = f && !(f.view === 'html' && f.mode === 'preview')
+    const htmlPreview = Boolean(f && f.view === 'html' && f.mode === 'preview')
+    const panelActions = f ? filePanelActions(host.files, { wide: true, side: true, home: host.filesHome(), go: host.goFiles }) : []
+    const actionButtons = f ? [...host.registry.draw('files.action', { slot: 'action', file: f, files: host.files }), ...panelActions] : []
+    const fileToolbar = Boolean(f && !htmlPreview)
     const panelHeader = fileToolbar ? host.registry.reduce('files.action', { slot: 'toolbar', file: f, files: host.files,
-      defaultView: () => header([fileTools.readAloud?.glyph, ...host.registry.draw('files.action', { slot: 'action', file: f, files: host.files })]),
-    }, null) : ['thread', 'app'].includes(at?.kind) ? null : header()
+      defaultView: () => header([fileTools.readAloud?.glyph, ...actionButtons]),
+    }, null) : ['thread', 'app'].includes(at?.kind) ? null : header(htmlPreview ? actionButtons : undefined)
     return renderPanel({ host, item: at, header: panelHeader, context: { fileTools },
       after: [...(at?.kind === 'profile' ? own.profileActivity.dialogNodes() : []), host.editorNodes(), ...host.sheetNodes()] })
   }

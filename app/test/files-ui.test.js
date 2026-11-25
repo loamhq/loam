@@ -554,8 +554,22 @@ test('a folder the host does not let you add to has no Upload anywhere', async (
 test('a folder the host cannot list says so in its own words, with a way to try again', async () => {
   popTo('/files/vault/Broken')
   await until(() => find(root, 'banner-retry'))
-  assert.match(text(find(root, 'banner-retry')), /nothing at vault\/Broken/)
+  assert.match(text(find(root, 'banner-retry')), /vault index temporarily unavailable/)
   assert.ok(all(find(root, 'banner-retry'), 'pillbtn').some((b) => text(b) === 'Try again'))
+})
+
+test('a missing folder or wrong root 404 says plainly it is not there and links back to Your files', async () => {
+  popTo('/files/40_PROJECTS/missing/page.html')
+  await until(() => find(root, 'fs-notfound'))
+  assert.equal(find(root, 'banner-retry'), null)
+  const copy = text(find(root, 'fs-notfound'))
+  assert.match(copy, /Not found/)
+  assert.match(copy, /isn’t there/)
+  assert.doesNotMatch(copy, /box is busy/i)
+  const back = find(root, 'fs-notfound-back')
+  assert.equal(text(back), 'Back to Your files')
+  click(back)
+  await until(() => globalThis.location.pathname === '/files/vault' && rowNamed('Notes'))
 })
 
 const composer = () => find(find(root, 'composer-box'), 'draft-row').childNodes.find((n) => n.className === 'draft')

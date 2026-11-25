@@ -70,7 +70,8 @@ export function filesHost({ texts = {} } = {}) {
     'GET /v1/files/list': (req, res, url) => {
       const root = url.searchParams.get('root')
       const path = url.searchParams.get('path') ?? ''
-      if (path === 'Broken') return json(res, 404, { error: 'nothing at vault/Broken' })
+      if (root !== 'vault' && root !== 'spaces') return json(res, 404, { error: `no root called '${root}'; GET /v1/files/roots names them` })
+      if (path === 'Broken') return json(res, 503, { error: 'vault index temporarily unavailable' })
       const entries = rows[`${root}:${path}`]
       if (!entries) return json(res, 404, { error: `nothing at ${root}/${path}` })
       const folder = path === '' ? { ...row(root, ''), capabilities: { read: true, download: false, write: false, create: root === 'vault' } } : find(root, path) ?? row(root, path)

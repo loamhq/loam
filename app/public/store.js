@@ -7,6 +7,7 @@ import { installation } from './installation.js'
 
 const SIDEBAR = 'loam-ui.sidebar'
 const FILES = 'loam-ui.files'
+const FILE_PANEL = 'loam-ui.file-panel'
 const READS = 'loam-ui.reads' // what this browser used to decide unread by, and no longer does
 const POSITIONS = 'loam-ui.seq.' // what an earlier version wrote, and no longer does
 const CURRENT = 'loam-ui.session' // which chat was open, and no longer is (2026-10-05)
@@ -57,6 +58,16 @@ export function createStore(storage = globalThis.localStorage) {
     },
     set files(value) {
       write(FILES, filesSettings(value))
+    },
+    // Whether a non-Markdown file's companion panel (Comments) stays open or
+    // closed on this device across files and reloads: null means automatic
+    // (closed when empty, open when unresolved notes exist).
+    get filePanel() {
+      const value = read(FILE_PANEL, null)
+      return value === 'open' || value === 'closed' ? value : null
+    },
+    set filePanel(value) {
+      write(FILE_PANEL, value === 'open' || value === 'closed' ? value : null)
     },
   }
 }

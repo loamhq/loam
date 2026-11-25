@@ -576,6 +576,8 @@ export const icon = {
   // The desktop rail's two tabs and the button that hides the list column.
   chat: (s = 20) =>
     svg(s, [['path', { d: 'M20.5 11.7a8 8 0 0 1-8.6 8 8.7 8.7 0 0 1-3.6-.9L3.5 20.5l1.7-4.8a8 8 0 0 1-.9-3.7 8 8 0 0 1 8-8 8 8 0 0 1 8.2 7.7z' }]]),
+  comment: (s = 16) =>
+    svg(s, [['path', { d: 'M20 11.5c0 4-3.6 7-8 7-1.2 0-2.3-.2-3.3-.6L4 19.5l1.3-3.6C4.5 14.6 4 13.1 4 11.5c0-4 3.6-7 8-7s8 3 8 7z' }]], { stroke: 1.9 }),
   panelLeft: (s = 18) =>
     svg(s, [
       ['rect', { x: 3, y: 4, width: 18, height: 16, rx: 3 }],

@@ -5,16 +5,16 @@
  * so does an image seen full size, light on its own dark (image-view.js). */
 /* Docked audio play/speed own neutral surfaces in the plugin stylesheet.
  * :where() keeps the inline speed control's selector specificity unchanged. */
-:root :is(.iconbtn,.pillbtn,.roundbtn,.plusbtn,.modelbtn,.chip,.editor-done,.stepbtn,.cancel,.fs-add,.settings-select,.provider-chip,.player-rate:where(:not(.playerbar-rate)),.player-retry,.takebtn.discard,.approve .allow,.approve .allowchat,.selbtn):not(.primary):not(.secondary):not(.nav *,.rail *,.accounttile,.fs-entry *,.image-view *) {
+:root :is(.iconbtn,.pillbtn,.roundbtn,.plusbtn,.modelbtn,.chip,.editor-done,.stepbtn,.cancel,.fs-add,.settings-select,.provider-chip,.player-rate:where(:not(.playerbar-rate)),.player-retry,.takebtn.discard,.approve .allow,.approve .allowchat,.selbtn):not(.primary):not(.secondary):not(.nav *,.rail *,.accounttile,.fs-entry *,.image-view *,.banner-retry *) {
   background:transparent; color:var(--paper-ink); border-color:transparent; box-shadow:none;
 }
 /* Keep border boxes the same size; borderless controls have no painted edge. */
-:root :is(.iconbtn,.pillbtn,.roundbtn,.plusbtn,.modelbtn,.chip,.editor-done,.stepbtn,.cancel,.fs-add,.provider-chip,.player-rate:where(:not(.playerbar-rate)),.player-retry,.takebtn.discard,.approve .allow,.approve .allowchat,.selbtn):not(.primary):not(.secondary):not(.nav *,.rail *,.accounttile,.fs-entry *,.image-view *):is(:hover,:active,:focus-visible) {
+:root :is(.iconbtn,.pillbtn,.roundbtn,.plusbtn,.modelbtn,.chip,.editor-done,.stepbtn,.cancel,.fs-add,.provider-chip,.player-rate:where(:not(.playerbar-rate)),.player-retry,.takebtn.discard,.approve .allow,.approve .allowchat,.selbtn):not(.primary):not(.secondary):not(.nav *,.rail *,.accounttile,.fs-entry *,.image-view *,.banner-retry *):is(:hover,:active,:focus-visible) {
   background:var(--paper-hover); color:var(--paper-ink); border-color:transparent; box-shadow:none;
 }
 /* Selection is information, not an action tier. A paper thumb and an underline
  * retain the chosen option without spending the secondary-action allowance. */
-:root :is(.iconbtn,.plusbtn,.modelbtn,.chip,.provider-chip,.segmented button).on:not(.primary):not(.secondary):not(.nav *,.rail *,.accounttile) {
+:root :is(.iconbtn,.plusbtn,.modelbtn,.chip,.provider-chip,.segmented button,.fs-comments-btn).on:not(.primary):not(.secondary):not(.nav *,.rail *,.accounttile) {
   background:var(--paper-hover); color:var(--paper-ink); border-color:transparent; box-shadow:none;
 }
 :root :is(.chip,.provider-chip,.segmented button).on {

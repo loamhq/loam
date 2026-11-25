@@ -241,3 +241,23 @@ have never met.
   resyncs after 3.5 s if the SSE stream fails to echo the accepted message. See
   `test/thread-live-recovery.test.js`, `test/thread-live-recovery-browser.mjs`,
   and `docs/evidence/thread-live-recovery/README.md`.
+- **Hosted non-Markdown file panels and Files 404** (`public/file-panel.js`,
+  `public/files.js`, `public/page/side-panel.js`, `public/store.js`,
+  `public/auth.js`, `public/style.css`): core hosts `files.viewer`
+  `slot: 'panel'` across all non-Markdown viewers (including HTML live preview
+  and the side panel beside a chat) by passing `wide: true, hosted: true` so
+  existing panel plugins hand back their kept DOM node for both desktop and
+  phone. Core owns the toolbar toggle button (`.fs-comments-btn.dc-pbtn`) with
+  live unresolved count badge, per-device persistence (`store.filePanel` /
+  `loam-ui.file-panel`), automatic desktop default (closed when empty,
+  auto-opened on unresolved comments until closed; phones always show the file
+  first and open `.fs-panel-sheet.dc-panel-dlg` on tap), close (`×`),
+  `Escape`-inside-panel (yielding to `.dc-edit-fld`), and composer focus only
+  when empty. At `@container (max-width: 780px)` (narrow desktop split panes),
+  the panel slides in as a right-edge overlay drawer over a scrim instead of
+  stacking under or crushing an HTML iframe. Files 404s render a calm
+  `emptyState` (`.fs-notfound`) with **Back to Your files**, and
+  `failureSentence(text, status)` avoids mapping 404 `/v1/` strings to the
+  busy-box message. See `test/file-panel.test.js`,
+  `test/file-comments-panel-browser.mjs`, and
+  `docs/evidence/file-comments-panel/README.md`.

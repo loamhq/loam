@@ -2015,6 +2015,24 @@ a.ghline { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
 .fs-quiet { padding: 40px 20px; text-align: center; color: var(--paper-ink-2); font-size: 14px; }
 .fs-more { align-self: center; }
 .banner.banner-retry { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.banner.banner-retry > .pillbtn {
+  min-height: 40px; height: 40px; padding: 0 16px;
+  background: transparent; color: var(--text-inverse);
+  border: 1px solid color-mix(in srgb, var(--text-inverse) 55%, transparent);
+  box-shadow: none;
+}
+.banner.banner-retry > .pillbtn:active, .banner.banner-retry > .pillbtn:focus-visible {
+  background: color-mix(in srgb, var(--text-inverse) 16%, transparent);
+  color: var(--text-inverse); border-color: var(--text-inverse);
+}
+@media (hover: hover) {
+  .banner.banner-retry > .pillbtn:hover {
+    background: color-mix(in srgb, var(--text-inverse) 14%, transparent);
+    color: var(--text-inverse); border-color: var(--text-inverse);
+  }
+}
+.fs-notfound { flex: 1 1 auto; }
+.fs-notfound .fs-notfound-back { min-height: 44px; padding: 0 18px; }
 .fs-errlead { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; font-weight: 700; color: var(--text-inverse); }
 .fs-error-detail { color: inherit; display: flex; flex-wrap: wrap; gap: 10px; }
 .fs-error-detail p { flex-basis: 100%; margin: 0; font-size: 14px; }
@@ -2281,14 +2299,370 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .fs-pdfbar .pillbtn { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 14px; font-size: 13px; text-decoration: none; }
 .fs-audio { width: min(440px, 100%); }
 .fs-video { max-width: 100%; max-height: calc(68vh / var(--ui-scale, 1)); border-radius: var(--radius-lg); background: var(--paper-card); }
-.fs-split { flex: 1; min-height: 0; min-width: 0; display: flex; }
+.fs-comments-btn {
+  flex: none;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 40px; height: 40px; padding: 0 12px;
+  border-radius: var(--radius-pill);
+  font-size: 13.5px; font-weight: 600; line-height: 1;
+  white-space: nowrap;
+  transition: background-color 150ms var(--ease-standard), color 150ms var(--ease-standard), box-shadow 150ms var(--ease-standard);
+}
+.fs-comments-btn > svg { flex: none; color: var(--paper-ink-2); transition: color 150ms var(--ease-standard); }
+.fs-comments-btn.on > svg, .fs-comments-btn.has > svg { color: var(--paper-ink); }
+.fs-comments-btn.on { box-shadow: inset 0 0 0 1px var(--paper-rule); }
+.fs-comments-badge {
+  display: inline-grid; place-items: center;
+  min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box;
+  border-radius: var(--radius-pill);
+  background: var(--latte-foam); color: var(--latte-foam-ink);
+  font-size: 11.5px; font-weight: 700; line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.fs-comments-btn.on .fs-comments-badge {
+  background: var(--paper-raised); color: var(--paper-ink);
+}
+.fs-htmlbar .fs-comments-btn { min-height: 40px; height: 40px; padding: 0 12px; font-size: 13.5px; }
+.fs-file:not(.wide) .fs-comments-btn { min-height: 44px; height: 44px; }
+@container (max-width: 520px) {
+  .fs-livehead .fs-comments-lbl { display: none; }
+  .fs-livehead .fs-comments-btn { padding: 0 10px; }
+}
+
+.fs-split { position: relative; flex: 1; min-height: 0; min-width: 0; display: flex; overflow: hidden; }
 .fs-main-col { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: auto; overscroll-behavior: contain; }
 .fs-file.html-live .fs-main-col { overflow: hidden; }
-.fs-side-panel { width: 320px; flex: none; min-height: 0; border-left: 1px solid var(--paper-rule); display: flex; flex-direction: column; overflow: hidden; }
+.fs-split-backdrop { display: none; }
+.fs-side-panel {
+  --fs-panel-w: 344px;
+  position: relative;
+  width: 0; flex: none; min-height: 0;
+  border-left: 1px solid transparent;
+  display: flex; flex-direction: column; overflow: hidden;
+  opacity: 0; pointer-events: none;
+  transition: width 220ms var(--ease-standard), opacity 180ms var(--ease-standard), border-left-color 180ms var(--ease-standard);
+}
+.fs-side-panel.open {
+  width: var(--fs-panel-w);
+  border-left-color: var(--paper-rule);
+  opacity: 1; pointer-events: auto;
+}
+.fs-side-panel:focus:not(:focus-visible), .fs-panel-sheet:focus:not(:focus-visible) { outline: none; }
+.fs-side-panel-inner {
+  position: relative;
+  width: var(--fs-panel-w); min-width: var(--fs-panel-w);
+  height: 100%; min-height: 0;
+  display: flex; flex-direction: column;
+  transform: translateX(12px);
+  transition: transform 220ms var(--ease-standard);
+}
+.fs-side-panel.open .fs-side-panel-inner { transform: none; }
+
 @container (max-width: 780px) {
-  .fs-split { flex-direction: column; overflow: auto; overscroll-behavior: contain; }
-  .fs-main-col { overflow: visible; flex: none; }
-  .fs-side-panel { width: auto; border-left: 0; border-top: 1px solid var(--paper-rule); flex: none; overflow: visible; }
+  .fs-split-backdrop {
+    display: block; position: absolute; inset: 0; z-index: 5;
+    background: color-mix(in srgb, var(--scrim) 55%, transparent);
+    opacity: 0; pointer-events: none;
+    transition: opacity 200ms var(--ease-standard);
+  }
+  .fs-split-backdrop.open { opacity: 1; pointer-events: auto; }
+  .fs-side-panel {
+    position: absolute; top: 0; right: 0; bottom: 0; z-index: 6;
+    width: min(var(--fs-panel-w), calc(100% - 20px));
+    max-width: 100%;
+    border-left: 1px solid var(--paper-rule);
+    box-shadow: var(--shadow-popover);
+    transform: translateX(104%);
+    transition: transform 220ms var(--ease-standard), opacity 180ms var(--ease-standard);
+  }
+  .fs-side-panel.open {
+    width: min(var(--fs-panel-w), calc(100% - 20px));
+    transform: none;
+  }
+  .fs-side-panel-inner { width: 100%; min-width: 0; transform: none; transition: none; }
+}
+
+.fs-panel-sheet-wrap {
+  position: fixed; inset: 0; z-index: 90;
+  display: flex; flex-direction: column; justify-content: flex-end;
+  pointer-events: none; visibility: hidden;
+  transition: visibility 0s linear 240ms;
+}
+.fs-panel-sheet-wrap.open {
+  pointer-events: auto; visibility: visible;
+  transition: visibility 0s linear 0s;
+}
+.fs-panel-backdrop {
+  position: absolute; inset: 0;
+  background: var(--scrim); touch-action: none;
+  opacity: 0; transition: opacity 220ms var(--ease-standard);
+}
+.fs-panel-sheet-wrap.open .fs-panel-backdrop { opacity: 1; }
+.fs-panel-sheet {
+  position: relative; z-index: 1;
+  width: 100%; height: min(84dvh, 660px);
+  box-sizing: border-box;
+  display: flex; flex-direction: column; overflow: hidden;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  background: var(--paper-pane); color: var(--paper-ink);
+  box-shadow: var(--shadow-popover);
+  transform: translateY(100%);
+  transition: transform 240ms var(--ease-standard);
+}
+.fs-panel-sheet-wrap.open .fs-panel-sheet { transform: none; }
+.fs-panel-sheet.dragging { transition: none; }
+.fs-panel-grip {
+  flex: none; display: flex; justify-content: center; align-items: center;
+  padding: 10px 0 4px; touch-action: none; cursor: grab;
+}
+.fs-panel-grip > span {
+  width: 38px; height: 4px; border-radius: var(--radius-pill);
+  background: var(--paper-rule-strong);
+}
+
+.fs-panel-close {
+  position: absolute; top: 10px; right: 10px; z-index: 4;
+  width: 36px; height: 36px; min-width: 36px; min-height: 36px;
+  border-radius: var(--radius-pill);
+  color: var(--paper-ink-3);
+}
+.fs-panel-sheet > .fs-panel-close {
+  top: 20px; right: 10px;
+  width: 40px; height: 40px; min-width: 40px; min-height: 40px;
+}
+.fs-panel-close:active { background: var(--paper-pressed); color: var(--paper-ink); }
+@media (hover: hover) {
+  .fs-panel-close:hover { background: var(--paper-hover); color: var(--paper-ink); }
+}
+
+/* Hosted non-Markdown Comments panel inside Loam's shell. Defines the plugin's
+ * --dc-* tokens on the panel root, restores compact desktop control geometry,
+ * warms the empty state, and calms the composer across light and dark modes. */
+#app .fs-panel-host .dc-panel {
+  --dc-ground: var(--paper-page);
+  --dc-pane: var(--paper-pane);
+  --dc-paper: var(--paper-raised);
+  --dc-surface: var(--paper-card);
+  --dc-hover: var(--paper-hover);
+  --dc-ink: var(--paper-ink);
+  --dc-ink2: var(--paper-ink-2);
+  --dc-ink3: var(--paper-ink-3);
+  --dc-rule: var(--paper-rule);
+  --dc-rule2: var(--paper-rule-strong);
+  --dc-well: var(--paper-card);
+  --dc-accent: var(--signal-crema);
+  --dc-pill: var(--radius-pill);
+  --dc-r-sm: var(--radius-sm);
+  --dc-r-md: var(--radius-md);
+  --dc-r-lg: var(--radius-lg);
+  --dc-ease: var(--ease-standard);
+  flex: 1 1 auto;
+  background: var(--paper-pane);
+  color: var(--paper-ink);
+}
+#app .fs-panel-host .dc-panel-head {
+  min-height: 56px; box-sizing: border-box;
+  padding: 10px 54px 10px 18px;
+  border-bottom: 1px solid var(--paper-rule);
+  background: var(--paper-pane);
+}
+#app .fs-panel-sheet .dc-panel-head {
+  min-height: 48px;
+  padding: 4px 58px 12px 18px;
+}
+#app .fs-panel-host .dc-panel-title { gap: 8px; }
+#app .fs-panel-host .dc-panel-title h2 {
+  font-size: 19px; letter-spacing: -.01em; color: var(--paper-ink);
+}
+#app .fs-panel-host .dc-panel-count {
+  min-width: 22px; height: 22px; padding: 0 7px;
+  background: var(--paper-card); color: var(--paper-ink-2);
+  font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+#app .fs-panel-host .dc-panel-tog {
+  height: 30px; min-height: 30px; min-width: 0;
+  padding: 0 11px !important;
+  border-radius: var(--radius-pill);
+  font-size: 12.5px; font-weight: 600;
+  color: var(--paper-ink-2) !important;
+  transition: background-color 140ms var(--ease-standard), color 140ms var(--ease-standard);
+}
+#app .fs-panel-host .dc-panel-tog.on {
+  background: var(--paper-card); color: var(--paper-ink) !important;
+}
+#app .fs-panel-host .dc-panel-body {
+  display: flex; flex-direction: column;
+  padding: 14px 14px 20px;
+  overscroll-behavior: contain;
+}
+#app .fs-panel-host .dc-panel-empty {
+  flex: 1 1 auto;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 20px 12px;
+  color: var(--paper-ink-3);
+}
+#app .fs-panel-host .fs-panel-empty { padding: 12px 6px; }
+#app .fs-panel-host .fs-panel-empty .empty-state-art { width: 96px; }
+#app .fs-panel-host .fs-panel-empty .empty-state-title {
+  margin-top: 10px; font-size: 17px; color: var(--paper-ink);
+}
+#app .fs-panel-host .fs-panel-empty .empty-state-body {
+  margin-top: 6px; max-width: 26ch; font-size: 13.5px; line-height: 1.5; color: var(--paper-ink-3);
+}
+#app .fs-panel-host .fs-panel-empty .empty-state-action { margin-top: 14px; }
+#app .fs-panel-host .fs-panel-showres {
+  height: 34px; min-height: 34px; padding: 0 14px;
+  font-size: 13px; font-weight: 600;
+  background: var(--paper-card); color: var(--paper-ink);
+}
+#app .fs-panel-host .dc-panel-list { gap: 10px; }
+#app .fs-panel-host .dc-pcard {
+  background: var(--paper-raised);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-ink) 26%, transparent), 0 0 0 1px var(--paper-rule);
+  padding: 13px 14px 12px;
+  gap: 7px;
+}
+#app .fs-panel-host .dc-pcard.resolved {
+  background: color-mix(in srgb, var(--paper-raised) 68%, var(--paper-pane));
+  opacity: .9;
+}
+#app .fs-panel-host .dc-pcard .dc-ch { gap: 8px; min-height: 26px; }
+#app .fs-panel-host .dc-pcard .dc-nm { font-size: 13.5px; font-weight: 650; color: var(--paper-ink); }
+#app .fs-panel-host .dc-pcard .dc-tm { font-size: 12px; color: var(--paper-ink-3); }
+#app .fs-panel-host .dc-pcard .dc-tx {
+  margin: 1px 0 0; font-size: 14px; line-height: 1.55; color: var(--paper-ink);
+}
+#app .fs-panel-host .dc-pcard .dc-rps {
+  margin-top: 6px; padding-top: 10px;
+  border-top: 1px solid var(--paper-rule); gap: 10px;
+}
+#app .fs-panel-host .dc-pcard .dc-rp {
+  grid-template-columns: 20px 1fr; gap: 8px; align-items: start;
+}
+#app .fs-panel-host .dc-pcard .dc-rh {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  min-height: 20px;
+  font-size: 12.5px; line-height: 1.35;
+}
+#app .fs-panel-host .dc-pcard .dc-rh b { color: var(--paper-ink); font-weight: 650; }
+#app .fs-panel-host .dc-pcard .dc-rt {
+  font-size: 13.5px; line-height: 1.5; color: var(--paper-ink-2); margin-top: 2px;
+}
+#app .fs-panel-host .dc-pcard .dc-own { display: inline-flex; align-items: center; gap: 2px; }
+#app .fs-panel-host .dc-pcard .dc-ib {
+  width: 28px; height: 28px; min-width: 28px; min-height: 28px;
+  border-radius: var(--radius-pill);
+  color: var(--paper-ink-3) !important;
+}
+#app .fs-panel-host .dc-pcard .dc-rp .dc-own .dc-ib {
+  width: 22px; height: 22px; min-width: 22px; min-height: 22px;
+}
+#app .fs-panel-host .dc-pcard .dc-panel-replybtn {
+  min-width: 0; min-height: 28px; height: 28px;
+  padding: 0 9px !important; margin-left: -9px;
+  border-radius: var(--radius-pill);
+  font-size: 12.5px; font-weight: 600;
+  color: var(--paper-ink-3) !important;
+}
+#app .fs-panel-host .dc-pcard .dc-cmp {
+  margin-top: 6px; height: auto; min-height: 36px;
+  padding: 3px 3px 3px 13px; gap: 6px;
+  background: var(--paper-card);
+  border-radius: var(--radius-pill);
+}
+#app .fs-panel-host .dc-pcard .dc-cmp .dc-input {
+  min-height: 30px; height: 30px; min-width: 0;
+  font-size: 13.5px; color: var(--paper-ink);
+}
+#app .fs-panel-host .dc-pcard .dc-cmp .dc-send {
+  width: 30px; height: 30px; min-width: 30px; min-height: 30px;
+}
+#app .fs-panel-host .dc-pcard .dc-sm {
+  height: 30px; min-height: 30px; min-width: 0;
+  padding: 0 12px !important;
+  font-size: 12.5px !important; font-weight: 600;
+}
+
+#app .fs-panel-host .dc-panel-foot {
+  padding: 10px 14px 14px;
+  border-top: 1px solid var(--paper-rule);
+  background: var(--paper-pane);
+}
+#app .fs-panel-sheet .dc-panel-foot {
+  padding: 10px 14px calc(14px + env(safe-area-inset-bottom));
+}
+#app .fs-panel-host .dc-panel-comp {
+  display: flex; align-items: flex-end; gap: 8px;
+  padding: 7px 8px 7px 14px;
+  background: var(--paper-raised);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-ink) 22%, transparent), inset 0 0 0 1px var(--paper-rule);
+  transition: box-shadow 160ms var(--ease-standard);
+}
+#app .fs-panel-host .dc-panel-comp:focus-within {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px var(--signal-crema), 0 4px 14px color-mix(in srgb, var(--shadow-ink) 28%, transparent);
+}
+#app .fs-panel-host :is(.dc-panel-in, .dc-cmp .dc-input, .dc-fld textarea):is(:focus, :focus-visible) {
+  outline: none;
+}
+#app .fs-panel-host .dc-panel-in {
+  flex: 1 1 auto; min-width: 0;
+  min-height: 34px; max-height: 132px;
+  padding: 6px 0;
+  font-size: 14px; line-height: 1.45;
+  color: var(--paper-ink);
+  overflow-y: auto; overscroll-behavior: contain;
+}
+#app .fs-panel-sheet .dc-panel-in { font-size: 16px; }
+#app .fs-panel-host .dc-panel-comp-bar {
+  flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 6px;
+}
+#app .fs-panel-host .dc-panel-hint { display: none; }
+#app .fs-panel-host .dc-panel-send {
+  flex: none;
+  height: 34px; min-height: 34px; min-width: 0;
+  padding: 0 14px !important;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-body); font-size: 13px !important; font-weight: 600;
+  background: var(--latte-espresso); color: var(--latte-espresso-ink);
+  opacity: 1;
+  transition: background-color 160ms var(--ease-standard), color 160ms var(--ease-standard), transform 120ms var(--ease-standard);
+}
+#app .fs-panel-host .dc-panel-send:disabled {
+  opacity: 1;
+  background: var(--paper-card);
+  color: var(--paper-ink-2);
+  cursor: default;
+}
+#app .fs-panel-host .dc-panel-send:not(:disabled):active { transform: scale(.97); }
+#app .fs-panel-host .dc-panel-toast { bottom: 76px; padding: 8px 14px; }
+#app .fs-panel-host .dc-panel-toast button {
+  min-height: 28px; height: 28px; min-width: 0;
+  padding: 0 10px !important;
+  font-size: 13px;
+}
+#app .fs-panel-sheet .dc-panel-toast { bottom: calc(82px + env(safe-area-inset-bottom)); }
+@media (hover: hover) {
+  #app .fs-panel-host .dc-panel-comp:hover:not(:focus-within) {
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-ink) 22%, transparent), inset 0 0 0 1px var(--paper-rule-strong);
+  }
+  #app .fs-panel-host .dc-panel-send:not(:disabled):hover {
+    background: var(--latte-espresso-hover); color: var(--latte-espresso-ink);
+  }
+  #app .fs-panel-host .fs-panel-showres:hover {
+    background: var(--paper-hover); color: var(--paper-ink);
+  }
+}
+@media (hover: none) {
+  #app .fs-panel-host .dc-pcard .dc-own { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fs-side-panel, .fs-side-panel-inner, .fs-split-backdrop,
+  .fs-panel-sheet-wrap, .fs-panel-backdrop, .fs-panel-sheet {
+    transition: none;
+  }
 }
 .fs-move-bar { display: flex; align-items: center; gap: 8px; padding: 2px 10px 8px; min-height: 36px; }
 .fs-move-loc { flex: 1; min-width: 0; font-size: 13px; color: var(--paper-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
