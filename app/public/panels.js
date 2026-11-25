@@ -127,6 +127,14 @@ export function createPanels({ main, side, width = () => layoutPixels(globalThis
       control('Swap the two panels', icon.swap(18), swap, sameItem() || main.pending?.() || side.pending?.()),
       control('Close side panel', icon.close(16), closeAnimated)]
   }
+  function panelActions() {
+    const same = sameItem()
+    return {
+      promote: { label: 'Open as the main panel', disabled: same, run: promote },
+      swap: { label: 'Swap the two panels', disabled: same || Boolean(main.pending?.() || side.pending?.()), run: swap },
+      close: { label: 'Close side panel', disabled: false, run: closeAnimated },
+    }
+  }
   function affordance(item) {
     if (!available()) return null
     return action('Open to the side', icon.panelRight(16), event => { event.stopPropagation(); openSide(item) })
@@ -140,7 +148,7 @@ export function createPanels({ main, side, width = () => layoutPixels(globalThis
       onkeydown: event => { if (!['ArrowLeft', 'ArrowRight', 'Home', 'Enter'].includes(event.key)) return; event.preventDefault(); split(event.key === 'Home' || event.key === 'Enter' ? DEFAULT_SPLIT : st.split + (event.key === 'ArrowLeft' ? -2 : 2)) },
     }, h('span', { 'aria-hidden': 'true' }))
   }
-  return { st, available, visible, focused, focus, tucked, showSidebar, openMain, openSide, swap, promote, close, restore, sync, split, controls, affordance, divider, persist }
+  return { st, available, visible, focused, focus, tucked, showSidebar, openMain, openSide, swap, promote, close, restore, sync, split, controls, panelActions, affordance, divider, persist }
 }
 
 // Selectors used by an instance must never borrow another instance's stream,

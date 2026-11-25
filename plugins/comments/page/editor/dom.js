@@ -96,6 +96,9 @@ const ICONS = {
   file: ['M7 3.5h6.5l4 4V20a.5.5 0 0 1-.5.5H7a.5.5 0 0 1-.5-.5V4a.5.5 0 0 1 .5-.5z', 'M13.5 3.5v4h4'],
   restore: ['M3.5 12a8.5 8.5 0 1 0 2.5-6', 'M3.5 4.5V9H8'],
   trash: ['M5 7h14', 'M10 7V5h4v2', 'M7 7l1 12.5h8L17 7'],
+  arrowLeft: ['M19 12H5', 'M11 6l-6 6 6 6'],
+  swap: ['M4 8h15', 'M15 4l4 4-4 4', 'M20 16H5', 'M9 12l-4 4 4 4'],
+  toc: ['M4 7h16', 'M4 12h12', 'M4 17h9'],
 }
 
 export function icon(name, size = 16) {

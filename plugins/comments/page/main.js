@@ -217,6 +217,7 @@ export function activate(loam) {
           ? () => [{ label: 'Copy link', icon: 'link', run: () => copyText(wm.url, 'Link copied. Its password stays with your Loam.') }]
           : null,
         headExtras: () => [entry.options.readAloud?.glyph || null].filter(Boolean),
+        sidePanel: () => entry.options.sideChrome || null,
         mic: () => entry.options.mic || null,
         micInHead: () => Boolean(entry.options.wide),
         onCanType: (yes) => { if (!yes) stopDictation(entry) },

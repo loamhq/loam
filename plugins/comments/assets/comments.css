@@ -93,6 +93,18 @@ body:has(.dc-dlg-scrim.on) .dc :is(.primary, .secondary) { background: var(--pap
 .dc-head .dc-back { margin-left: calc(-18px + min(18px, var(--pane-lead, 0px))); margin-right: 2px; }
 .dc-headx { display: inline-flex; align-items: center; }
 
+/* side panel: one unified header row matching .side-head (title + path, primary actions, one ⋯, close) */
+.dc.side .dc-head.dc-sidehead { min-height: 72px; padding: 12px 14px; gap: 4px; }
+.dc.side .dc-head.dc-sidehead > :not(.dc-side-heading) { flex: none; }
+.dc-side-heading { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 0 4px; }
+.dc-side-heading strong { font: 600 15.5px/1.3 var(--font-body, Figtree, system-ui, sans-serif); color: var(--dc-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dc-side-heading span { color: var(--dc-ink3); font-size: 11px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dc.side .dc-head.dc-sidehead .iconbtn { width: 36px; height: 36px; min-width: 36px; min-height: 36px; border-radius: var(--dc-pill); display: inline-grid; place-items: center; color: var(--dc-ink2); transition: background .15s, color .15s; }
+.dc.side .dc-head.dc-sidehead .iconbtn:hover { background: var(--dc-hover); color: var(--dc-ink); }
+.dc.side .dc-head.dc-sidehead .dc-mpill { gap: 2px; padding: 0 7px 0 9px !important; }
+.dc.side .dc-head.dc-sidehead .dc-mpill > span:not(.dc-cv) { display: none; }
+.dc.side .dc-head.dc-sidehead .dc-sharebtn { margin-left: 2px; }
+
 .dc-menu { position: absolute; top: calc(100% + 8px); right: 0; width: min(284px, calc(100vw - 16px)); box-sizing: border-box; background: var(--dc-ground); color: var(--dc-ink); border-radius: var(--dc-r-lg); box-shadow: var(--dc-float); padding: 6px; z-index: 40; transform-origin: top right; animation: dc-pop .16s var(--dc-ease); }
 @keyframes dc-pop { from { opacity: 0; transform: translateY(-4px) scale(.98); } to { opacity: 1; transform: none; } }
 @keyframes dc-fade { from { opacity: 0; } to { opacity: 1; } }
@@ -352,9 +364,8 @@ body:has(.dc-dlg-scrim.on) .dc :is(.primary, .secondary) { background: var(--pap
 @media (pointer: fine) { .dc-selbar button, .dc-selbar input { min-height: 0; min-width: 0; } }
 
 /* the link chip: shown on desktop hover or keyboard caret inside a link */
-.dc-lchip { position: absolute; z-index: 31; display: none; align-items: center; gap: 2px; max-width: min(340px, calc(100% - 16px)); box-sizing: border-box; background: var(--dc-ground); color: var(--dc-ink); padding: 3px; border-radius: var(--dc-pill); box-shadow: var(--dc-float), 0 0 0 1px var(--dc-rule); }
-.dc-lchip.on { display: flex; animation: dc-selin .16s cubic-bezier(.33, 1, .68, 1) both; }
-.dc-lchip.on.blw { animation-name: dc-selin-b; }
+.dc-lchip { position: absolute; z-index: 31; display: none; align-items: center; gap: 2px; max-width: min(340px, calc(100% - 16px)); box-sizing: border-box; background: var(--paper-page, #EEEAE3); color: var(--dc-ink); padding: 3px; border-radius: var(--dc-pill); border: 1px solid var(--paper-rule, rgba(28,27,25,.13)); box-shadow: var(--shadow-popover, 0 18px 48px rgba(28,27,25,.18)); opacity: 1; }
+.dc-lchip.on { display: flex; }
 .dc-lchip button { height: 28px; min-height: 0; min-width: 0; border-radius: var(--dc-pill); font-size: 12.5px !important; display: inline-flex !important; align-items: center; transition: background .12s, color .12s; white-space: nowrap; }
 .dc-lchip button:hover { background: var(--dc-hover); }
 .dc-lchip-go { min-width: 0; flex: 0 1 auto; gap: 6px; padding: 0 9px 0 9px !important; color: var(--dc-ink2) !important; }
@@ -485,7 +496,7 @@ body:has(.dc-dlg-scrim.on) .dc :is(.primary, .secondary) { background: var(--pap
 @media (prefers-reduced-motion: reduce) {
   .dc *, .dc *::before, .dc *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
   /* The selection's popup still fades, without the movement. */
-  .dc .dc-selbar.in, .dc .dc-selbar.in.blw, .dc .dc-lchip.on, .dc .dc-lchip.on.blw { animation-name: dc-fade !important; animation-duration: .14s !important; }
+  .dc .dc-selbar.in, .dc .dc-selbar.in.blw { animation-name: dc-fade !important; animation-duration: .14s !important; }
   .dc .dc-selbar.out { animation-duration: .08s !important; }
 }
 

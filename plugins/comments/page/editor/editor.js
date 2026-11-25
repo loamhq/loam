@@ -1307,12 +1307,15 @@ export function createDocEditor(opts) {
     const c = st.lchip
     if (!c) return
     if (!linkChipAllowed()) return hideLinkChip()
-    const aFrom = c.labelFrom != null && c.labelTo != null && c.labelTo > c.labelFrom ? c.labelFrom : c.from
-    const aTo = c.labelFrom != null && c.labelTo != null && c.labelTo > c.labelFrom ? c.labelTo : c.to
+    const sel = view.state.selection.main
+    const expanded = view.hasFocus && c.from != null && c.to != null && sel.from <= c.to && sel.to >= c.from
+    const hasLabel = !expanded && c.labelFrom != null && c.labelTo != null && c.labelTo > c.labelFrom
+    const aFrom = hasLabel ? c.labelFrom : c.from
+    const aTo = hasLabel ? c.labelTo : c.to
     if (aFrom == null || aTo == null) return hideLinkChip()
     const seen = selectionInView(aFrom, aTo)
     if (!seen) { lchip.classList.remove('on'); return }
-    const below = placeAbove(lchip, seen.from, seen.to, { avoidPointer: false, gap: 6 })
+    const below = placeAbove(lchip, seen.from, seen.to, { avoidPointer: false, gap: 6, prefer: 'below', align: 'start' })
     lchip.classList.toggle('blw', below)
     lchip.classList.add('on')
   }
@@ -1370,14 +1373,25 @@ export function createDocEditor(opts) {
     }
   }
 
+  function scheduleHideHoverChip(ms = 100) {
+    clearTimeout(lchipShowTimer)
+    if (st.lchip?.reason !== 'hover') return
+    clearTimeout(lchipHideTimer)
+    lchipHideTimer = setTimeout(() => {
+      if (st.lchip?.reason === 'hover') hideLinkChip()
+    }, ms)
+  }
+
   lchip.addEventListener('mouseenter', () => { clearTimeout(lchipHideTimer) })
   lchip.addEventListener('mouseleave', (e) => {
     if (st.lchip?.reason !== 'hover') return
     if (e.relatedTarget?.closest?.('.dc-link, .dc-wiki')) return
-    clearTimeout(lchipHideTimer)
-    lchipHideTimer = setTimeout(() => {
-      if (st.lchip?.reason === 'hover') hideLinkChip()
-    }, 180)
+    scheduleHideHoverChip(80)
+  })
+  view.contentDOM.addEventListener('mouseleave', (e) => {
+    clearTimeout(lchipShowTimer)
+    if (e.relatedTarget && lchip.contains(e.relatedTarget)) return
+    scheduleHideHoverChip(100)
   })
 
   function onEditorOver(e) {
@@ -1389,10 +1403,9 @@ export function createDocEditor(opts) {
         clearTimeout(lchipHideTimer)
         if (st.lchip && st.lchip.from === hit.from && st.lchip.to === hit.to) return
         clearTimeout(lchipShowTimer)
-        const delay = lchip.classList.contains('on') ? 0 : 80
+        const delay = lchip.classList.contains('on') ? 0 : 60
         lchipShowTimer = setTimeout(() => {
           if (!linkChipAllowed()) return
-          if (st.lchip?.reason === 'caret' && st.lchip.from === hit.from && st.lchip.to === hit.to) return
           showLinkChip(hit, 'hover')
         }, delay)
       }
@@ -1405,13 +1418,7 @@ export function createDocEditor(opts) {
     if (fromLink) {
       const to = e.relatedTarget
       if (to && (fromLink.contains(to) || lchip.contains(to) || to.closest?.('.dc-link, .dc-wiki'))) return
-      clearTimeout(lchipShowTimer)
-      if (st.lchip?.reason === 'hover') {
-        clearTimeout(lchipHideTimer)
-        lchipHideTimer = setTimeout(() => {
-          if (st.lchip?.reason === 'hover') hideLinkChip()
-        }, 180)
-      }
+      scheduleHideHoverChip(100)
     }
   }
 
@@ -1606,7 +1613,7 @@ export function createDocEditor(opts) {
   }
 
   // Returns whether it went below the selection.
-  function placeAbove(el, from, to, { avoidPointer = true, gap = 8 } = {}) {
+  function placeAbove(el, from, to, { avoidPointer = true, gap = 8, prefer = 'above', align = 'center' } = {}) {
     const ca = view.coordsAtPos(from), cb = view.coordsAtPos(to, -1)
     if (!ca || !cb) return false
     const a = local(ca), b = local(cb), c = local(col.getBoundingClientRect())
@@ -1618,23 +1625,40 @@ export function createDocEditor(opts) {
     if (!was) el.classList.remove('on')
     el.style.visibility = ''
     const sameLine = Math.abs(a.top - b.top) < 4
-    const mid = sameLine ? (a.left + b.right) / 2 : (a.left + Math.min(b.right, c.right)) / 2
-    let left = mid - w / 2
+    let left
+    if (align === 'start') {
+      left = sameLine ? a.left : Math.min(a.left, b.left)
+    } else {
+      const mid = sameLine ? (a.left + b.right) / 2 : (a.left + Math.min(b.right, c.right)) / 2
+      left = mid - w / 2
+    }
     left = Math.max(8, Math.min(left, box.width - w - 8))
-    // Just above the first line of the selection, clear of the header;
-    // below its last line when there is no room above.
-    let top = a.top - hgt - gap
-    let below = top < head.offsetHeight + 4
-    if (below) top = b.bottom + gap
-    // A selection taller than the screen: at the top of the view.
+    const floor = head.offsetHeight + 4
     const vb = local(scroll.getBoundingClientRect()).bottom
-    if (below && top + hgt > vb - 8) { top = head.offsetHeight + 8; below = false }
-    // Never under the pointer where the button came up: the other side of
-    // the selection when that side has room.
-    const p = avoidPointer && gest.at && local({ left: gest.at.x, right: gest.at.x, top: gest.at.y, bottom: gest.at.y })
-    if (p && p.left > left - 6 && p.left < left + w + 6 && p.top > top - 6 && p.top < top + hgt + 6) {
-      const alt = below ? a.top - hgt - gap : b.bottom + gap
-      if (below ? alt >= head.offsetHeight + 4 : alt + hgt <= box.height - 8) { top = alt; below = !below }
+    let top, below
+    if (prefer === 'below') {
+      top = b.bottom + gap
+      below = true
+      if (top + hgt > vb - 8) {
+        const alt = a.top - hgt - gap
+        if (alt >= floor) { top = alt; below = false }
+        else { top = Math.max(floor, vb - hgt - 8); below = true }
+      }
+    } else {
+      // Just above the first line of the selection, clear of the header;
+      // below its last line when there is no room above.
+      top = a.top - hgt - gap
+      below = top < floor
+      if (below) top = b.bottom + gap
+      // A selection taller than the screen: at the top of the view.
+      if (below && top + hgt > vb - 8) { top = floor + 4; below = false }
+      // Never under the pointer where the button came up: the other side of
+      // the selection when that side has room.
+      const p = avoidPointer && gest.at && local({ left: gest.at.x, right: gest.at.x, top: gest.at.y, bottom: gest.at.y })
+      if (p && p.left > left - 6 && p.left < left + w + 6 && p.top > top - 6 && p.top < top + hgt + 6) {
+        const alt = below ? a.top - hgt - gap : b.bottom + gap
+        if (below ? alt >= floor : alt + hgt <= box.height - 8) { top = alt; below = !below }
+      }
     }
     el.style.left = `${left}px`
     el.style.top = `${top}px`
@@ -1664,12 +1688,14 @@ export function createDocEditor(opts) {
   function placeLinkBar() {
     const l = st.link
     if (!l) return
-    const aFrom = l.anchorFrom ?? l.from
-    const aTo = l.anchorTo ?? l.to
+    const sel = view.state.selection.main
+    const expanded = view.hasFocus && l.from != null && l.to != null && sel.from <= l.to && sel.to >= l.from
+    const aFrom = expanded ? l.from : (l.anchorFrom ?? l.from)
+    const aTo = expanded ? l.to : (l.anchorTo ?? l.to)
     if (aTo > aFrom) {
       const seen = selectionInView(aFrom, aTo)
       if (!seen) { selbar.classList.remove('on', 'in'); return }
-      showSelbar(placeAbove(selbar, seen.from, seen.to, { avoidPointer: false }))
+      showSelbar(placeAbove(selbar, seen.from, seen.to, { avoidPointer: false, gap: 6, prefer: 'below', align: 'start' }))
     } else {
       const ca = view.coordsAtPos(aFrom)
       const sr = scroll.getBoundingClientRect()
@@ -1677,7 +1703,7 @@ export function createDocEditor(opts) {
         selbar.classList.remove('on', 'in')
         return
       }
-      showSelbar(placeAbove(selbar, aFrom, aFrom, { avoidPointer: false }))
+      showSelbar(placeAbove(selbar, aFrom, aFrom, { avoidPointer: false, gap: 6, prefer: 'below', align: 'start' }))
     }
   }
 
@@ -2348,7 +2374,7 @@ export function createDocEditor(opts) {
     }))
   }
 
-  function moreMenuItems(deleteFile) {
+  function moreMenuItems(deleteFile, sidePanel = null) {
     const det = detached().length
     const hasHistory = opts.history !== false
     const showResolved = hasHistory || (st.resolved || 0) > 0
@@ -2365,16 +2391,25 @@ export function createDocEditor(opts) {
         icon('history', 17), h('span', { class: 'dc-l' }, h('b', { text: 'History' })), h('span', { class: 'dc-chv' }, icon('chevronRight', 14))) : null,
       showResolved ? h('button', { class: 'dc-mi', type: 'button', role: 'menuitem', onclick: () => openDrawer('resolved') },
         icon('resolved', 17), h('span', { class: 'dc-l' }, h('b', { text: 'Resolved' })), h('span', { class: 'dc-ct', text: String(st.resolved || 0) }), h('span', { class: 'dc-chv' }, icon('chevronRight', 14))) : null,
+      sidePanel && toc.active() ? h('button', { class: 'dc-mi', type: 'button', role: 'menuitem', onclick: () => { st.menu = null; openSheet('toc') } },
+        icon('toc', 17), h('span', { class: 'dc-l' }, h('b', { text: 'Contents' })), h('span', { class: 'dc-chv' }, icon('chevronRight', 14))) : null,
       ...extras.map(x => h('button', { class: 'dc-mi', type: 'button', role: 'menuitem', onclick: () => { st.menu = null; render(); x.run() } }, icon(x.icon || 'file', 17), h('span', { class: 'dc-l' }, h('b', { text: x.label })))),
     ].filter(Boolean)
+    const pa = sidePanel?.actions?.()
+    const panelItems = pa ? [
+      h('button', { class: 'dc-mi', type: 'button', role: 'menuitem', disabled: pa.promote.disabled ? true : null, onclick: () => { st.menu = null; render(); pa.promote.run() } },
+        icon('arrowLeft', 17), h('span', { class: 'dc-l' }, h('b', { text: pa.promote.label }))),
+      h('button', { class: 'dc-mi', type: 'button', role: 'menuitem', disabled: pa.swap.disabled ? true : null, onclick: () => { st.menu = null; render(); pa.swap.run() } },
+        icon('swap', 17), h('span', { class: 'dc-l' }, h('b', { text: pa.swap.label }))),
+    ] : []
     const bottom = [
       fileMenu ? h('button', { class: 'dc-mi', type: 'button', role: 'menuitem', onclick: () => { st.menu = null; render(); fileMenu() } },
         icon('file', 17), h('span', { class: 'dc-l' }, h('b', { text: 'This file…' })), h('span', { class: 'dc-chv' }, icon('chevronRight', 14))) : null,
       deleteFile ? h('button', { class: 'dc-mi dc-mi-delete', type: 'button', role: 'menuitem', onclick: () => { st.menu = null; render(); deleteFile() } },
         icon('trash', 17), h('span', { class: 'dc-l' }, h('b', { text: 'Delete' }))) : null,
     ].filter(Boolean)
-    if (top.length && bottom.length) return [...top, h('div', { class: 'dc-msep', role: 'separator' }), ...bottom]
-    return [...top, ...bottom]
+    const groups = [top, panelItems, bottom].filter(g => g.length)
+    return groups.flatMap((g, i) => (i ? [h('div', { class: 'dc-msep', role: 'separator' }), ...g] : g))
   }
 
   function clampOpenMenu() {
@@ -2410,25 +2445,32 @@ export function createDocEditor(opts) {
   let headKey = null, headNodes = []
   function renderHead() {
     const deleteFile = opts.fileDelete?.()
+    const sp = opts.sidePanel?.() || null
+    const spBack = sp?.back?.() || null
+    const spClose = sp?.closeButton?.() || null
+    const pa = sp?.actions?.() || null
     const mic = canType() && opts.micInHead?.() ? opts.mic?.() || null : null
     const extras = [...(opts.headExtras?.() || []), ...(mic ? [mic] : []), null, ...(opts.headEnd?.() || [])]
+    const trackedNodes = [...extras, spBack, spClose]
     const sw = saveWordNode()
-    const key = JSON.stringify([st.mode, st.menu, st.phone, sw?.textContent || '', sw?.className || '', (opts.crumbs || []).map(c => c.label), opts.titleBar || null, opts.back?.label || null,
+    const key = JSON.stringify([st.mode, st.menu, st.phone, Boolean(sp), sp?.label || '', sp?.location || '',
+      pa ? [pa.promote.disabled, pa.swap.disabled] : null,
+      sw?.textContent || '', sw?.className || '', (opts.crumbs || []).map(c => c.label), opts.titleBar || null, opts.back?.label || null,
       st.authors, st.resolved, detached().length, st.can, (opts.menuExtras?.() || []).map(x => x.label), Boolean(fileMenu), Boolean(deleteFile), st.phone && toc.active()])
-    const cls = `dc-head${scroll.scrollTop > 4 ? ' scd' : ''}${head.classList.contains('tight') ? ' tight' : ''}`
+    const cls = `dc-head${sp ? ' dc-sidehead' : ''}${scroll.scrollTop > 4 ? ' scd' : ''}${head.classList.contains('tight') ? ' tight' : ''}`
     if (head.className !== cls) head.className = cls
     // A host's own buttons may be made afresh on every call (Share is):
     // the same markup is the same button.
     const same = (n, o) => n === o || (n && o && n.outerHTML === o.outerHTML)
-    if (key === headKey && extras.length === headNodes.length && extras.every((n, i) => same(n, headNodes[i])) && head.firstChild) { fitHead(); if (st.menu) clampOpenMenu(); return }
+    if (key === headKey && trackedNodes.length === headNodes.length && trackedNodes.every((n, i) => same(n, headNodes[i])) && head.firstChild) { fitHead(); if (st.menu) clampOpenMenu(); return }
     headKey = key
-    headNodes = extras
+    headNodes = trackedNodes
     const m = MODES.find(x => x.id === st.mode)
     // The phone names the doc (its folders are one tap away, behind the back
     // button); the desktop shows the whole path (shortened by the host).
     const all = opts.crumbs || []
     // With contents, the phone's title is the section being read (toc.js).
-    const secTitle = st.phone ? toc.titleNode() : null
+    const secTitle = st.phone && !sp ? toc.titleNode() : null
     const crumbs = st.phone && all.length
       ? [secTitle || h('b', { class: 'dc-docname', text: all[all.length - 1].label })]
       : all.flatMap((c, i) => [
@@ -2439,7 +2481,7 @@ export function createDocEditor(opts) {
       icon(m.icon, 15), h('span', { text: m.label }), h('span', { class: 'dc-cv' }, icon('chevronDown', 12)))
     // A note whose passage is gone puts a small quiet mark on ⋯ (no banner).
     const lost = detached().length
-    const items = moreMenuItems(deleteFile)
+    const items = moreMenuItems(deleteFile, sp)
     const viewOnlyShare = opts.history === false && !st.can.edit && !st.can.suggest
     let moreCtrl = null
     if (items.length) {
@@ -2454,18 +2496,35 @@ export function createDocEditor(opts) {
         moreCtrl = menuWrap('more', dots, h('div', { class: 'dc-menu', role: 'menu' }, ...items))
       }
     }
-    put(head, 
-      opts.back ? h('button', { class: 'dc-gbtn dc-back', type: 'button', 'aria-label': opts.back.label, title: opts.back.label, onclick: opts.back.go }, icon('chevronLeft', 20)) : null,
-      opts.titleBar
-        ? h('div', { class: 'dc-crumb dc-titlebar' }, secTitle || h('b', { text: opts.titleBar.title }), opts.titleBar.sub ? h('span', { class: 'dc-sl', text: '·' }) : null, opts.titleBar.sub ? h('span', { text: opts.titleBar.sub }) : null)
-        : h('div', { class: 'dc-crumb' }, crumbs),
-      h('span', { class: 'dc-saveslot' }, sw),
-      ...extras.slice(0, extras.indexOf(null)),
-      // Only Viewing allowed: a quiet word, no menu.
-      !st.can.edit && !st.can.suggest ? h('span', { class: 'dc-mpill dc-mpill-only' }, icon('eye', 15), h('span', { text: 'Viewing' })) : menuWrap('mode', pill, modeMenu()),
-      moreCtrl,
-      ...extras.slice(extras.indexOf(null) + 1),
-    )
+    const modeCtrl = !st.can.edit && !st.can.suggest
+      ? h('span', { class: 'dc-mpill dc-mpill-only' }, icon('eye', 15), h('span', { text: 'Viewing' }))
+      : menuWrap('mode', pill, modeMenu())
+    const sep = extras.indexOf(null)
+    if (sp) {
+      put(head,
+        spBack,
+        h('div', { class: 'dc-side-heading' },
+          h('strong', { text: sp.label }),
+          sp.location ? h('span', { text: sp.location, title: sp.location }) : null),
+        ...extras.slice(0, sep),
+        modeCtrl,
+        ...extras.slice(sep + 1),
+        moreCtrl,
+        spClose,
+      )
+    } else {
+      put(head,
+        opts.back ? h('button', { class: 'dc-gbtn dc-back', type: 'button', 'aria-label': opts.back.label, title: opts.back.label, onclick: opts.back.go }, icon('chevronLeft', 20)) : null,
+        opts.titleBar
+          ? h('div', { class: 'dc-crumb dc-titlebar' }, secTitle || h('b', { text: opts.titleBar.title }), opts.titleBar.sub ? h('span', { class: 'dc-sl', text: '·' }) : null, opts.titleBar.sub ? h('span', { text: opts.titleBar.sub }) : null)
+          : h('div', { class: 'dc-crumb' }, crumbs),
+        h('span', { class: 'dc-saveslot' }, sw),
+        ...extras.slice(0, sep),
+        modeCtrl,
+        moreCtrl,
+        ...extras.slice(sep + 1),
+      )
+    }
     fitHead()
     if (st.menu) clampOpenMenu()
   }
@@ -2923,7 +2982,7 @@ export function createDocEditor(opts) {
       bareTimer = setTimeout(render, TYPING_PAUSE - quiet + 20)
     }
     shownBare = bare
-    root.className = `dc mode-${st.mode}${st.phone ? ' phone' : ' desk'}${st.phone && st.sheet ? ' sheet-open' : ''}${bare ? ' bare' : ''}${st.authors ? ' authors' : ''}${st.reattach ? ' reattaching' : ''}${st.drawer && !st.phone ? ' drawer-open' : ''}`
+    root.className = `dc mode-${st.mode}${st.phone ? ' phone' : ' desk'}${opts.sidePanel?.() ? ' side' : ''}${st.phone && st.sheet ? ' sheet-open' : ''}${bare ? ' bare' : ''}${st.authors ? ' authors' : ''}${st.reattach ? ' reattaching' : ''}${st.drawer && !st.phone ? ' drawer-open' : ''}`
     renderHead()
     banner.classList.toggle('on', Boolean(st.reattach))
     if (st.reattach) {

@@ -147,13 +147,17 @@ export function mountSidePanel(base, activityOptions) {
   function transfer(to, id) {
     own.threads.transferTo(to.threads, id)
   }
-  function header(fileActions) {
-    const at = item(), f = host.files.st.file
+  function sideLabel(f, at) {
     // A plugin root's file is named by its row and placed by its `place`
     // (a doc on another Loam has no folder here, 2026-11-17).
     const ownRoot = f?.plugin ? host.files.pluginRoot?.(f.root) : null
     const label = f ? (f.plugin ? f.row?.name ?? nameOf(f.path) : nameOf(f.path)) : at?.id ?? 'Files'
     const location = f ? (f.plugin ? f.row?.place ?? ownRoot?.name ?? f.root : [ROOT_LOOK[f.root]?.name ?? f.root, ...splitPath(parentOf(f.path))].join(' / ')) : ''
+    return { label, location }
+  }
+  function header(fileActions) {
+    const at = item(), f = host.files.st.file
+    const { label, location } = sideLabel(f, at)
     const controls = base.panels.controls()
     return h('header', { class: 'side-head' },
       base.backButton('side'), h('span', { class: 'side-face', 'aria-hidden': 'true' }, icon.file(20)),
@@ -165,18 +169,36 @@ export function mountSidePanel(base, activityOptions) {
     const fileTools = f ? host.fileDictation() : null
     const home = f ? host.filesHome() : null
     const at = item()
-    const customViewer = f ? hasCustomFileViewer(host.files, f, { wide: true, side: true, go: host.goFiles, home }) : false
+    const customViewer = f && !f.error
+      ? hasCustomFileViewer(host.files, f.loading ? { ...f, loading: false } : f, { wide: true, side: true, go: host.goFiles, home })
+      : false
     const headerParts = f && !customViewer
       ? fileHeaderParts(host.files, f, { wide: true, side: true, go: host.goFiles, home, readAloud: fileTools?.readAloud })
       : null
     const panelHeader = f && !customViewer ? host.registry.reduce('files.action', { slot: 'toolbar', file: f, files: host.files,
       defaultView: () => header(headerParts.actions),
-    }, null) : ['thread', 'app'].includes(at?.kind) ? null : header()
+    }, null) : (customViewer || ['thread', 'app'].includes(at?.kind)) ? null : header()
     return renderPanel({ host, item: at, header: panelHeader, context: { fileTools, headerParts },
       after: [...(at?.kind === 'profile' ? own.profileActivity.dialogNodes() : []), host.editorNodes(), ...host.sheetNodes()] })
   }
-  own.filePanelView = (fileTools, headerParts = null) => host.files.st.file ? fileView(host.files, { wide: true, side: true, headerParts, field: host.fileFieldFor, home: host.filesHome(), go: host.goFiles, onLink: host.openFileRef,
-    onTool: host.applyTool, embed: host.embedFor, ...fileTools }) : folderView(host.files, { wide: true, go: host.goFiles, home: host.filesHome() })
+  own.filePanelView = (fileTools, headerParts = null) => {
+    const f = host.files.st.file
+    if (!f) return folderView(host.files, { wide: true, go: host.goFiles, home: host.filesHome() })
+    const { label, location } = sideLabel(f, item())
+    const sideChrome = {
+      label,
+      location,
+      back: () => base.backButton('side'),
+      actions: () => base.panels.panelActions(),
+      closeButton: () => base.panels.controls().at(-1),
+    }
+    const sideFallbackHeader = () => {
+      const parts = fileHeaderParts(host.files, f, { wide: true, side: true, go: host.goFiles, home: host.filesHome(), readAloud: fileTools?.readAloud })
+      return header(parts.actions)
+    }
+    return fileView(host.files, { wide: true, side: true, sideChrome, sideFallbackHeader, headerParts, field: host.fileFieldFor, home: host.filesHome(), go: host.goFiles, onLink: host.openFileRef,
+      onTool: host.applyTool, embed: host.embedFor, ...fileTools })
+  }
 
   function afterRender() {
     if (state.screen === 'threads') own.threads.afterRender()

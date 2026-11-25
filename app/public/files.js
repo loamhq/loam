@@ -2470,15 +2470,15 @@ export function fileView(files, options) {
   return files.registry.component('core.files.viewer', context)
 }
 
-function builtinFileView(files, { close, closeLabel, historyBack = null, wide, side = false, headerParts = null, field, onLink = null, onTool = null, go = null, returnBack = null, embed = null, mic = null, take = null, notice = null, readAloud = null, audioBar = null, home = null, backToThread = null, openFolder = returnBack ? close : null }) {
+function builtinFileView(files, { close, closeLabel, historyBack = null, wide, side = false, sideChrome = null, sideFallbackHeader = null, headerParts = null, field, onLink = null, onTool = null, go = null, returnBack = null, embed = null, mic = null, take = null, notice = null, readAloud = null, audioBar = null, home = null, backToThread = null, openFolder = returnBack ? close : null }) {
   const back = backToThread ? { label: 'Back to thread', title: historyBack?.title ?? 'Back to thread',
     go: historyBack?.go ?? backToThread, shortcut: Boolean(historyBack) } : historyBack
-  const context = { files, file: files.st.file, options: { close, closeLabel, wide, side, field, onLink, onTool, go, returnBack, embed, mic, take, notice, readAloud, audioBar, home }, slot: 'viewer' }
+  const context = { files, file: files.st.file, options: { close, closeLabel, wide, side, sideChrome, field, onLink, onTool, go, returnBack, embed, mic, take, notice, readAloud, audioBar, home }, slot: 'viewer' }
   const viewers = files.registry.entries('files.viewer', context).filter(entry => !entry.component && entry.slot === 'viewer')
   for (let i = viewers.length - 1; i >= 0; i--) {
     if (files.st.file) files.st.file.openFolder = openFolder ?? close
     const up = close && { title: `Back to ${closeLabel}`, go: close, label: `Back to ${closeLabel}` }
-    const leading = historyBackButton(back ?? up)
+    const leading = side && sideChrome ? null : historyBackButton(back ?? up)
     const content = files.registry.invoke(viewers[i], 'render', { ...context, options: { ...context.options, close: null, returnBack: null, openFolder: openFolder ?? close } })
     if (content) {
       return h('div', { class: 'fs-custom-view', key: `viewer:${files.st.file.root}:${files.st.file.path}` },
@@ -2527,7 +2527,7 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, s
   const { hosted: hostedPanels, actions } = headerParts ?? fileHeaderParts(files, f, { wide, side, close, go, home, readAloud })
   const menuButton = h('button', { class: 'iconbtn fs-filemenu', title: 'This file', 'aria-label': 'This file', onclick: openMenu }, icon.dots(18))
 
-  const head = side ? null : files.registry.reduce('files.action', { slot: 'toolbar', file: f, files, defaultView: () => htmlPreview
+  const head = side ? (viewers.length && sideFallbackHeader ? sideFallbackHeader() : null) : files.registry.reduce('files.action', { slot: 'toolbar', file: f, files, defaultView: () => htmlPreview
     ? h(
         'div',
         { class: 'fs-htmlbar fs-livehead' },
