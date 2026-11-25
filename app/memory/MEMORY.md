@@ -294,3 +294,20 @@ have never met.
   revision clears the dismissal and returns the card collapsed. See
   `test/agent-drafts.test.js`, `test/agent-draft-card-browser.mjs`, and
   `docs/evidence/agent-draft-card/README.md`.
+- **Anchored open question and approval cards** (`public/thread-record.js`,
+  `public/thread-experience.js`, `public/threads.js`): thread-engine
+  `broker.permission_request` events arrive without a `message_id`, so
+  `applyThreadEvent()` records `after_message` (the last non-streaming message
+  ID, or `null` when empty) on first arrival and preserves it across reconnect
+  `thread.snapshot` replays. `placePermissions()` anchors unmatched cards right
+  after `after_message` inside `messageRuns()` — sitting below the persona's
+  own streaming draft only while no newer message has landed after the anchor,
+  and falling back cleanly across grouped join notices, hidden empty replies,
+  or older pagination windows (with `data-thread-trailing="true"` as a safety
+  net for any unanchored card lacking `after_message`). `showReply()` also
+  suppresses an empty streaming draft while its persona has an open unmatched
+  permission (matching `threadWaiting()` returning `null`), avoiding a ghost
+  speaker pill between a sent follow-up message and another agent's reply. See
+  `test/threads.test.js`, `test/thread-waiting-redraw.test.js`,
+  `test/permission-card-scroll-browser.mjs`, and
+  `docs/evidence/permission-card-scroll/README.md`.

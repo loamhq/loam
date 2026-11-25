@@ -46,10 +46,22 @@ const document = (over = {}) => ({ source: 'document', title: 'A draft', mode: '
 
 // A WAV as the TTS model answers one: RIFF, 24 kHz mono 16-bit PCM.
 // voicedText sizes the tone to the transcript's words at the reference pace.
+// Cache one 1-second 220 Hz period per rate (exact integer cycles) so long
+// synthetic takes do not block the event loop with millions of Math.sin calls.
+const tonePeriods = new Map()
+function tonePeriod(rate) {
+  let period = tonePeriods.get(rate)
+  if (!period) {
+    period = Buffer.alloc(rate * 2)
+    for (let i = 0; i < rate; i++) period.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 220 * i) / rate) * 8000), i * 2)
+    tonePeriods.set(rate, period)
+  }
+  return period
+}
 function wav(ms = 100, rate = 24000) {
   const samples = Math.round((rate * ms) / 1000)
-  const pcm = Buffer.alloc(samples * 2)
-  for (let i = 0; i < samples; i++) pcm.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 220 * i) / rate) * 8000), i * 2)
+  const pcm = Buffer.allocUnsafe(samples * 2)
+  pcm.fill(tonePeriod(rate))
   const head = Buffer.alloc(44)
   head.write('RIFF', 0, 'ascii')
   head.writeUInt32LE(36 + pcm.length, 4)
@@ -201,10 +213,10 @@ async function settled(app, id) {
     last = await poll(app, id)
     return last.body.status !== 'preparing'
   }
-  const deadline = Date.now() + 8000
+  const deadline = Date.now() + 15000
   while (!(await ask())) {
     if (Date.now() > deadline) throw new Error(`still preparing: ${JSON.stringify(last.body)}`)
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    await new Promise((resolve) => setTimeout(resolve, 20))
   }
   return last
 }
