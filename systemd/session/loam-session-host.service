@@ -6,6 +6,7 @@ Type=simple
 Restart=always
 RestartSec=5s
 OOMScoreAdjust=@CORE_OOM@
+CPUWeight=@CORE_CPU_WEIGHT@
 Environment=PATH=@UNIT_PATH@
 Environment=DISABLE_AUTOUPDATER=1
 Environment=AGY_CLI_DISABLE_AUTO_UPDATE=true

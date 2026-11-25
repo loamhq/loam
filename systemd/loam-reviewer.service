@@ -11,6 +11,9 @@ Type=oneshot
 # until then): an agent run, at the agents' place in the OOM order
 # (lib/loam_config.py).
 OOMScoreAdjust=@AGENT_OOM@
+CPUWeight=@BACKGROUND_CPU_WEIGHT@
+Nice=@BACKGROUND_NICE@
+IOSchedulingClass=@BACKGROUND_IO_CLASS@
 Environment=DISABLE_AUTOUPDATER=1
 # And Antigravity's own updater off (lib/loam_pins.py: the CLIs stay at
 # the release's pin; the variable is read only as `true`).

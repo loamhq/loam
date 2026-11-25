@@ -111,8 +111,9 @@ export async function driven({ width, height = 900, theme = 'light', body, scrip
   const proc = spawn(
     bin,
     ['--headless', '--no-sandbox', '--disable-gpu', '--hide-scrollbars', '--remote-debugging-port=0', `--user-data-dir=${join(dir, 'profile')}`, `--window-size=${width},${height}`, '--allow-file-access-from-files', `file://${page}`],
-    { stdio: 'ignore' },
+    { stdio: 'ignore', detached: true },
   )
+  const exited = new Promise((resolve) => proc.once('exit', resolve))
   let ws = null
   try {
     const port = await new Promise((resolve, reject) => {
@@ -168,8 +169,21 @@ export async function driven({ width, height = 900, theme = 'light', body, scrip
     if (parsed.innerWidth !== width) throw new Error(`test/layout.js: asked for a ${width}px viewport and got ${parsed.innerWidth}px`)
     return parsed.answer
   } finally {
+    try {
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ id: 999999, method: 'Browser.close', params: {} }))
+      }
+    } catch {}
     ws?.close()
-    proc.kill()
+    // `/usr/bin/chromium-headless-shell` on Debian is a `/bin/sh` wrapper without
+    // `exec`; killing only `proc.pid` orphans the real browser and its renderer
+    // tree. Signal the whole process group and fall back to SIGKILL.
+    const killGroup = (sig) => {
+      try { process.kill(-proc.pid, sig) } catch { try { proc.kill(sig) } catch {} }
+    }
+    killGroup('SIGTERM')
+    await Promise.race([exited, new Promise((r) => setTimeout(r, 1500))])
+    killGroup('SIGKILL')
     rmSync(dir, { recursive: true, force: true })
   }
 }

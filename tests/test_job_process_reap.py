@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -86,6 +87,55 @@ finally:
         if p.poll() is None:
             p.kill()
             p.wait(timeout=2)
+
+# 4. Processes whose binary scrubbed LOAM_WAKE/LOAM_JOB_DIR from /proc/<pid>/environ
+#    (such as chromium-headless-shell) are still caught via their engineer cgroup
+#    or via their scratch-dir cmdline (e.g. escaped app-org.chromium.Chromium-*.scope).
+with tempfile.TemporaryDirectory() as fake_proc_str:
+    fake_proc = Path(fake_proc_str)
+    jid_c = "20990101-120000-cafebabe"
+    jid_other = "20990101-120001-deadbeef"
+
+    def make_proc(pid: int, *, environ: bytes = b"", cgroup: str = "", cmdline: bytes = b"") -> None:
+        d = fake_proc / str(pid)
+        d.mkdir()
+        (d / "environ").write_bytes(environ)
+        (d / "cgroup").write_text(cgroup, encoding="utf-8")
+        (d / "cmdline").write_bytes(cmdline)
+        (d / "status").write_text("PPid:\t1\n", encoding="utf-8")
+
+    # 4a. Renderer inside loam-engineer-<jid_c>.service with scrubbed environ
+    make_proc(
+        900001,
+        environ=b"PATH=/usr/bin\0HOME=/home/test\0",
+        cgroup=f"0::/user.slice/user-1000.slice/user@1000.service/app.slice/loam-engineer-{jid_c}.service\n",
+        cmdline=b"/usr/lib/chromium/chromium-headless-shell\0--type=renderer\0",
+    )
+    # 4b. Escaped browser main process in D-Bus scope with scrubbed environ + job scratch profile
+    make_proc(
+        900002,
+        environ=b"PATH=/usr/bin\0",
+        cgroup="0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-org.chromium.Chromium-900002.scope\n",
+        cmdline=f"/usr/lib/chromium/chromium-headless-shell\0--user-data-dir=/tmp/loam-job-{jid_c}/prof\0".encode(),
+    )
+    # 4c. Persistent Loam service whose cmdline mentions the scratch path must STILL be spared
+    make_proc(
+        900003,
+        environ=b"",
+        cgroup="0::/user.slice/user-1000.slice/user@1000.service/app.slice/loam-session-broker.service\n",
+        cmdline=f"python3\0/tmp/loam-job-{jid_c}/something\0".encode(),
+    )
+    # 4d. Another job's cgroup process must not match jid_c
+    make_proc(
+        900004,
+        environ=b"",
+        cgroup=f"0::/user.slice/user-1000.slice/user@1000.service/app.slice/loam-engineer-{jid_other}.service\n",
+        cmdline=b"/usr/lib/chromium/chromium-headless-shell\0--type=gpu-process\0",
+    )
+
+    caught = eng.find_job_processes(jid_c, proc_root=fake_proc)
+    check("cgroup + scratch-cmdline matching catches scrubbed Chromium processes and spares broker/other job",
+          sorted(x["pid"] for x in caught) == [900001, 900002], caught)
 
 failed = sum(not r for r in results)
 print(f"\n{'FAIL' if failed else 'OK'}: {failed} failure(s) out of {len(results)}")

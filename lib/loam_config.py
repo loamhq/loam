@@ -241,6 +241,29 @@ UNIT_PATH = f"{LOCAL_BIN}:/usr/local/bin:/usr/bin:/bin"
 AGENT_OOM_SCORE_ADJ = 800
 CORE_OOM_SCORE_ADJ = 100
 
+# -- CPU and I/O priority order --------------------------------------------------
+#
+# Owner-facing work (the web app, thread API and live chat sessions) goes first;
+# background work (wakes, crons, reviews, results, engineer jobs and landing
+# tests) yields CPU and disk I/O whenever an owner-facing process is runnable,
+# while still using all idle capacity when the box is quiet. Works on every box
+# size (4 vCPU, 16 vCPU and hosted boxes) without hard CPU caps.
+#
+#   CORE_CPU_WEIGHT        session broker & provider host (200 vs default 100)
+#   BACKGROUND_CPU_WEIGHT  wakes, crons, reviewer, results (20; 10:1 below core)
+#   BACKGROUND_NICE        wakes, crons, reviewer, results (15)
+#   ENGINEER_CPU_WEIGHT    engineer sessions & landing tests (10; 20:1 below core)
+#   ENGINEER_IO_WEIGHT     engineer cgroup I/O weight where io is delegated (10)
+#   ENGINEER_NICE          engineer sessions & landing tests (19, lowest CFS)
+#   BACKGROUND_IO_CLASS    idle I/O scheduling class for all background runs
+CORE_CPU_WEIGHT = 200
+BACKGROUND_CPU_WEIGHT = 20
+BACKGROUND_NICE = 15
+ENGINEER_CPU_WEIGHT = 10
+ENGINEER_IO_WEIGHT = 10
+ENGINEER_NICE = 19
+BACKGROUND_IO_CLASS = "idle"
+
 # -- whose -----------------------------------------------------------------------
 
 OWNER_ID = get("owner.id", "owner")

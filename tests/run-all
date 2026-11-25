@@ -137,7 +137,7 @@ def fixture_config(scratch: Path) -> str:
     return str(path)
 
 
-def sealed_env(scratch: Path) -> dict[str, str]:
+def sealed_env(scratch: Path, *, jobs: int = 1) -> dict[str, str]:
     """The environment one test file runs in: everything it could share
     with another test, or with the box, in its own scratch folder."""
     env = dict(os.environ)
@@ -157,6 +157,12 @@ def sealed_env(scratch: Path) -> dict[str, str]:
     env.setdefault("LOAM_PLUGIN_UNITS", "0")
     env["LOAM_RESULTS_KICK"] = "0"
     env.pop("LOAM_LIVE_LOCKS", None)
+    if jobs > 1:
+        # Nested suites (e.g. test_app.py -> npm test) share the box with the
+        # outer runner's other workers; cap inner concurrency so total active
+        # workers stay within half the box's CPUs.
+        env.setdefault("APP_TEST_CONCURRENCY",
+                       str(max(1, min(4, (os.cpu_count() or 2) // 4))))
     if not os.environ.get("LOAM_TEST_INSTALL_CONFIG"):
         env["LOAM_CONFIG"] = fixture_config(scratch)
         env["TZ"] = FIXTURE["timezone"]
@@ -171,14 +177,14 @@ def sealed_env(scratch: Path) -> dict[str, str]:
     return env
 
 
-def run_one(test: Path, live: bool = False) -> tuple[Path, object, str, float]:
+def run_one(test: Path, live: bool = False, jobs: int = 1) -> tuple[Path, object, str, float]:
     t0 = time.monotonic()
     scratch = Path(tempfile.mkdtemp(prefix=f"loam-t-{test.stem[5:][:12]}-"))
     try:
         out = subprocess.run([interpreter(test), str(test)], cwd=ROOT,
                              capture_output=True, text=True,
                              timeout=PER_TEST_TIMEOUT,
-                             env=None if live else sealed_env(scratch),
+                             env=None if live else sealed_env(scratch, jobs=jobs),
                              stdin=subprocess.DEVNULL)
         code, text = out.returncode, out.stdout + out.stderr
     except subprocess.TimeoutExpired as exc:
@@ -189,12 +195,17 @@ def run_one(test: Path, live: bool = False) -> tuple[Path, object, str, float]:
     return test, code, text, time.monotonic() - t0
 
 
-def workers(argv: list[str]) -> int:
+def default_workers(cpus: int | None = None) -> int:
+    count = os.cpu_count() if cpus is None else cpus
+    return max(1, min(8, (count or 2) // 2))
+
+
+def workers(argv: list[str], *, cpus: int | None = None) -> int:
     if "--jobs" in argv:
         return max(1, int(argv[argv.index("--jobs") + 1]))
     if os.environ.get("LOAM_TEST_JOBS"):
         return max(1, int(os.environ["LOAM_TEST_JOBS"]))
-    return max(2, min(8, (os.cpu_count() or 2) // 2))
+    return default_workers(cpus)
 
 
 def main() -> int:
@@ -212,7 +223,7 @@ def main() -> int:
     started = time.monotonic()
     print(f"{len(tests)} files, {n} at a time", flush=True)
     with ThreadPoolExecutor(max_workers=n) as pool:
-        for fut in as_completed([pool.submit(run_one, t, live) for t in tests]):
+        for fut in as_completed([pool.submit(run_one, t, live, n) for t in tests]):
             test, code, text, took = fut.result()
             mark = "ok  " if code == 0 else "FAIL"
             if only:

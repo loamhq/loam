@@ -3305,3 +3305,45 @@ listener for immediate notification in an open page.
   `--enable-features=WebMCP` gate (`coreBundle.js:24725`). Repeated downloads
   suggesting the same filename now save distinct files (`name.txt`,
   `name-1.txt`) in `BROWSER_OUTPUT` instead of overwriting.
+
+## 2026-11-25 — Background CPU/IO priority, CPU-sized test concurrency, and Chromium orphan reaping
+
+- **Why a 4-vCPU / 8 GB server hit load 37.5 and 6.5 GB on one job.** Debian's
+  `/usr/bin/chromium-headless-shell` is a `#!/bin/sh -e` wrapper without `exec`,
+  so `spawn(bin)` followed by `proc.kill()` only kills `/bin/sh` and leaves
+  `/usr/lib/chromium/chromium-headless-shell` plus its zygote, GPU, and renderer
+  tree alive. Worse, `chromium-headless-shell` scrubs `LOAM_WAKE` and
+  `LOAM_JOB_DIR` from `/proc/<pid>/environ` and moves its main browser PID into
+  a D-Bus `app-org.chromium.Chromium-<pid>.scope` while leaving the heavy
+  zygote/GPU/renderer children inside `loam-engineer-<job_id>.service`. Because
+  `lib/loam_engineer.py` `find_job_processes()` previously scanned only
+  `environ`, 36 orphaned browser trees (~5.5 GB RAM + 3.4 GB swap) survived
+  session end into landing, exhausting 100% RAM and 100% swap and triggering
+  load-37 swap thrashing and unrelated test timeouts.
+- **Three-layer fix.**
+  1. `lib/loam_engineer.py` `find_job_processes()` now matches processes by
+     `environ` (`LOAM_WAKE`/`LOAM_JOB_DIR`), engineer unit cgroup
+     (`loam-engineer-<job_id>.service`), or scratch-dir cmdline
+     (`loam-job-<job_id>`), while still sparing persistent non-engineer Loam
+     services and ancestor PIDs. Leftover session children cannot survive into
+     landing even when they wipe `environ` or escape into a D-Bus scope.
+  2. `app/test/layout.js` (`driven()`) and `app/test/permission-card-scroll-browser.mjs`
+     now spawn Chromium with `detached: true`, send best-effort CDP
+     `Browser.close`, and signal the full process group (`-proc.pid`) with
+     `SIGTERM` and `SIGKILL` fallback so wrapper scripts never orphan browsers.
+  3. **CPU/IO priority order** (`lib/loam_config.py`): owner-facing
+     `loam-session-broker.service` and `loam-session-host.service` run at
+     `CPUWeight=200`; wakes, crons, reviewer, and results drains run at
+     `CPUWeight=20`, `Nice=15`, `IOSchedulingClass=idle`; engineer jobs run at
+     `CPUWeight=10`, `IOWeight=10`, `Nice=19`, `IOSchedulingClass=idle`; and
+     `lib/loam_worktree.py` `run_tests()` wraps commands in `ionice -t -c 3`
+     and `nice -n 19` (`low_priority_argv()`) so standalone landing runs obey
+     the same floor.
+- **Test concurrency sized to CPUs.** `tests/run-all` uses
+  `max(1, min(8, cpus // 2))` (1 on 1–2 vCPU, 2 on 4 vCPU, 4 on 8 vCPU, 8 on
+  16+ vCPU) and caps nested `APP_TEST_CONCURRENCY` to `max(1, min(4, cpus // 4))`
+  when `jobs > 1` so `test_app.py` does not multiply concurrency. `app/package.json`
+  delegates to `app/tools/run-tests.mjs`, which passes `--test-concurrency`
+  sized to `max(1, min(8, floor(cpus / 2)))` (and `max(1, min(2, floor(cpus / 4)))`
+  when `LOAM_CHROME` or `LOAM_PLAYWRIGHT` is set, instead of Node's default
+  `availableParallelism() - 1`).

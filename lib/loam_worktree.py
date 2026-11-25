@@ -1230,6 +1230,18 @@ def is_credential(name: str) -> bool:
     return name in CREDENTIAL_NAMES or name.endswith(CREDENTIAL_SUFFIXES)
 
 
+def low_priority_argv(argv: list[str], *, which=shutil.which) -> list[str]:
+    """Wrap a landing test command in lowest CPU/IO priority (`nice -n 19`,
+    `ionice -t -c 3`) so tests yield to owner-facing chats and the app even when
+    invoked outside an engineer systemd unit."""
+    prefix: list[str] = []
+    if which("ionice"):
+        prefix += ["ionice", "-t", "-c", "3"]
+    if which("nice"):
+        prefix += ["nice", "-n", str(lc.ENGINEER_NICE)]
+    return prefix + argv
+
+
 def run_tests(project: eng.Project, tree: Path) -> tuple[bool | None, str, str]:
     """(passed, the command, the output's tail). None when there is no test
     command to run, which a landing treats as a failure to be reported."""
@@ -1241,6 +1253,7 @@ def run_tests(project: eng.Project, tree: Path) -> tuple[bool | None, str, str]:
         argv, cwd = platform_argv(tree, command), str(tree)
     else:
         argv, cwd = ["sh", "-c", command], str(tree)
+    argv = low_priority_argv(argv)
     # The test command runs project code. Strip job restrictions and inherited credentials.
     env = {k: v for k, v in os.environ.items()
            if k != "CLAUDE_PROJECT_DIR"

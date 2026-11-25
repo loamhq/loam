@@ -32,6 +32,10 @@ def tokens() -> list[tuple[str, str]]:
         ("@ZONE_WORD@", lc.ZONE_WORD),
         ("@AGENT_OOM@", str(lc.AGENT_OOM_SCORE_ADJ)),
         ("@CORE_OOM@", str(lc.CORE_OOM_SCORE_ADJ)),
+        ("@CORE_CPU_WEIGHT@", str(lc.CORE_CPU_WEIGHT)),
+        ("@BACKGROUND_CPU_WEIGHT@", str(lc.BACKGROUND_CPU_WEIGHT)),
+        ("@BACKGROUND_NICE@", str(lc.BACKGROUND_NICE)),
+        ("@BACKGROUND_IO_CLASS@", lc.BACKGROUND_IO_CLASS),
     ]
 
 

@@ -73,8 +73,9 @@ async function launchCdp({ width, height, theme }) {
       `--user-data-dir=${path.join(dir, 'profile')}`,
       `--window-size=${width},${height}`, 'about:blank',
     ],
-    { stdio: 'ignore' },
+    { stdio: 'ignore', detached: true },
   )
+  const exited = new Promise((resolve) => proc.once('exit', resolve))
   const port = await new Promise((resolve, reject) => {
     const start = Date.now()
     const poll = () => {
@@ -153,9 +154,19 @@ async function launchCdp({ width, height, theme }) {
       writeFileSync(path.join(out, `${name}-${width}-${theme}.png`), Buffer.from(data, 'base64'))
     }
   }
-  const close = () => {
+  const close = async () => {
+    try {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ id: ++seq, method: 'Browser.close', params: {} }))
+      }
+    } catch {}
     try { ws.close() } catch {}
-    proc.kill()
+    const killGroup = (sig) => {
+      try { process.kill(-proc.pid, sig) } catch { try { proc.kill(sig) } catch {} }
+    }
+    killGroup('SIGTERM')
+    await Promise.race([exited, new Promise((r) => setTimeout(r, 1500))])
+    killGroup('SIGKILL')
     rmSync(dir, { recursive: true, force: true })
   }
   return { send, evalJs, waitFor, settle, typeAndSend, shot, errors, close }
@@ -509,7 +520,7 @@ async function walk(width, theme) {
     assert.deepEqual(cdp.errors, [], `zero page errors at ${width}px ${theme}`)
     console.log(`${width}px ${theme}: all 3 journeys verified (question card + send/stream/answer, Bash allow + Write deny, ordinary thread unchanged)`)
   } finally {
-    cdp.close()
+    await cdp.close()
     await app.close()
   }
 }

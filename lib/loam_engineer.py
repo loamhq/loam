@@ -245,14 +245,26 @@ def remove_scratch(job_id: str, root: Path | None = None) -> None:
 # Process reaping for finished or orphaned engineer jobs.
 #
 # A job runs inside `loam-engineer-<job_id>.service`, whose cgroup systemd
-# tears down at exit. A command launched with `systemd-run --user --scope`
-# (for example a browser test rig under a memory cap) moves into a sibling
-# transient `run-*.scope` unit outside the job's cgroup, so any helper it
-# leaves running outlives the job and keeps deleted scratch open. Every child
-# process — including across `--scope` — inherits `LOAM_WAKE=engineer:<id>`
-# (and `LOAM_JOB_DIR`), so scanning `/proc` by job id catches both cgroup
-# stragglers before scratch removal and escaped transient scopes.
+# tears down at exit. Two things can outlive the session while landing still
+# runs inside the same unit (or escape the unit altogether):
+#   1. Child processes inside `loam-engineer-<job_id>.service` whose binary
+#      scrubbed its own `/proc/<pid>/environ` (e.g. `chromium-headless-shell`,
+#      which drops `LOAM_WAKE` and `LOAM_JOB_DIR` from `environ` and can leave
+#      renderer/zygote trees alive when a shell wrapper is terminated without
+#      killing its process group).
+#   2. Helpers that moved into a sibling transient scope (via `systemd-run
+#      --scope` or D-Bus `app-org.chromium.Chromium-*.scope`), either still
+#      carrying `LOAM_WAKE=engineer:<id>` / `LOAM_JOB_DIR` in `environ` or
+#      referencing the job's scratch directory (`/tmp/loam-job-<id>`) in
+#      `cmdline`.
+# Scanning `/proc` by `environ`, unit cgroup, and scratch-path cmdline catches
+# all three before scratch removal and before landing tests begin.
 # ---------------------------------------------------------------------------
+
+_CGROUP_ENGINEER_RE = re.compile(r"/loam-engineer-(\d{8}-\d{6}-[0-9a-f]{4,16})\.service(?:/|$)")
+_SCRATCH_CMDLINE_RE = re.compile(r"(?:^|[=\s/])loam-job-"
+                                 r"(\d{8}-\d{6}-[0-9a-f]{4,16})(?:/|[\s\0\"']|$)")
+
 
 def _ancestor_pids(start: int, proc_root: Path = Path("/proc")) -> set[int]:
     anc: set[int] = set()
@@ -284,6 +296,20 @@ def _is_persistent_loam_unit(cgroup_text: str) -> bool:
         if unit.startswith("loam-") and unit.endswith(".service") and not unit.startswith("loam-engineer-"):
             return True
     return False
+
+
+def _job_id_from_cgroup(cgroup_text: str) -> str | None:
+    match = _CGROUP_ENGINEER_RE.search(cgroup_text)
+    if match and JOB_ID_RE.match(match.group(1)):
+        return match.group(1)
+    return None
+
+
+def _job_id_from_cmdline(cmdline: str) -> str | None:
+    match = _SCRATCH_CMDLINE_RE.search(cmdline)
+    if match and JOB_ID_RE.match(match.group(1)):
+        return match.group(1)
+    return None
 
 
 def job_id_of_pid(pid: int, proc_root: Path = Path("/proc")) -> str | None:
@@ -332,9 +358,6 @@ def find_job_processes(
                 continue
         except OSError:
             continue
-        jid = job_id_of_pid(pid, proc_root)
-        if jid is None or (job_id is not None and jid != job_id):
-            continue
         try:
             cgroup = (entry / "cgroup").read_text(encoding="utf-8", errors="replace").strip()
         except OSError:
@@ -345,6 +368,11 @@ def find_job_processes(
             cmd = (entry / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", errors="replace").strip()
         except OSError:
             cmd = ""
+        jid = (job_id_of_pid(pid, proc_root)
+               or _job_id_from_cgroup(cgroup)
+               or _job_id_from_cmdline(cmd))
+        if jid is None or (job_id is not None and jid != job_id):
+            continue
         found.append({"pid": pid, "job_id": jid, "cgroup": cgroup, "cmd": cmd[:200]})
     return found
 

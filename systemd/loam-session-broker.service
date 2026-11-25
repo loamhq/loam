@@ -39,6 +39,7 @@ RestartSec=5s
 # took the broker first. Before 11-09: High 28% / Max 32%, sized in 2026-10
 # for a cap of four chats.
 OOMScoreAdjust=@CORE_OOM@
+CPUWeight=@CORE_CPU_WEIGHT@
 Environment=DISABLE_AUTOUPDATER=1
 # And Antigravity's own updater off (lib/loam_pins.py: the CLIs stay at
 # the release's pin; the variable is read only as `true`).
