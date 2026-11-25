@@ -277,3 +277,20 @@ have never met.
   file in the side panel, `.side-head` omits duplicate `files.action` / `readAloud`
   controls. See `test/files-links-headers-browser.mjs` and
   `docs/evidence/files-links-headers/README.md`.
+- **Agent draft card and trailing scroll clamping** (`public/agent-drafts.js`,
+  `public/threads.js`, `public/follow.js`, `public/style.css`,
+  `public/button-tiers.css`): `.agent-drafts` renders inside `.msgcol` after
+  the message rows with `data-thread-trailing="true"`. `follower({ pinTarget })`
+  clamps `pin()` against the last message before any `[data-thread-trailing]`
+  block so a tall trailing card or short keyboard viewport can never push the
+  newest message above the top of `.tt-stream`, while leaving ordinary threads
+  untouched. Expanding a draft card scrolls calmly to the card header (`o.focusDraftCard`)
+  and releases follow if it overflows; sending a message, a new turn starting,
+  a new non-system reply, or a new draft revision collapses expanded cards back
+  to their compact form without interrupting mid-turn streaming (`message.delta`)
+  or redundant `load()` calls for the same revision. A quiet close button
+  (`.agent-draft-close`) hides the current `(draft, rev)` locally
+  (`loam-ui.dismissed-drafts`) without deleting the draft on the host; any new
+  revision clears the dismissal and returns the card collapsed. See
+  `test/agent-drafts.test.js`, `test/agent-draft-card-browser.mjs`, and
+  `docs/evidence/agent-draft-card/README.md`.

@@ -13,7 +13,7 @@ import { authorMarkers } from './thread-authors.js'
 import { canReply, quoteLine, replyQuotes, replyGesture } from './thread-replies.js'
 import { OPENING_MESSAGES, HISTORY_MESSAGES, openingContext, readingAnchor, restoreAnchor, mergeHistory, progressiveProse } from './thread-opening.js'
 import { follower } from './follow.js'
-import { layoutPixels } from './scale.js'
+import { layoutPixels, uiScale } from './scale.js'
 import { modelPill, settingsRow, listHeading, personaGrid, rowTop, chatHeader, chatFrame, chatDock, agentProse, userBubble, messageFiles, replyImages, stepFold, thinkingLine, emptyConversation, panelHeader, settingsNav, selectionMark, createMessageState, sheetHandle } from './chat-ui.js'
 import { authenticatedFetch as fetch, authExpired, failureSentence } from './auth.js'
 import { createPermissionCards } from './permission-cards.js'
@@ -33,7 +33,56 @@ import { applyThreadEvent, threadTurns, readThreadRecord, readThreadSummary, rea
 const button = (text, onclick, props = {}) => h('button', { class: 'pillbtn', type: 'button', onclick, ...props }, text)
 export function createThreads({ registry = createCoreRegistry(), linePending = () => false, headerActionPending = () => false, api, redraw, agents, changedAgent = () => {}, agentsReady = () => false, loadAgents = () => {}, providers = () => [], rail, nav, enter, leave, compose, openProfile, openSettings = null, openRef, address = () => {}, viewAddress = () => {}, archiveAddress = () => false, historyButton = () => null, visitId = () => null, messageState = createMessageState(), sidebar = null, renderText = markdown, marketCards = null, fixture = false, running = null, stepUI = null, dom = document, navigate = null, side = () => null, sidePanel = false, visible = () => true, listIsMain = () => true, missing = () => {} }) {
 
-  const follow = follower()
+  // When a trailing review card sits below the messages inside `.msgcol`,
+  // pinning to raw `scrollHeight` can push the newest message above the top of
+  // the viewport (on a short screen, with a keyboard open, or with a tall card).
+  // Clamp the pin target so the latest message always keeps room on screen.
+  function threadPinTarget(pane, max) {
+    const trailing = pane?.querySelector?.('.msgcol > [data-thread-trailing]')
+    if (!trailing) return null
+    let last = trailing.previousElementSibling
+    while (last && !last.getBoundingClientRect?.().height) last = last.previousElementSibling
+    if (!last || last.classList?.contains('tt-opening-note') || last.classList?.contains('tt-history')) return null
+    const paneRect = pane.getBoundingClientRect()
+    const msgRect = last.getBoundingClientRect()
+    if (!paneRect.height || !msgRect.height) return null
+    const dockInset = parseFloat(globalThis.getComputedStyle?.(pane)?.paddingBottom) || 0
+    const visibleH = Math.max(0, pane.clientHeight - dockInset)
+    if (!visibleH) return null
+    const msgTop = pane.scrollTop + layoutPixels(msgRect.top - paneRect.top)
+    const msgBottom = pane.scrollTop + layoutPixels(msgRect.bottom - paneRect.top)
+    const msgH = msgBottom - msgTop
+    const minBand = Math.min(180, visibleH * 0.55)
+    const wantVisible = Math.min(visibleH - 16, Math.max(minBand, Math.min(msgH + 16, visibleH * 0.55)))
+    const cap = Math.max(0, msgBottom - wantVisible)
+    return Math.min(max, cap)
+  }
+
+  function isViewingBottomOrDraft(pane, o) {
+    if (!o) return false
+    if (o.atEnd !== false) return true
+    if (!pane) return false
+    const drafts = pane.querySelector?.('.agent-drafts')
+    if (!drafts) return false
+    const pr = pane.getBoundingClientRect(), dr = drafts.getBoundingClientRect()
+    if (!pr.height || !dr.height) return false
+    const dockInset = parseFloat(globalThis.getComputedStyle?.(pane)?.paddingBottom) || 0
+    const visibleBottom = pr.bottom - dockInset * uiScale()
+    return dr.top < visibleBottom && dr.bottom > pr.top
+  }
+
+  function pinToLatest(o) {
+    o.atEnd = true
+    o.focusDraftCard = null
+    o.readingPosition = null
+    o.openingBoundary = null
+    o.replyAnchor = null
+    o.landAt = null
+    o.landing = false
+    follow.send()
+  }
+
+  const follow = follower({ pinTarget: threadPinTarget })
   const elementId = id => sidePanel ? `side-${id}` : id
   const authors = authorMarkers()
   const selection = threadSelection({ dom })
@@ -77,6 +126,28 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       field.focus({ preventScroll: true })
       o.focusReplyDraft = true
       redraw()
+    },
+    onToggle: (draft, expanded) => {
+      const o = st.open
+      if (!o) return
+      if (expanded) {
+        o.focusDraftCard = draft.draft
+        o.readingPosition = null; o.openingBoundary = null; o.replyAnchor = null; o.landAt = null; o.landing = false
+      } else {
+        pinToLatest(o)
+      }
+    },
+    onDismiss: (draft) => {
+      const o = st.open
+      if (!o) return
+      if (o.changingDraft?.draft === draft.draft) o.changingDraft = null
+      o.focusDraftCard = null
+      if (isViewingBottomOrDraft(dom.querySelector?.('.tt-stream'), o)) pinToLatest(o)
+    },
+    onRevision: () => {
+      const o = st.open
+      if (!o) return
+      if (isViewingBottomOrDraft(dom.querySelector?.('.tt-stream'), o)) pinToLatest(o)
     },
     renderText,
   })
@@ -600,6 +671,14 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     if (['thread.snapshot', 'members', 'turn.started', 'turn.step', 'turn.waiting', 'turn.mark', 'turn.finished', 'message.delta', 'message.done', 'broker.user_message'].includes(e.type)) cancelRemoval(o.thread.id)
     if (e.type === 'turn.started') awaitingSince.delete(e.persona)
     if (['thread.snapshot', 'members', 'turn.started', 'turn.step', 'turn.waiting', 'turn.mark', 'turn.finished', 'message.delta', 'message.done'].includes(e.type)) o.eventVersion = (o.eventVersion ?? 0) + 1
+    const wasNewMessage = e.type === 'message.done' && Boolean(e.message?.id) && !o.messages.some(m => m.id === e.message.id)
+    const shouldCollapseDrafts = e.type === 'turn.started' || e.type === 'broker.user_message' || (wasNewMessage && e.message?.kind !== 'system')
+    if (shouldCollapseDrafts && agentDrafts.expanded.size) {
+      const keepInView = isViewingBottomOrDraft(dom.querySelector?.('.tt-stream'), o)
+      agentDraftController.collapseAll()
+      o.focusDraftCard = null
+      if (keepInView) pinToLatest(o)
+    }
     if (e.type !== 'thread.changed') applyThreadEvent(o, e)
     else if (!st.listLive && e.summary?.id === o.thread.id) updateRow(e.summary)
     registry.emit('thread.event', { thread: o.thread, event: e })
@@ -784,14 +863,16 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
         st.drafts.delete(o.thread.id)
         if (st.open === o) {
           o.replyTo = null; o.changingDraft = null; draft.value = ''; compose.clear(); st.mention = null
-          o.atEnd = true; o.readingPosition = null; o.openingBoundary = null; o.replyAnchor = null; o.landAt = null; o.landing = false
+          agentDraftController.collapseAll()
+          pinToLatest(o)
         }
       } catch (error) { o.error = `Your message is still here. ${error.message}` }
       finally { o.sending = false; redraw() }
       return
     }
-    o.sending = true; o.pending = { id: 'pending-send', author: owner().id, kind: 'message', text, attachments, reply_to, reply_source: reply_thread ? o.replyTo : null }; o.atEnd = true; o.error = ''; st.mention = null; redraw()
-    o.readingPosition = null; o.openingBoundary = null; o.replyAnchor = null; o.landAt = null; o.landing = false
+    agentDraftController.collapseAll()
+    pinToLatest(o)
+    o.sending = true; o.pending = { id: 'pending-send', author: owner().id, kind: 'message', text, attachments, reply_to, reply_source: reply_thread ? o.replyTo : null }; o.error = ''; st.mention = null; redraw()
     let accepted = false
     // Keep the draft until acceptance. A lost response never auto-resends a
     // message: Retry is an explicit act and the durable record is readable.
@@ -1809,7 +1890,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
   }
   function changeDraftPrompt(o) {
     const revision = o.changingDraft
-    if (!revision || !agentDrafts.rows.some(d => d.draft === revision.draft && d.rev === revision.rev)) return null
+    if (!revision || !agentDraftController.visibleRows(o.thread.id).some(d => d.draft === revision.draft && d.rev === revision.rev)) return null
     return o.thread.default ? `Tell ${name(o.thread.default)} what to change` : 'Say what to change'
   }
 
@@ -2069,6 +2150,27 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     }
     else if (pane && o?.openingBoundary && placeBoundary(o.openingBoundary)) { o.replyAnchor = null; follow.release() }
     else if (pane && o?.replyAnchor) { restoreAnchor(pane, o.replyAnchor); o.readingPosition = o.replyAnchor; o.replyAnchor = null; follow.release() }
+    else if (pane && o?.focusDraftCard) {
+      const card = [...pane.querySelectorAll('.agent-draft-card')].find((n) => n.getAttribute('data-draft') === o.focusDraftCard)
+      o.focusDraftCard = null
+      if (card) {
+        const paneRect = pane.getBoundingClientRect()
+        const cardRect = card.getBoundingClientRect()
+        if (paneRect.height && cardRect.height) {
+          const dockInset = parseFloat(globalThis.getComputedStyle?.(pane)?.paddingBottom) || 0
+          const visibleH = Math.max(0, pane.clientHeight - dockInset)
+          const cardTop = pane.scrollTop + layoutPixels(cardRect.top - paneRect.top)
+          const cardH = layoutPixels(cardRect.height)
+          const dest = cardH + 24 <= visibleH
+            ? Math.max(pane.scrollTop, cardTop + cardH - visibleH + 16)
+            : Math.max(0, cardTop - 16)
+          pane.scrollTop = dest
+          o.atEnd = pane.scrollHeight - pane.scrollTop - pane.clientHeight <= 2
+          if (o.atEnd) follow.pin(pane)
+          else { follow.release(); o.readingPosition = readingAnchor(pane) }
+        }
+      }
+    }
     else if (pane && o?.restoreTop !== undefined) { pane.scrollTop = o.restoreTop; delete o.restoreTop; follow.release() }
     else if (pane && o?.atEnd !== false) { follow.pin(pane); if (!o.loading) o.landing = false }
     if (pane && o) {

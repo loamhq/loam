@@ -269,3 +269,49 @@ test('an inactive chat adapter releases its observer and pending follow request'
   p.content += 50; resized()
   assert.ok(atEnd(p), 'returning to the active adapter resumes normal following')
 })
+
+test('a trailing pinTarget keeps the latest message in view and lets go on scroll away', () => {
+  const { Observer, resized } = observers()
+  // Simulate a 600px trailing card below the message list inside a 700px pane.
+  let trailing = 600
+  const f = follower({
+    Observer,
+    pinTarget: (p, max) => Math.max(0, max - trailing + 120),
+  })
+  const p = pane({ content: 2600, window: 700 })
+  f.watch(p)
+  f.pin(p)
+  // max is 1900; pinTarget clamps to 1900 - 600 + 120 = 1420.
+  assert.equal(p.scrollTop, 1420)
+  assert.equal(f.following(p), true)
+
+  // Streaming growth keeps following at the clamped target instead of jumping to raw bottom.
+  p.content += 80
+  resized()
+  assert.equal(p.scrollTop, 1500)
+  assert.equal(f.following(p), true)
+
+  // Scrolling down into the trailing card releases follow so the reader isn't pulled back up.
+  p.scrollTop = 1650
+  f.scrolled(p)
+  assert.equal(f.following(p), false)
+  p.content += 60
+  resized()
+  assert.equal(p.scrollTop, 1650)
+
+  // Scrolling up into earlier history also releases follow.
+  f.pin(p)
+  assert.equal(p.scrollTop, 1560)
+  p.scrollTop = 1200
+  f.scrolled(p)
+  assert.equal(f.following(p), false)
+  p.content += 40
+  resized()
+  assert.equal(p.scrollTop, 1200)
+
+  // When the trailing card shrinks/collapses, pinTarget lands right at the bottom.
+  trailing = 100
+  f.send()
+  draw(f, p, () => (p.content -= 500))
+  assert.ok(atEnd(p))
+})

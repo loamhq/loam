@@ -76,6 +76,13 @@
 :root .agent-draft-card:has(~ .agent-draft-card) .primary {
   background:var(--latte-foam); color:var(--latte-foam-ink); border-color:transparent; box-shadow:none;
 }
+/* Quiet card dismissal sits at the paper ink's muted tier until engaged. */
+:root .agent-draft-card .agent-draft-head .iconbtn.ghost.agent-draft-close:not(.primary):not(.secondary) {
+  background:transparent; color:var(--paper-ink-3); border-color:transparent; box-shadow:none;
+}
+:root .agent-draft-card .agent-draft-head .iconbtn.ghost.agent-draft-close:not(.primary):not(.secondary):is(:hover,:active,:focus-visible) {
+  background:var(--paper-hover); color:var(--paper-ink); border-color:transparent; box-shadow:none;
+}
 /* Disabled actions do not advertise a next step. */
 :root :is(.primary,.roundsend,.secondary,.roundmic):is(:disabled,[aria-disabled="true"]) {
   background:var(--paper-hover); color:var(--paper-ink-3);

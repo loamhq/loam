@@ -15,7 +15,14 @@ after the line that says the draft was made, which is where the agent says it
 is ("below"). It shows the new agent's face (the theme's face for its id, as
 it will have once made), its name, and the first two sentences of its soul.
 "Read the whole thing" opens the soul ("Who they are") and the config ("How
-they work") rendered as markdown, never raw. **Create** is the primary action
+they work") rendered as markdown, never raw, scrolling calmly to the card's
+header. Sending a message, a new turn starting, a new reply, or a new draft
+revision collapses the card back to its compact form so new messages and
+replies stay in view right above it (and `follow.js`'s trailing `pinTarget`
+prevents any trailing card in `.msgcol` from pushing the latest message off
+short viewports). A quiet close control hides the card for that revision
+without discarding the draft or blocking creation through chat; any later
+revision brings the card back collapsed. **Create** is the primary action
 and **Ask for changes** as the secondary action. It focuses the composer with a prompt to tell the agent what to change. The draft stays on the card.
 While the person is writing, or on an older draft when there are two, Create
 steps down to the secondary tier (`button-tiers.css`). A revision number is

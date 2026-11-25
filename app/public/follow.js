@@ -5,7 +5,7 @@
 // Allow for fractional scroll positions when testing whether the pane is at its end.
 export const AT_BOTTOM_PX = 2
 
-export function follower({ Observer = globalThis.ResizeObserver } = {}) {
+export function follower({ Observer = globalThis.ResizeObserver, pinTarget = null } = {}) {
   let pane = null
   // The `scrollTop` the page last left this pane at, at its end. `null` is "the
   // page has not put it there", and only a reader at the end then follows.
@@ -15,7 +15,15 @@ export function follower({ Observer = globalThis.ResizeObserver } = {}) {
   let forced = false
   const observer = Observer ? new Observer(() => grew()) : null
 
+  const maxScroll = (p) => Math.max(0, p.scrollHeight - p.clientHeight)
   const atEnd = (p) => p.scrollHeight - p.scrollTop - p.clientHeight <= AT_BOTTOM_PX
+
+  function targetTop(p) {
+    const max = maxScroll(p)
+    if (!pinTarget) return max
+    const custom = pinTarget(p, max)
+    return custom == null ? max : Math.max(0, Math.min(custom, max))
+  }
 
   function adopt(p) {
     if (p === pane) return
@@ -29,13 +37,13 @@ export function follower({ Observer = globalThis.ResizeObserver } = {}) {
   function following(p) {
     if (forced) return true
     if (atEnd(p)) return true
-    return p === pane && pinnedTop !== null && Math.abs(p.scrollTop - pinnedTop) < 1
+    return p === pane && pinnedTop !== null && Math.abs(p.scrollTop - pinnedTop) <= AT_BOTTOM_PX
   }
 
   function pin(p) {
     adopt(p)
     forced = false
-    p.scrollTop = p.scrollHeight
+    p.scrollTop = targetTop(p)
     pinnedTop = p.scrollTop
   }
 
@@ -66,6 +74,7 @@ export function follower({ Observer = globalThis.ResizeObserver } = {}) {
     scrolled(p) {
       adopt(p)
       if (atEnd(p)) pinnedTop = p.scrollTop
+      else if (pinnedTop !== null && Math.abs(p.scrollTop - pinnedTop) > AT_BOTTOM_PX) pinnedTop = null
     },
     // The page put the pane somewhere on purpose that is not the end.
     release() {
