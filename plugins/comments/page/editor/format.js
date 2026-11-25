@@ -24,13 +24,28 @@ function around(state, kind, from, to) {
   return null
 }
 
+function inFrontmatter(doc, pos) {
+  const text = doc.sliceString(0, Math.min(doc.length, 20000))
+  const m = /^---\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?=\r?\n|$)/.exec(text)
+  return Boolean(m && pos < m[0].length)
+}
+
+function inCode(state, pos) {
+  for (const side of [1, -1]) {
+    let node = syntaxTree(state).resolveInner(pos, side)
+    while (node) {
+      if (node.name === 'InlineCode' || node.name === 'FencedCode' || node.name === 'CodeBlock') return true
+      node = node.parent
+    }
+  }
+  return false
+}
+
 export function active(state) {
   const r = state.selection.main
   const out = {}
   for (const k of Object.keys(NODE)) out[k] = Boolean(around(state, k, r.from, r.to))
-  let link = syntaxTree(state).resolveInner(r.from, 1)
-  out.link = false
-  while (link) { if (link.name === 'Link') { out.link = true; break } link = link.parent }
+  out.link = Boolean(linkInfoAt(state, r.from) || (r.to > r.from && linkInfoAt(state, r.to - 1)))
   out.block = blockOf(state)
   return out
 }
@@ -66,28 +81,128 @@ export function toggleInline(view, kind) {
   view.focus()
 }
 
-// A link: wrap the selection as [words](url) and select the url, or change
-// the url of the link the caret is in.
-export function setLink(view, url, range = null) {
+// The Markdown link, bare URL, or wiki-link at `pos`, if any.
+export function linkInfoAt(state, pos) {
+  if (pos == null) return null
+  const p = Math.max(0, Math.min(state.doc.length, pos))
+  if (inFrontmatter(state.doc, p) || inCode(state, p)) return null
+  const tree = syntaxTree(state)
+  for (const side of [1, -1]) {
+    let node = tree.resolveInner(p, side)
+    while (node) {
+      if (node.name === 'Link' && p >= node.from && p <= node.to) {
+        const urlNode = node.getChild('URL')
+        if (!urlNode) { node = node.parent; continue }
+        const marks = node.getChildren('LinkMark')
+        const rawUrl = state.sliceDoc(urlNode.from, urlNode.to)
+        const url = rawUrl.replace(/^<|>$/g, '')
+        const labelFrom = marks.length >= 2 ? marks[0].to : node.from
+        const labelTo = marks.length >= 2 ? marks[1].from : node.to
+        const label = marks.length >= 2 ? state.sliceDoc(labelFrom, labelTo) : ''
+        return {
+          kind: 'md',
+          from: node.from,
+          to: node.to,
+          labelFrom,
+          labelTo,
+          urlFrom: urlNode.from,
+          urlTo: urlNode.to,
+          ref: url,
+          target: url,
+          label,
+        }
+      }
+      if (node.name === 'URL' && node.parent?.name !== 'Link' && node.parent?.name !== 'Image' && p >= node.from && p <= node.to) {
+        const rawUrl = state.sliceDoc(node.from, node.to)
+        const url = rawUrl.replace(/^<|>$/g, '')
+        return {
+          kind: 'url',
+          from: node.from,
+          to: node.to,
+          labelFrom: node.from,
+          labelTo: node.to,
+          ref: url,
+          target: url,
+          label: url,
+        }
+      }
+      node = node.parent
+    }
+  }
+  const line = state.doc.lineAt(p)
+  const wl = /(!?)\[\[([^\]\n]+?)\]\]/g
+  let m
+  while ((m = wl.exec(line.text))) {
+    if (m[1]) continue
+    const s = line.from + m.index
+    const e = s + m[0].length
+    if (p >= s && p <= e) {
+      if (inCode(state, s)) return null
+      const bar = m[2].indexOf('|')
+      const rawTarget = bar >= 0 ? m[2].slice(0, bar) : m[2]
+      const target = rawTarget.trim()
+      const hasLabel = bar >= 0
+      const label = hasLabel ? m[2].slice(bar + 1) : target
+      const labelFrom = hasLabel ? s + 2 + rawTarget.length + 1 : s + 2
+      const labelTo = e - 2
+      return {
+        kind: 'wiki',
+        from: s,
+        to: e,
+        labelFrom,
+        labelTo,
+        ref: `[[${target}]]`,
+        target,
+        label,
+        hasLabel,
+      }
+    }
+  }
+  return null
+}
+
+// A link: wrap the selection as [words](url), or change/remove the target of
+// the Markdown link, wiki-link, or bare URL at `range`.
+export function setLink(view, value, range = null) {
   const { state } = view
   const r = range || state.selection.main
-  let node = syntaxTree(state).resolveInner(r.from, 1)
-  while (node && node.name !== 'Link') node = node.parent
-  if (node) {
-    const urlNode = node.getChild('URL')
-    if (urlNode) {
-      if (!url) {
-        // Removing a link keeps its words.
-        const marks = node.getChildren('LinkMark')
-        const words = marks.length >= 2 ? state.sliceDoc(marks[0].to, marks[1].from) : ''
-        view.dispatch({ changes: { from: node.from, to: node.to, insert: words }, userEvent: 'input.format' })
-        return
-      }
-      view.dispatch({ changes: { from: urlNode.from, to: urlNode.to, insert: url }, userEvent: 'input.format' })
+  const info = linkInfoAt(state, r.from) || (r.to > r.from ? linkInfoAt(state, r.to - 1) : null)
+  const url = (value || '').trim()
+  if (info?.kind === 'md') {
+    if (!url) {
+      // Removing a link keeps its words.
+      view.dispatch({ changes: { from: info.from, to: info.to, insert: info.label }, userEvent: 'input.format' })
+      view.focus()
+      return
+    }
+    if (info.urlFrom != null && info.urlTo != null) {
+      const wrapped = state.sliceDoc(info.urlFrom, info.urlTo).startsWith('<')
+      const next = wrapped || /\s/.test(url) ? `<${url}>` : url
+      view.dispatch({ changes: { from: info.urlFrom, to: info.urlTo, insert: next }, userEvent: 'input.format' })
+      view.focus()
       return
     }
   }
-  if (!url) return
+  if (info?.kind === 'wiki') {
+    if (!url) {
+      view.dispatch({ changes: { from: info.from, to: info.to, insert: info.label }, userEvent: 'input.format' })
+      view.focus()
+      return
+    }
+    const cleaned = url.replace(/^\[\[|\]\]$/g, '').trim()
+    const insert = /^(https?:|mailto:|\/)/i.test(url)
+      ? `[${info.label}](${url})`
+      : info.hasLabel ? `[[${cleaned}|${info.label}]]` : `[[${cleaned}]]`
+    view.dispatch({ changes: { from: info.from, to: info.to, insert }, userEvent: 'input.format' })
+    view.focus()
+    return
+  }
+  if (info?.kind === 'url') {
+    if (url) view.dispatch({ changes: { from: info.from, to: info.to, insert: url }, userEvent: 'input.format' })
+    view.focus()
+    return
+  }
+  if (!url) { view.focus(); return }
   const words = state.sliceDoc(r.from, r.to) || url
   view.dispatch({
     changes: { from: r.from, to: r.to, insert: `[${words}](${url})` },
@@ -98,10 +213,7 @@ export function setLink(view, url, range = null) {
 }
 
 export function linkAt(state, pos) {
-  let node = syntaxTree(state).resolveInner(pos, 1)
-  while (node && node.name !== 'Link') node = node.parent
-  const u = node?.getChild('URL')
-  return u ? state.sliceDoc(u.from, u.to) : ''
+  return linkInfoAt(state, pos)?.target || ''
 }
 
 // -- blocks --------------------------------------------------------------------

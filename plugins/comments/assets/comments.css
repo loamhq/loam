@@ -159,8 +159,9 @@ body:has(.dc-dlg-scrim.on) .dc :is(.primary, .secondary) { background: var(--pap
 .dc .dc-strike { text-decoration: line-through 1px var(--dc-ink3); color: var(--dc-ink2); }
 .dc .dc-hl { background: color-mix(in srgb, var(--dc-accent) 18%, transparent); border-radius: 3px; }
 .dc .dc-code { font-family: var(--dc-mono); font-size: .84em; padding: .14em .36em; border-radius: 5px; background: var(--dc-well); }
-.dc .dc-link, .dc .dc-wiki { text-decoration: underline 1px var(--paper-mark-rule, var(--dc-rule2)); text-underline-offset: 4px; }
-.dc.mode-view .dc-link, .dc.mode-view .dc-wiki { cursor: pointer; }
+.dc .dc-link, .dc .dc-wiki { text-decoration: underline 1px var(--paper-mark-rule, var(--dc-rule2)); text-underline-offset: 4px; cursor: pointer; }
+@media (hover: hover) { .dc .dc-link:not(.dc-link-src):hover, .dc .dc-wiki:not(.dc-wiki-src):hover { text-decoration-color: var(--dc-ink2); } }
+.dc .dc-link-src, .dc .dc-wiki-src { cursor: text; }
 .dc .dc-url { color: var(--dc-ink3); font-size: .9em; }
 .dc .dc-wiki-src { text-decoration: none; color: var(--dc-ink2); }
 .dc .dc-li { padding-left: 1.4em !important; text-indent: -1.1em; }
@@ -318,7 +319,7 @@ body:has(.dc-dlg-scrim.on) .dc :is(.primary, .secondary) { background: var(--pap
 .dc-qpop .dc-card { position: static; width: auto; transform: none; border-radius: var(--dc-r-lg); padding: 12px 16px 14px; box-shadow: var(--dc-float); background: var(--dc-ground); cursor: default; }
 
 /* the selection popup: format | note */
-.dc-selbar { position: absolute; z-index: 32; display: none; align-items: center; background: var(--dc-ground); color: var(--dc-ink); padding: 3px; border-radius: var(--dc-pill); box-shadow: var(--dc-float); }
+.dc-selbar { position: absolute; z-index: 32; display: none; align-items: center; max-width: calc(100% - 16px); box-sizing: border-box; background: var(--dc-ground); color: var(--dc-ink); padding: 3px; border-radius: var(--dc-pill); box-shadow: var(--dc-float), 0 0 0 1px var(--dc-rule); }
 /* It comes once the selecting has stopped: one motion, fading in while it
    rises a few pixels away from the words (down, when it sits below them).
    It leaves in a blink, already out of the pointer's way. */
@@ -344,9 +345,24 @@ body:has(.dc-dlg-scrim.on) .dc :is(.primary, .secondary) { background: var(--pap
 .dc-tip kbd { font: inherit; opacity: .55; letter-spacing: .04em; }
 .dc-selbar button:hover .dc-tip { opacity: 1; transform: translate(-50%, 0); transition-delay: .35s; }
 .dc-selbar.lnk { padding: 3px 3px 3px 12px; gap: 6px; }
-.dc-selbar.lnk .dc-lk { color: var(--dc-ink3); display: inline-flex; }
-.dc-selbar.lnk input { width: 220px; border: 0; background: none; outline: none; font: inherit; font-size: 13px; height: 30px; color: var(--dc-ink); }
+.dc-selbar.lnk .dc-lk { color: var(--dc-ink3); display: inline-flex; flex: none; }
+.dc-selbar.lnk input { width: 220px; min-width: 0; flex: 1 1 140px; border: 0; background: none; outline: none; font: inherit; font-size: 13px; height: 30px; min-height: 0; color: var(--dc-ink); }
+.dc-selbar.lnk .dc-fb { flex: none; }
 .dc-selbar.lnk .dc-fb.ok svg { color: inherit; }
+@media (pointer: fine) { .dc-selbar button, .dc-selbar input { min-height: 0; min-width: 0; } }
+
+/* the link chip: shown on desktop hover or keyboard caret inside a link */
+.dc-lchip { position: absolute; z-index: 31; display: none; align-items: center; gap: 2px; max-width: min(340px, calc(100% - 16px)); box-sizing: border-box; background: var(--dc-ground); color: var(--dc-ink); padding: 3px; border-radius: var(--dc-pill); box-shadow: var(--dc-float), 0 0 0 1px var(--dc-rule); }
+.dc-lchip.on { display: flex; animation: dc-selin .16s cubic-bezier(.33, 1, .68, 1) both; }
+.dc-lchip.on.blw { animation-name: dc-selin-b; }
+.dc-lchip button { height: 28px; min-height: 0; min-width: 0; border-radius: var(--dc-pill); font-size: 12.5px !important; display: inline-flex !important; align-items: center; transition: background .12s, color .12s; white-space: nowrap; }
+.dc-lchip button:hover { background: var(--dc-hover); }
+.dc-lchip-go { min-width: 0; flex: 0 1 auto; gap: 6px; padding: 0 9px 0 9px !important; color: var(--dc-ink2) !important; }
+.dc-lchip-go:hover { color: var(--dc-ink) !important; }
+.dc-lchip-go svg { color: var(--dc-ink3); flex: none; }
+.dc-lchip-txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.dc-lchip .dc-sep { width: 1px; height: 16px; background: var(--dc-rule); margin: 0 2px; flex: none; }
+.dc-lchip-edit { flex: none; padding: 0 10px !important; font-weight: 600; color: var(--dc-ink) !important; }
 
 /* the empty line: + in the gutter, and the block menu */
 .dc-plus { position: absolute; left: 38px; width: 26px; height: 26px; border-radius: var(--dc-r-sm); display: grid !important; place-items: center; color: var(--dc-ink3) !important; opacity: 0; transform: scale(.8); pointer-events: none; transition: opacity .2s, transform .2s var(--dc-ease), background .15s, color .15s; z-index: 3; margin-top: 40px; }
@@ -469,7 +485,7 @@ body:has(.dc-dlg-scrim.on) .dc :is(.primary, .secondary) { background: var(--pap
 @media (prefers-reduced-motion: reduce) {
   .dc *, .dc *::before, .dc *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
   /* The selection's popup still fades, without the movement. */
-  .dc .dc-selbar.in, .dc .dc-selbar.in.blw { animation-name: dc-fade !important; animation-duration: .14s !important; }
+  .dc .dc-selbar.in, .dc .dc-selbar.in.blw, .dc .dc-lchip.on, .dc .dc-lchip.on.blw { animation-name: dc-fade !important; animation-duration: .14s !important; }
   .dc .dc-selbar.out { animation-duration: .08s !important; }
 }
 
@@ -647,10 +663,10 @@ body:has(.dc-dlg-scrim.on) .dc-sharebtn .dc-sf { box-shadow: 0 0 0 2px var(--pap
 /* the phone's link, typed in the keyboard bar */
 .dc-kbar.dc-klink { gap: 6px; padding: 0 6px 0 12px; animation: dc-fade .15s ease; }
 .dc-kbar.dc-klink .dc-kl { color: var(--dc-ink3); display: inline-flex; }
-.dc-kbar.dc-klink input { flex: 1; min-width: 0; height: 34px; border: 0; outline: none; border-radius: var(--dc-r-sm); background: var(--dc-well); padding: 0 12px; font: inherit; font-size: 16px; color: var(--dc-ink); }
-.dc-kbar.dc-klink .dc-kok { width: 34px; height: 34px; min-width: 34px; border-radius: 50% !important; }
+.dc-kbar.dc-klink input { flex: 1; min-width: 0; height: 34px; min-height: 0; border: 0; outline: none; border-radius: var(--dc-r-sm); background: var(--dc-well); padding: 0 12px; font: inherit; font-size: 16px; color: var(--dc-ink); }
+.dc-kbar.dc-klink .dc-kok { width: 34px; height: 34px; min-width: 34px; min-height: 34px; border-radius: 50% !important; }
 .dc-kbar.dc-klink .dc-kok.primary { background: var(--dc-pri) !important; color: var(--dc-onpri) !important; }
-.dc-kbar.dc-klink .dc-kx { min-width: 30px !important; color: var(--dc-ink3) !important; }
+.dc-kbar.dc-klink .dc-kx { min-width: 34px !important; min-height: 34px; height: 34px; color: var(--dc-ink3) !important; }
 
 /* ⋯ carries a small quiet mark while a note has lost its passage. */
 .dc-gbtn.dc-lost { position: relative; }

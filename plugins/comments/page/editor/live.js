@@ -410,8 +410,16 @@ function inlineDecos(view) {
             if (c.name === 'URL') url = c
             c = c.nextSibling
           }
-          if (marks.length >= 2) {
-            add(marks[0].to, marks[1].from, mk(n === 'Image' ? 'dc-imgalt' : 'dc-link'))
+          if (marks.length >= 2 && (n === 'Image' || url)) {
+            if (n === 'Image') {
+              add(marks[0].to, marks[1].from, mk('dc-imgalt'))
+            } else {
+              const href = state.sliceDoc(url.from, url.to).replace(/^<|>$/g, '')
+              add(marks[0].to, marks[1].from, Decoration.mark({
+                class: shown ? 'dc-link dc-link-src' : 'dc-link',
+                attributes: href ? { 'data-url': href } : {},
+              }))
+            }
             if (!shown) {
               add(node.from, marks[0].to, hide)
               add(marks[1].from, node.to, hide)
@@ -422,7 +430,15 @@ function inlineDecos(view) {
           }
           return false
         }
-        if (n === 'URL') { add(node.from, node.to, mk('dc-link')); return false }
+        if (n === 'URL') {
+          const shown = touches(state, node.from, node.to)
+          const href = state.sliceDoc(node.from, node.to).replace(/^<|>$/g, '')
+          add(node.from, node.to, Decoration.mark({
+            class: shown ? 'dc-link dc-link-src' : 'dc-link',
+            attributes: href ? { 'data-url': href } : {},
+          }))
+          return false
+        }
         if (n === 'FencedCode' || n === 'CodeBlock') {
           const first = state.doc.lineAt(node.from).number
           const last = state.doc.lineAt(node.to).number
@@ -504,21 +520,33 @@ function inlineDecos(view) {
     })
     // Wiki-links and highlights, which the Markdown grammar does not know.
     const text = state.doc.sliceString(from, to)
+    const tree = syntaxTree(state)
+    const inCodeAt = (pos) => {
+      let node = tree.resolveInner(pos, 1)
+      while (node) {
+        if (node.name === 'InlineCode' || node.name === 'FencedCode' || node.name === 'CodeBlock') return true
+        node = node.parent
+      }
+      return false
+    }
     const wl = /(!?)\[\[([^\]\n]+?)\]\]/g
     let m
     while ((m = wl.exec(text))) {
       const s = from + m.index, e = s + m[0].length
       if (fm && s < fm.to) continue
       if (m[1]) continue
-      const [target, label] = m[2].split('|')
+      if (inCodeAt(s)) continue
+      const bar = m[2].indexOf('|')
+      const target = bar >= 0 ? m[2].slice(0, bar) : m[2]
+      const label = bar >= 0 ? m[2].slice(bar + 1) : undefined
       const shown = touches(state, s, e)
-      if (shown) { add(s, e, mk('dc-wiki dc-wiki-src')); continue }
+      if (shown) { add(s, e, Decoration.mark({ class: 'dc-wiki dc-wiki-src', attributes: { 'data-wiki': target.trim() } })); continue }
       if (label !== undefined) {
         add(s, s + 2 + target.length + 1, hide)
-        add(s + 2 + target.length + 1, e - 2, Decoration.mark({ class: 'dc-wiki', attributes: { 'data-wiki': target } }))
+        add(s + 2 + target.length + 1, e - 2, Decoration.mark({ class: 'dc-wiki', attributes: { 'data-wiki': target.trim() } }))
       } else {
         add(s, s + 2, hide)
-        add(s + 2, e - 2, Decoration.mark({ class: 'dc-wiki', attributes: { 'data-wiki': target } }))
+        add(s + 2, e - 2, Decoration.mark({ class: 'dc-wiki', attributes: { 'data-wiki': target.trim() } }))
       }
       add(e - 2, e, hide)
     }

@@ -249,6 +249,8 @@ The [chat link and preview gallery](evidence/chat-file-links/README.md) compares
 the chat links, file previews and file actions at phone and desktop widths.
 The [Files link and header gallery](evidence/files-links-headers/README.md) extends
 that check to Files' main view, side panel headers across viewers, and the mounted
-Markdown editor plugin.
+Markdown editor plugin. The [Markdown editor links gallery](evidence/editor-links/README.md)
+covers plain-click link following, hover/caret link-chip editing, and `Mod-K`
+across Editing, Suggesting, and Viewing in Files main and beside a chat.
 
 The [phone tab bar comparisons](evidence/phone-tab-bar/README.md) show the list roots and full-screen details at 390 and 1440 pixels.

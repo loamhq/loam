@@ -23,7 +23,7 @@ import {
   modeField, setMode, suggestBase, setSuggestBase, focusField, setFocused,
 } from './live.js'
 import { remote, draftsField, setDrafts, setRecording, inBase, applied, passages, draftDecos } from './record.js'
-import { INLINE, BLOCKS, active, toggleInline, setLink, linkAt, setBlock, blockOf } from './format.js'
+import { INLINE, BLOCKS, active, toggleInline, setLink, linkAt, linkInfoAt, setBlock, blockOf } from './format.js'
 import { createToc } from './toc.js'
 
 export const AUTOSAVE_MS = 1200
@@ -95,7 +95,7 @@ export function createDocEditor(opts) {
     focus: null, peek: null, compose: null,
     drawer: null, history: null, authors: Boolean(settings?.get('authors', false)), authorSpans: null,
     menu: null, saving: false, dirty: false, again: false, word: '', error: '',
-    phone: Boolean(opts.phone), reattach: null, toast: null, sheet: null, bmenu: null, link: null,
+    phone: Boolean(opts.phone), reattach: null, toast: null, sheet: null, bmenu: null, link: null, lchip: null,
     destroyed: false, editing: null, openReplies: new Set(), preview: null, sheetFor: null,
     // The selection's tools are wanted (desktop: the popup) or offered (a
     // phone's bars) only once the selecting has stopped.
@@ -129,6 +129,7 @@ export function createDocEditor(opts) {
   const plus = h('button', { class: 'dc-plus', type: 'button', hidden: true, title: 'Add a block  ·  type / on an empty line', 'aria-label': 'Add a block' }, icon('plus', 17))
   const margin = h('div', { class: 'dc-margin', role: 'complementary', 'aria-label': 'Comments and suggestions' })
   const selbar = h('div', { class: 'dc-selbar', role: 'toolbar', 'aria-label': 'Formatting and notes' })
+  const lchip = h('div', { class: 'dc-lchip', role: 'toolbar', 'aria-label': 'Link' })
   const bmenu = h('div', { class: 'dc-bmenu', role: 'menu' })
   const qpop = h('div', { class: 'dc-qpop' })
   const kbar = h('div', { class: 'dc-kbar', role: 'toolbar', 'aria-label': 'Formatting' })
@@ -142,7 +143,7 @@ export function createDocEditor(opts) {
   col.append(notice, legend, gutter, plus)
   page.append(col, margin)
   scroll.append(page)
-  root.append(head, take, player, banner, scroll, kbar, vbar, selbar, bmenu, qpop, drawer, sheetScrim, sheet, toast)
+  root.append(head, take, player, banner, scroll, kbar, vbar, selbar, lchip, bmenu, qpop, drawer, sheetScrim, sheet, toast)
 
   // -- placing things beside the text ----------------------------------------------
   //
@@ -340,13 +341,14 @@ export function createDocEditor(opts) {
           mouseover: onEditorOver,
           mouseout: onEditorOut,
           keydown: () => { typedAt = Date.now() },
-          focus: () => { view.dispatch({ effects: setFocused.of(true), annotations: remote.of(true) }); renderBars() },
+          focus: () => { view.dispatch({ effects: setFocused.of(true), annotations: remote.of(true) }); renderBars(); syncCaretLinkChip() },
           blur: () => setTimeout(() => {
             if (st.destroyed) return
             if (!view.hasFocus) view.dispatch({ effects: setFocused.of(false), annotations: remote.of(true) })
             // Focus went elsewhere (the margin, the header): the selection's
             // popup goes with it, unless it is the link field being typed in.
             if (!view.hasFocus && !st.link) hideSelbar()
+            if (!view.hasFocus && !lchip.contains(document.activeElement) && st.lchip?.reason === 'caret') hideLinkChip()
             renderBars()
             if (st.mode === 'edit' && st.dirty) save()
           }, 120),
@@ -653,7 +655,7 @@ export function createDocEditor(opts) {
     if (u.docChanged || u.geometryChanged || u.viewportChanged || u.transactions.some(t => t.effects.length)) queueLayout()
     if (u.docChanged) toc.changed(true)
     if (u.selectionSet) selectionMoved(u)
-    if (u.selectionSet || u.focusChanged) { renderPlus(); if (st.phone) renderBars() }
+    if (u.docChanged || u.selectionSet || u.focusChanged) { renderPlus(); if (st.phone) renderBars(); syncCaretLinkChip() }
   }
 
   function scheduleSave(ms = AUTOSAVE_MS) {
@@ -1016,6 +1018,7 @@ export function createDocEditor(opts) {
     redrawPlaces()
     st.menu = null
     hideSelbar()
+    hideLinkChip()
     render()
     queueLayout()
   }
@@ -1039,6 +1042,7 @@ export function createDocEditor(opts) {
     st.compose = { kind, from: r.from, to: r.to, quote, text: '', replacement: quote }
     st.focus = null
     hideSelbar()
+    hideLinkChip()
     pushNotes()
     view.dispatch({ selection: { anchor: r.to }, annotations: remote.of(true) })
     if (st.phone) openSheet('compose')
@@ -1152,6 +1156,7 @@ export function createDocEditor(opts) {
   function escape() {
     if (st.bmenu) { closeBmenu(); return true }
     if (st.link) { st.link = null; hideSelbar(); return true }
+    if (st.lchip) { hideLinkChip(); return true }
     if (st.compose) { cancelCompose(); return true }
     if (st.menu) { st.menu = null; render(); return true }
     if (st.drawer) { st.drawer = null; render(); return true }
@@ -1167,29 +1172,93 @@ export function createDocEditor(opts) {
     return el ? el.getAttribute('data-note') : null
   }
 
+  function canHover() {
+    return typeof matchMedia === 'undefined' || matchMedia('(hover: hover)').matches
+  }
+
+  function linkTargetFromDOM(target) {
+    const wiki = target?.closest?.('.dc-wiki')
+    if (wiki) {
+      const expanded = wiki.classList.contains('dc-wiki-src')
+      const attr = wiki.getAttribute('data-wiki')
+      let pos = null
+      try { pos = view.posAtDOM(wiki) } catch { pos = null }
+      const info = pos != null ? (linkInfoAt(view.state, pos) || linkInfoAt(view.state, pos + 1)) : null
+      const ref = info?.ref || (attr ? `[[${attr}]]` : null)
+      if (!ref) return null
+      return {
+        el: wiki,
+        expanded,
+        kind: 'wiki',
+        ref,
+        target: info?.target || attr || '',
+        from: info?.from ?? pos,
+        to: info?.to ?? (pos != null ? pos + 1 : null),
+        labelFrom: info?.labelFrom ?? pos,
+        labelTo: info?.labelTo ?? (pos != null ? pos + 1 : null),
+      }
+    }
+    const link = target?.closest?.('.dc-link')
+    if (link) {
+      const expanded = link.classList.contains('dc-link-src')
+      let pos = null
+      try { pos = view.posAtDOM(link) } catch { pos = null }
+      const info = pos != null ? (linkInfoAt(view.state, pos) || linkInfoAt(view.state, pos + 1)) : null
+      const url = info?.ref || link.getAttribute('data-url') || ''
+      if (!url) return null
+      return {
+        el: link,
+        expanded,
+        kind: info?.kind || 'md',
+        ref: url,
+        target: info?.target || url,
+        from: info?.from ?? pos,
+        to: info?.to ?? (pos != null ? pos + 1 : null),
+        labelFrom: info?.labelFrom ?? pos,
+        labelTo: info?.labelTo ?? (pos != null ? pos + 1 : null),
+      }
+    }
+    return null
+  }
+
+  let pendingLink = null
+
   function onEditorMouseDown(e) {
+    pendingLink = null
+    if (e.button === 0 && !e.shiftKey && !st.reattach) {
+      const hit = linkTargetFromDOM(e.target)
+      if (hit) {
+        const mod = e.metaKey || e.ctrlKey
+        // Follow collapsed links on a plain click in every mode (Editing,
+        // Suggesting, Viewing). When a link's source is already expanded for
+        // editing, a plain click places the caret and Cmd/Ctrl-click follows.
+        if (!hit.expanded || mod || st.mode === 'view') {
+          e.preventDefault()
+          pendingLink = { ref: hit.ref, x: e.clientX, y: e.clientY, at: Date.now() }
+          hideLinkChip()
+          return true
+        }
+      }
+    }
     // Phone: a tap on a note's words opens its sheet and does not also put
     // the caret there (inside a list item it would show the raw "- ").
     if (st.phone && !(e.metaKey || e.ctrlKey)) {
       const id = noteAt(e.target)
       if (id && id !== '__new') { e.preventDefault(); focusNote(id); return true }
     }
-    const wiki = e.target?.closest?.('.dc-wiki[data-wiki]')
-    if (wiki && (e.metaKey || e.ctrlKey || st.mode === 'view')) {
-      e.preventDefault()
-      openLink?.(`[[${wiki.getAttribute('data-wiki')}]]`, e)
-      return true
-    }
-    const link = e.target?.closest?.('.dc-link')
-    if (link && (e.metaKey || e.ctrlKey || st.mode === 'view')) {
-      const pos = view.posAtDOM(link)
-      const url = linkAt(view.state, pos + 1)
-      if (url) { e.preventDefault(); openLink?.(url, e); return true }
-    }
     return false
   }
 
   function onEditorClick(e) {
+    if (pendingLink) {
+      const link = pendingLink
+      pendingLink = null
+      if (Date.now() - link.at < 2000 && Math.hypot(e.clientX - link.x, e.clientY - link.y) <= 8) {
+        e.preventDefault()
+        openLink?.(link.ref, e)
+        return true
+      }
+    }
     const id = noteAt(e.target)
     if (id && id !== '__new') {
       const sel = view.state.selection.main
@@ -1203,13 +1272,147 @@ export function createDocEditor(opts) {
     }
   }
 
+  // -- the link chip (desktop hover and keyboard caret) ----------------------------------------
+
+  let lchipShowTimer = 0, lchipHideTimer = 0
+
+  function linkChipLabel(info) {
+    const raw = info.target || info.ref || ''
+    if (info.kind === 'wiki') return raw
+    if (/^https?:\/\//i.test(raw)) return raw.replace(/^https?:\/\/(www\.)?/i, '').replace(/\/$/, '')
+    if (/^mailto:/i.test(raw)) return raw.slice(7)
+    if (raw.startsWith('/files/vault/')) {
+      try { return decodeURIComponent(raw.slice('/files/vault/'.length)) } catch { return raw.slice('/files/vault/'.length) }
+    }
+    if (raw.startsWith('/files/')) {
+      try { return decodeURIComponent(raw.slice('/files/'.length)) } catch { return raw.slice('/files/'.length) }
+    }
+    return raw
+  }
+
+  function linkChipAllowed() {
+    return !st.destroyed && canFormat() && canHover()
+      && !st.link && !st.bmenu && !st.menu && !st.compose && !st.reattach && !st.sheet
+      && !selectionRange()
+  }
+
+  function hideLinkChip() {
+    clearTimeout(lchipShowTimer)
+    clearTimeout(lchipHideTimer)
+    st.lchip = null
+    lchip.classList.remove('on', 'blw')
+  }
+
+  function placeLinkChip() {
+    const c = st.lchip
+    if (!c) return
+    if (!linkChipAllowed()) return hideLinkChip()
+    const aFrom = c.labelFrom != null && c.labelTo != null && c.labelTo > c.labelFrom ? c.labelFrom : c.from
+    const aTo = c.labelFrom != null && c.labelTo != null && c.labelTo > c.labelFrom ? c.labelTo : c.to
+    if (aFrom == null || aTo == null) return hideLinkChip()
+    const seen = selectionInView(aFrom, aTo)
+    if (!seen) { lchip.classList.remove('on'); return }
+    const below = placeAbove(lchip, seen.from, seen.to, { avoidPointer: false, gap: 6 })
+    lchip.classList.toggle('blw', below)
+    lchip.classList.add('on')
+  }
+
+  function showLinkChip(info, reason) {
+    clearTimeout(lchipShowTimer)
+    clearTimeout(lchipHideTimer)
+    if (!info || !linkChipAllowed()) return hideLinkChip()
+    const prev = st.lchip
+    st.lchip = { ...info, reason }
+    if (prev && prev.from === info.from && prev.to === info.to && prev.ref === info.ref && lchip.classList.contains('on')) {
+      placeLinkChip()
+      return
+    }
+    const label = linkChipLabel(info)
+    const goBtn = h('button', {
+      class: 'dc-lchip-go',
+      type: 'button',
+      title: info.target || info.ref,
+      onclick: (e) => {
+        e.preventDefault()
+        hideLinkChip()
+        openLink?.(info.ref, e)
+      },
+    }, icon('link', 13), h('span', { class: 'dc-lchip-txt', text: label }))
+    const editBtn = h('button', {
+      class: 'dc-lchip-edit',
+      type: 'button',
+      onclick: (e) => {
+        e.preventDefault()
+        const target = { from: info.from, to: info.to, url: info.target }
+        hideLinkChip()
+        openLink_(target)
+      },
+    }, 'Edit')
+    put(lchip, goBtn, h('span', { class: 'dc-sep' }), editBtn)
+    placeLinkChip()
+  }
+
+  function syncCaretLinkChip() {
+    if (!linkChipAllowed() || !view.hasFocus) {
+      if (st.lchip?.reason === 'caret') hideLinkChip()
+      return
+    }
+    const r = view.state.selection.main
+    if (!r.empty) {
+      hideLinkChip()
+      return
+    }
+    const info = linkInfoAt(view.state, r.head)
+    if (info) {
+      showLinkChip(info, 'caret')
+    } else if (st.lchip?.reason === 'caret') {
+      hideLinkChip()
+    }
+  }
+
+  lchip.addEventListener('mouseenter', () => { clearTimeout(lchipHideTimer) })
+  lchip.addEventListener('mouseleave', (e) => {
+    if (st.lchip?.reason !== 'hover') return
+    if (e.relatedTarget?.closest?.('.dc-link, .dc-wiki')) return
+    clearTimeout(lchipHideTimer)
+    lchipHideTimer = setTimeout(() => {
+      if (st.lchip?.reason === 'hover') hideLinkChip()
+    }, 180)
+  })
+
   function onEditorOver(e) {
     const id = noteAt(e.target)
     if (id && id !== st.peek) { st.peek = id; markPeek() }
+    if (!gest.touch && Date.now() - gest.touchedAt > 800 && linkChipAllowed()) {
+      const hit = linkTargetFromDOM(e.target)
+      if (hit) {
+        clearTimeout(lchipHideTimer)
+        if (st.lchip && st.lchip.from === hit.from && st.lchip.to === hit.to) return
+        clearTimeout(lchipShowTimer)
+        const delay = lchip.classList.contains('on') ? 0 : 80
+        lchipShowTimer = setTimeout(() => {
+          if (!linkChipAllowed()) return
+          if (st.lchip?.reason === 'caret' && st.lchip.from === hit.from && st.lchip.to === hit.to) return
+          showLinkChip(hit, 'hover')
+        }, delay)
+      }
+    }
   }
 
   function onEditorOut(e) {
     if (st.peek && !e.relatedTarget?.closest?.(`[data-note="${st.peek}"]`)) { st.peek = null; markPeek() }
+    const fromLink = e.target?.closest?.('.dc-link, .dc-wiki')
+    if (fromLink) {
+      const to = e.relatedTarget
+      if (to && (fromLink.contains(to) || lchip.contains(to) || to.closest?.('.dc-link, .dc-wiki'))) return
+      clearTimeout(lchipShowTimer)
+      if (st.lchip?.reason === 'hover') {
+        clearTimeout(lchipHideTimer)
+        lchipHideTimer = setTimeout(() => {
+          if (st.lchip?.reason === 'hover') hideLinkChip()
+        }, 180)
+      }
+    }
   }
 
   function markPeek() {
@@ -1366,15 +1569,17 @@ export function createDocEditor(opts) {
   }
 
   function renderSelbar() {
-    if (st.phone || st.destroyed) return hideSelbar()
+    if (st.destroyed) return hideSelbar()
+    if (st.link) return placeLinkBar()
+    if (st.phone) return hideSelbar()
     const r = selectionRange()
     const focused = view.hasFocus
-    if (st.link) return renderLinkBar()
     if (!st.selWant || gest.mouse) return hideSelbar({ keep: true })
     if (!r || !focused || st.compose) return hideSelbar()
     // Scrolled out of sight: it goes, and comes back with the words.
     const seen = selectionInView(r.from, r.to)
     if (!seen) return hideSelbar({ keep: true })
+    hideLinkChip()
     const a = active(view.state)
     const items = []
     if (st.reattach) {
@@ -1385,7 +1590,7 @@ export function createDocEditor(opts) {
           h('button', { class: 'dc-fb aa', type: 'button', 'aria-label': 'Text style', onclick: (e) => openBmenu({ at: 'selbar', anchor: e.currentTarget }) }, h('span', { text: 'Aa' }), icon('chevronDown', 12), tip('Text style', '#  ##  -  >', null)),
           h('span', { class: 'dc-sep' }),
           ...['bold', 'italic', 'strike'].map(k => h('button', { class: `dc-fb${a[k] ? ' on' : ''}`, type: 'button', 'aria-label': INLINE[k].label, 'aria-pressed': String(a[k]), onclick: () => { toggleInline(view, k); queueSelbar() } }, icon(k, 16), tip(INLINE[k].label, INLINE[k].md, `${MOD} ${INLINE[k].key}`))),
-          h('button', { class: `dc-fb${a.link ? ' on' : ''}`, type: 'button', 'aria-label': 'Link', onclick: openLink_ }, icon('link', 16), tip('Link', '[text](url)', `${MOD} K`)),
+          h('button', { class: `dc-fb${a.link ? ' on' : ''}`, type: 'button', 'aria-label': 'Link', onclick: () => openLink_() }, icon('link', 16), tip('Link', '[text](url)', `${MOD} K`)),
           h('button', { class: `dc-fb${a.code ? ' on' : ''}`, type: 'button', 'aria-label': 'Code', onclick: () => { toggleInline(view, 'code'); queueSelbar() } }, icon('code', 16), tip('Code', '`code`', `${MOD} E`)),
           h('span', { class: 'dc-sep' }),
         )
@@ -1401,7 +1606,7 @@ export function createDocEditor(opts) {
   }
 
   // Returns whether it went below the selection.
-  function placeAbove(el, from, to) {
+  function placeAbove(el, from, to, { avoidPointer = true, gap = 8 } = {}) {
     const ca = view.coordsAtPos(from), cb = view.coordsAtPos(to, -1)
     if (!ca || !cb) return false
     const a = local(ca), b = local(cb), c = local(col.getBoundingClientRect())
@@ -1418,17 +1623,17 @@ export function createDocEditor(opts) {
     left = Math.max(8, Math.min(left, box.width - w - 8))
     // Just above the first line of the selection, clear of the header;
     // below its last line when there is no room above.
-    let top = a.top - hgt - 8
+    let top = a.top - hgt - gap
     let below = top < head.offsetHeight + 4
-    if (below) top = b.bottom + 8
+    if (below) top = b.bottom + gap
     // A selection taller than the screen: at the top of the view.
     const vb = local(scroll.getBoundingClientRect()).bottom
     if (below && top + hgt > vb - 8) { top = head.offsetHeight + 8; below = false }
     // Never under the pointer where the button came up: the other side of
     // the selection when that side has room.
-    const p = gest.at && local({ left: gest.at.x, right: gest.at.x, top: gest.at.y, bottom: gest.at.y })
+    const p = avoidPointer && gest.at && local({ left: gest.at.x, right: gest.at.x, top: gest.at.y, bottom: gest.at.y })
     if (p && p.left > left - 6 && p.left < left + w + 6 && p.top > top - 6 && p.top < top + hgt + 6) {
-      const alt = below ? a.top - hgt - 8 : b.bottom + 8
+      const alt = below ? a.top - hgt - gap : b.bottom + gap
       if (below ? alt >= head.offsetHeight + 4 : alt + hgt <= box.height - 8) { top = alt; below = !below }
     }
     el.style.left = `${left}px`
@@ -1436,15 +1641,55 @@ export function createDocEditor(opts) {
     return below
   }
 
-  function openLink_() {
-    const r = view.state.selection.main
-    st.link = { from: r.from, to: r.to, url: linkAt(view.state, r.from) || '' }
+  function openLink_(target = null) {
+    hideLinkChip()
+    const hasRange = target && typeof target.from === 'number'
+    const r = hasRange ? target : view.state.selection.main
+    const info = linkInfoAt(view.state, r.from) || (r.to > r.from ? linkInfoAt(view.state, r.to - 1) : null)
+    const from = info ? info.from : r.from
+    const to = info ? info.to : r.to
+    const anchorFrom = info && info.labelTo > info.labelFrom ? info.labelFrom : from
+    const anchorTo = info && info.labelTo > info.labelFrom ? info.labelTo : to
+    const url = hasRange && target.url != null ? target.url : (info?.target || '')
+    const kind = info?.kind || 'md'
+    if (st.phone && !canHover()) {
+      st.klink = { from, to, url, kind }
+      renderBars()
+      return
+    }
+    st.link = { from, to, anchorFrom, anchorTo, url, kind }
     renderLinkBar()
+  }
+
+  function placeLinkBar() {
+    const l = st.link
+    if (!l) return
+    const aFrom = l.anchorFrom ?? l.from
+    const aTo = l.anchorTo ?? l.to
+    if (aTo > aFrom) {
+      const seen = selectionInView(aFrom, aTo)
+      if (!seen) { selbar.classList.remove('on', 'in'); return }
+      showSelbar(placeAbove(selbar, seen.from, seen.to, { avoidPointer: false }))
+    } else {
+      const ca = view.coordsAtPos(aFrom)
+      const sr = scroll.getBoundingClientRect()
+      if (!ca || ca.bottom <= Math.max(sr.top, head.getBoundingClientRect().bottom) || ca.top >= sr.bottom) {
+        selbar.classList.remove('on', 'in')
+        return
+      }
+      showSelbar(placeAbove(selbar, aFrom, aFrom, { avoidPointer: false }))
+    }
   }
 
   function renderLinkBar() {
     const l = st.link
-    const input = h('input', { type: 'url', placeholder: 'Paste or type a link', value: l.url, 'aria-label': 'Link address' })
+    if (!l) return
+    const input = h('input', {
+      type: l.kind === 'wiki' ? 'text' : 'url',
+      placeholder: l.kind === 'wiki' ? 'Note name or heading' : 'Paste or type a link',
+      value: l.url,
+      'aria-label': 'Link address',
+    })
     const done = () => {
       const url = input.value.trim()
       st.link = null
@@ -1458,8 +1703,8 @@ export function createDocEditor(opts) {
     selbar.classList.remove('fmt')
     selbar.classList.add('lnk')
     put(selbar, h('span', { class: 'dc-lk' }, icon('link', 15)), input, h('button', { class: 'dc-fb ok primary', type: 'button', 'aria-label': 'Apply link', onclick: done }, icon('check', 14)))
-    showSelbar(placeAbove(selbar, l.from, l.to))
-    setTimeout(() => input.focus(), 0)
+    placeLinkBar()
+    setTimeout(() => { input.focus(); input.select() }, 0)
   }
 
   // -- the block menu: + and / ----------------------------------------------------------------
@@ -2001,6 +2246,8 @@ export function createDocEditor(opts) {
     toc.changed(false)
     renderPlus()
     if ((selbar.classList.contains('on') || st.selWant) && !st.link) renderSelbar()
+    if (st.link) placeLinkBar()
+    if (st.lchip) placeLinkChip()
     if (st.mode === 'view' && st.focus && !st.phone) placeQpop()
   }
 
@@ -2244,8 +2491,11 @@ export function createDocEditor(opts) {
 
   scroll.addEventListener('scroll', () => {
     head.classList.toggle('scd', scroll.scrollTop > 4)
-    if (!st.phone && (selbar.classList.contains('on') || st.selWant)) {
-      if (st.link) renderLinkBar(); else renderSelbar()
+    if (st.link) placeLinkBar()
+    else if (!st.phone && (selbar.classList.contains('on') || st.selWant)) renderSelbar()
+    if (st.lchip) {
+      if (st.lchip.reason === 'hover') hideLinkChip()
+      else placeLinkChip()
     }
     if (st.bmenu) renderBmenu()
     if (st.mode === 'view' && st.focus && !st.phone) placeQpop()
@@ -2255,7 +2505,9 @@ export function createDocEditor(opts) {
   // body, outside the editor.
   const onEscape = (e) => {
     if (e.key !== 'Escape' || e.defaultPrevented || !root.isConnected) return
-    if (st.drawer && !st.phone) { e.preventDefault(); st.drawer = null; st.preview = null; render() }
+    if (st.link) { e.preventDefault(); st.link = null; hideSelbar(); view.focus() }
+    else if (st.lchip) { e.preventDefault(); hideLinkChip() }
+    else if (st.drawer && !st.phone) { e.preventDefault(); st.drawer = null; st.preview = null; render() }
     else if (st.menu) { e.preventDefault(); st.menu = null; render() }
   }
   globalThis.document?.addEventListener('keydown', onEscape)
@@ -2263,7 +2515,9 @@ export function createDocEditor(opts) {
   root.addEventListener('mousedown', (e) => {
     if (st.menu && !e.target.closest('.dc-ddw')) { st.menu = null; render() }
     if (st.bmenu && !e.target.closest('.dc-bmenu,.dc-plus,.dc-fb.aa,.dc-kb-aa')) closeBmenu()
-    if (e.target.closest('.dc-selbar,.dc-bmenu,.dc-plus,.dc-kbar,.dc-vbar') && !e.target.closest('input')) e.preventDefault()
+    if (st.link && !e.target.closest('.dc-selbar')) { st.link = null; hideSelbar() }
+    if (st.lchip && !e.target.closest('.dc-lchip,.dc-link,.dc-wiki')) hideLinkChip()
+    if (e.target.closest('.dc-selbar,.dc-lchip,.dc-bmenu,.dc-plus,.dc-kbar,.dc-vbar') && !e.target.closest('input')) e.preventDefault()
     if (st.mode === 'view' && st.focus && !st.phone && !e.target.closest('.dc-qpop,.dc-mk,[data-note]')) { st.focus = null; pushNotes(); render() }
   })
 
@@ -2510,7 +2764,14 @@ export function createDocEditor(opts) {
       // The link, typed in the bar itself, where the keyboard already is.
       const l = st.klink
       if (kbar.classList.contains('dc-klink') && kbar.querySelector('input')) return
-      const input = h('input', { type: 'url', inputmode: 'url', placeholder: 'Paste or type a link', value: l.url, 'aria-label': 'Link address', enterkeyhint: 'done' })
+      const input = h('input', {
+        type: l.kind === 'wiki' ? 'text' : 'url',
+        inputmode: l.kind === 'wiki' ? 'text' : 'url',
+        placeholder: l.kind === 'wiki' ? 'Note name or heading' : 'Paste or type a link',
+        value: l.url,
+        'aria-label': 'Link address',
+        enterkeyhint: 'done',
+      })
       const done = (apply) => {
         st.klink = null
         if (apply) setLink(view, input.value.trim(), { from: l.from, to: l.to })
@@ -2525,7 +2786,7 @@ export function createDocEditor(opts) {
         input,
         h('button', { class: 'dc-kx', type: 'button', 'aria-label': 'Cancel', onclick: () => done(false) }, icon('x', 16)),
         h('button', { class: 'dc-kok primary', type: 'button', 'aria-label': 'Apply link', onclick: () => done(true) }, icon('check', 16)))
-      if (document.activeElement !== input) setTimeout(() => input.focus(), 0)
+      if (document.activeElement !== input) setTimeout(() => { input.focus(); input.select() }, 0)
       return
     }
     kbar.classList.remove('dc-klink')
@@ -2535,7 +2796,12 @@ export function createDocEditor(opts) {
         h('button', { class: 'dc-kb-aa', type: 'button', 'aria-label': 'Text style', onclick: () => openSheet('blocks') }, h('span', { text: 'Aa' }), icon('chevronDown', 12)),
         h('button', { class: a.bold ? 'on' : '', type: 'button', 'aria-label': 'Bold', onclick: () => toggleInline(view, 'bold') }, icon('bold', 19)),
         h('button', { class: a.italic ? 'on' : '', type: 'button', 'aria-label': 'Italic', onclick: () => toggleInline(view, 'italic') }, icon('italic', 19)),
-        h('button', { class: a.link ? 'on' : '', type: 'button', 'aria-label': 'Link', onclick: () => { const r = view.state.selection.main; st.klink = { from: r.from, to: r.to, url: linkAt(view.state, r.from) || '' }; renderBars() } }, icon('link', 19)),
+        h('button', { class: a.link ? 'on' : '', type: 'button', 'aria-label': 'Link', onclick: () => {
+          const r = view.state.selection.main
+          const info = linkInfoAt(view.state, r.from) || (r.to > r.from ? linkInfoAt(view.state, r.to - 1) : null)
+          st.klink = { from: info ? info.from : r.from, to: info ? info.to : r.to, url: info?.target || '', kind: info?.kind || 'md' }
+          renderBars()
+        } }, icon('link', 19)),
         r ? null : h('button', { class: a.block === 'ul' ? 'on' : '', type: 'button', 'aria-label': 'List', onclick: () => setBlock(view, a.block === 'ul' ? 'p' : 'ul') }, icon('list', 19)),
         r ? null : h('button', { class: a.block === 'task' ? 'on' : '', type: 'button', 'aria-label': 'Checklist', onclick: () => setBlock(view, a.block === 'task' ? 'p' : 'task') }, icon('checklist', 19)),
       ] : []
@@ -2699,6 +2965,7 @@ export function createDocEditor(opts) {
       st.phone = Boolean(phone)
       st.sheet = null
       hideSelbar()
+      hideLinkChip()
       render()
       if (pos != null) {
         view.requestMeasure({
@@ -2740,6 +3007,8 @@ export function createDocEditor(opts) {
       clearTimeout(saveTimer)
       clearTimeout(suggestTimer)
       clearTimeout(watchTimer)
+      clearTimeout(lchipShowTimer)
+      clearTimeout(lchipHideTimer)
       globalThis.document?.removeEventListener('keydown', onEscape)
       clearTimeout(gest.timer)
       globalThis.removeEventListener?.('mouseup', onSelectEnd, true)

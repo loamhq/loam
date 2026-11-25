@@ -197,8 +197,8 @@ export function activate(loam) {
         settings: loam.settings,
         embed: remote ? null : (options.embed || host.embedFor || null),
         openLink: (ref, event) => {
-          if (/^(https?:|mailto:)/i.test(ref)) { window.open(ref, '_blank', 'noopener,noreferrer'); return }
-          if (!remote) host.openFileRef?.(ref, { root: file.root, path: file.path }, event)
+          if (remote && !/^(https?:|mailto:)/i.test(ref)) return
+          host.openFileRef?.(ref, remote ? null : { root: file.root, path: file.path }, event)
         },
         crumbs: remote
           ? [
