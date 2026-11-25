@@ -118,9 +118,10 @@ AUTHELIA_BUILDS = {
 # Docker.
 AUTHELIA_IMAGE = f"authelia/authelia:{AUTHELIA_VERSION}"
 AUTHELIA_REDIS_IMAGE = "redis:7.4.12-alpine"
-# The pinned browser server supports page evaluation and timer-independent settling.
-# Keep its advertised tools aligned with the configured browser clients.
-BROWSER_IMAGE = "mcr.microsoft.com/playwright/mcp:v0.0.85"
+# Pinned Playwright MCP browser image (Ubuntu Noble + Node 26, unique download
+# filenames, clean empty browser_file_upload cancel). Keep deploy/browser-tools.json
+# aligned with its advertised tools.
+BROWSER_IMAGE = "mcr.microsoft.com/playwright/mcp:v0.0.86"
 
 # Loopback ports the runtime's own containers publish on. Apps choose their
 # own in their compose file; the generator refuses a collision.

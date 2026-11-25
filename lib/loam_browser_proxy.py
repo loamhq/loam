@@ -99,7 +99,7 @@ def load_schema(cache_path: Path = CACHE_PATH, default_path: Path = DEFAULT_SCHE
         "initialize": {
             "protocolVersion": "2025-06-18",
             "capabilities": {"tools": {"listChanged": True}},
-            "serverInfo": {"name": "Playwright", "version": "0.0.85"},
+            "serverInfo": {"name": "Playwright", "version": "0.0.86"},
         },
         "tools": [],
     }
