@@ -129,14 +129,17 @@ try {
     const formTab = await formOpened
     await formTab.getByRole('heading', { name: 'The next chapter' }).waitFor()
     await formTab.close()
-    // The file's own Open in new tab control opens the live page too.
+    // Secondary HTML actions (Open in new tab, Reload) live inside the ⋯ menu.
+    assert.equal(await page.locator('.fs-htmlreload, .fs-htmlopen').count(), 0)
+    await page.locator('.fs-filemenu').click()
     const tabOpened = context.waitForEvent('page')
-    await page.locator('.fs-htmlopen').click()
+    await page.locator('.fs-menu-open').click()
     const tab = await tabOpened
     await tab.locator('body[data-chart="4.4.9"]').waitFor()
     assert.equal(await tab.evaluate(() => opener === null), true)
     await tab.close()
-    await page.locator('.fs-htmlreload').click()
+    await page.locator('.fs-filemenu').click()
+    await page.locator('.fs-menu-reload').click()
     await frame.locator('#change').filter({ hasText: 'Try another view' }).waitFor()
     await frame.locator('body[data-data=loaded]').waitFor()
     liveFrame = page.frames().find((f) => f.url().startsWith(contentOrigin))
@@ -197,7 +200,7 @@ try {
     await page.goto(`${appUrl}/files`)
     await page.locator('.fs-shortcut').filter({ hasText: 'moved.html' }).click()
     await page.locator('.listnotice.inline').filter({ hasText: 'has moved or been deleted' }).waitFor()
-    await page.getByRole('button', { name: 'Shortcut actions for moved.html', exact: true }).click()
+    await page.getByRole('button', { name: 'Actions for moved.html', exact: true }).click()
     await page.locator('.fs-shortcuttoggle').click()
     await page.locator('.fs-shortcut').filter({ hasText: 'moved.html' }).waitFor({ state: 'detached' })
     assert.equal(await page.locator('.fs-shortcut').filter({ hasText: 'moved.html' }).count(), 0)

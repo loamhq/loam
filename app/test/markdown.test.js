@@ -494,4 +494,16 @@ test('parse cache keeps linking.from, vaultUrls, images, soft breaks, vault mode
   assert.equal(elementsOf(previewNodes).find((n) => n.tag === 'input').hasAttribute('disabled'), false)
   assert.equal(elementsOf(previewNodes).filter((n) => n.getAttribute('data-embed') === 'shot.png').length, 1)
   assert.deepEqual(fileLinksIn(previewNodes).map((a) => a.textContent), ['rel'])
+  // File links in previews match chats: one inline link with no side-panel button or Open-in-Files tooltip.
+  const prevWidth = globalThis.innerWidth
+  globalThis.innerWidth = 1440
+  try {
+    const widePreview = markdown('Read [[Notes/plan|the plan]] and [site](https://example.org/docs).', { onLink, from: { root: 'vault', path: 'Notes/a.md' } })
+    assert.equal(elementsOf(widePreview).filter((n) => (n.getAttribute('class') ?? '').includes('filelink-side')).length, 0)
+    const links = fileLinksIn(widePreview)
+    assert.equal(links.length, 1)
+    assert.equal(links[0].getAttribute('title'), null)
+  } finally {
+    globalThis.innerWidth = prevWidth
+  }
 })

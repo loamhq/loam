@@ -68,7 +68,7 @@ try {
     await page.locator('.fs-menu-copy').click()
     await page.locator('.listnotice.inline').filter({ hasText: 'Link copied' }).waitFor()
     assert.equal(await page.evaluate(() => navigator.clipboard.readText()), `${app.url}/files/spaces/agent/private.md`)
-    assert.equal(await page.locator('.fs-copylink').getAttribute('aria-label'), 'Copy app link')
+    assert.equal(await page.locator('.fs-copylink, .fs-dl').count(), 0)
     await page.screenshot({ animations: 'disabled', path: path.join(out, `app-link-menu-${width}.png`) })
     assert.deepEqual(errors, [])
     assert.equal(requests.some(url => url.endsWith('/page.js')), true)

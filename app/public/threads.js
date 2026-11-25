@@ -1631,7 +1631,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
         h('span', { class: 'tt-listener-look' }, id === 'more' ? h('span', { class: 'tt-listener-more', text: `+${extra || o.listenerExtra || 0}` }) : avatar(id, 26)))))
   }
   function mentionMarkdown(text, pictures = null) {
-    const nodes = renderText(text ?? '', { chatLinks: true, images: pictures?.images })
+    const nodes = renderText(text ?? '', { images: pictures?.images })
     const visit = (node) => {
       if (['CODE', 'PRE', 'A', 'FIGURE'].includes(node.nodeName)) return
       for (const child of [...(node.childNodes ?? [])]) {

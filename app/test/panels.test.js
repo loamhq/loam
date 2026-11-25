@@ -171,6 +171,12 @@ test('chat file links and HTML preview actions work on phone and desktop in Chro
   t.diagnostic(stdout.trim())
 })
 
+test('file links and file headers behave consistently across Files main, side panel, chat and editor in Chromium', { skip: !process.env.LOAM_PLAYWRIGHT, timeout: 120000 }, async t => {
+  const { stdout } = await promisify(execFile)(process.execPath, ['test/files-links-headers-browser.mjs'], { timeout: 110000 })
+  assert.deepEqual(stdout.trim().split('\n'), ['390 light passed', '390 dark passed', '1440 light passed', '1440 dark passed'])
+  t.diagnostic(stdout.trim())
+})
+
 test('browser Back stops at the tab boundary and preserves reading positions and the save guard', { skip: !process.env.LOAM_PLAYWRIGHT, timeout: 120000 }, async t => {
   const { stdout } = await promisify(execFile)(process.execPath, ['test/panel-history-browser.mjs'], { timeout: 110000 })
   assert.match(stdout, /390 dark passed/)

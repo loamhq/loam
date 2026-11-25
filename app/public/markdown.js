@@ -36,9 +36,7 @@
 // reconciler in `ui.js` writes only what changed, so a delta touches the text
 // node at the end of one message and nothing else on the screen.
 
-import { h, icon } from './ui.js'
-import { layoutPixels } from './scale.js'
-import { SIDE_MIN } from './panels.js'
+import { h } from './ui.js'
 
 // ------------------------------------------------------------------ the page
 
@@ -56,7 +54,7 @@ import { SIDE_MIN } from './panels.js'
 // (`onTask(n, checked)`, the nth task in the note) and an embed drawn
 // (`embed(target)`, a node). In a chat none of that is asked for and a task is
 // a box nobody can tick.
-export function markdown(text, { copy = null, from = null, onLink = null, anchors = false, vault = false, onTask = null, embed = null, images = null, soft = false, chatLinks = false } = {}) {
+export function markdown(text, { copy = null, from = null, onLink = null, anchors = false, vault = false, onTask = null, embed = null, images = null, soft = false } = {}) {
   const before = linking
   const beforeSoft = softening
   softening = soft
@@ -65,7 +63,7 @@ export function markdown(text, { copy = null, from = null, onLink = null, anchor
   const beforeImages = imaging
   imaging = images
   const handler = onLink ?? fileLinks
-  linking = handler ? { handler, from, chatLinks } : null
+  linking = handler ? { handler, from } : null
   anchoring = anchors
   vaulting = vault ? { onTask, embed, tasks: 0 } : null
   try {
@@ -1244,7 +1242,7 @@ function renderInline(nodes) {
         break
       }
       case 'filelink': {
-        const { handler, from, chatLinks } = linking ?? {}
+        const { handler, from } = linking ?? {}
         const ref = node.ref
         out.push(
           h(
@@ -1252,7 +1250,6 @@ function renderInline(nodes) {
             {
               class: 'filelink',
               href: ref.startsWith('/files/') ? ref : '#',
-              title: chatLinks ? null : 'Open in Files',
               onclick: (event) => {
                 event?.preventDefault?.()
                 handler?.(ref, from, event)
@@ -1261,9 +1258,6 @@ function renderInline(nodes) {
             ...renderInline(node.children),
           ),
         )
-        if (!chatLinks && handler && layoutPixels(globalThis.innerWidth ?? 0) >= SIDE_MIN) out.push(h('button', { class: 'filelink-side', type: 'button', title: 'Open to the side', 'aria-label': 'Open to the side', onclick: event => {
-          event.preventDefault(); event.stopPropagation(); handler(ref, from, { currentTarget: event.currentTarget, openToSide: true })
-        } }, icon.panelRight(13)))
         break
       }
       case 'link':

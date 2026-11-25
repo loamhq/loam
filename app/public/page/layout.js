@@ -212,7 +212,7 @@ function filesPane(empty = false) {
   return h(
     'div',
     { class: 'pane-body', key: 'pane:files' },
-    fileView(host.files, { historyBack: host.backAction('main'), close: null, closeLabel: '', wide: true, htmlActionsInMenu: host.files.st.chatFile && !host.panels.available(), field: host.fileFieldFor, home: host.filesHome(), go: host.goFiles, onTool: host.applyTool, embed: host.embedFor, ...host.fileDictation() }),
+    fileView(host.files, { historyBack: host.backAction('main'), close: null, closeLabel: '', wide: true, field: host.fileFieldFor, home: host.filesHome(), go: host.goFiles, onLink: host.openFileRef, onTool: host.applyTool, embed: host.embedFor, ...host.fileDictation() }),
   )
 }
 

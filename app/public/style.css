@@ -2050,7 +2050,6 @@ a.ghline { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
 .fs-conflict .fs-keepmine:disabled, .fs-conflict .fs-taketheirs:disabled { opacity: .55; }
 .fs-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .fs-return { flex: none; }
-.fs-dl { transform: rotate(180deg); }
 .fs-field { flex: 1; margin: 0 12px 40px; border: 0; border-radius: 24px; background: transparent; padding: 20px 22px; font-family: var(--font-body); font-size: 16px; line-height: 1.65; color: var(--paper-ink); outline: none; resize: none; min-height: calc(50vh / var(--ui-scale, 1)); }
 .fs-field.mono { font-family: var(--font-mono); font-size: 13px; line-height: 1.6; }
 .fs-file.wide .fs-field, .fs-file.wide .fs-preview { margin: 0 20px 24px; max-width: 860px; width: calc(100% - 40px); align-self: center; }
@@ -2111,12 +2110,11 @@ a.ghline { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
 .fs-preview .tablewrap[data-edges="right"] { mask-image: linear-gradient(to right, var(--mask-opaque) calc(100% - 28px), transparent); }
 .fs-preview .tablewrap[data-edges="left"] { mask-image: linear-gradient(to right, transparent, var(--mask-opaque) 28px); }
 .fs-preview .tablewrap[data-edges="both"] { mask-image: linear-gradient(to right, transparent, var(--mask-opaque) 28px, var(--mask-opaque) calc(100% - 28px), transparent); }
-.fs-file:not(.wide) .fs-copylink, .fs-file:not(.wide) .fs-dl { display: none; }
 .fs-htmlframe { flex: 1; min-height: 0; min-width: 0; width: 100%; overflow: hidden; display: flex; flex-direction: column; }
 .fs-htmlbar { display: flex; flex: none; align-items: center; gap: 10px; min-height: 56px; padding: 0 14px; border-bottom: 1px solid var(--paper-pressed); }
 .fs-htmlmark { font-family: var(--font-mono); font-size: 9px; font-weight: 600; letter-spacing: .04em; color: var(--paper-ink-2); background: var(--paper-card); padding: 4px 6px; border-radius: 6px; }
 .fs-htmlname { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fs-htmlbar .pillbtn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 10px; font-size: 12px; color: var(--latte-foam-ink); text-decoration: none; }
+.fs-livehead > :is(button, a):not(.fs-htmlname) { flex: none; }
 .fs-iframe { flex: 1; min-height: 0; border: 0; width: 100%; background: var(--reading-ground); }
 /* Tell the browser what is behind transparent HTML, even when the app's
  * appearance differs from the system. Light-only pages get a light canvas. */
@@ -2128,6 +2126,10 @@ a.ghline { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
 .fs-livehead .iconbtn { flex: none; }
 .fs-livehead .fs-back { width: 32px; min-width: 44px; }
 .desk.collapsed .fs-livehead { padding-left: 62px; min-height: 68px; }
+@container (max-width: 440px) {
+  .fs-livehead { padding: 0 8px; gap: 4px; }
+  .fs-livehead .fs-htmlmark { display: none; }
+}
 .fs-menu-download > svg { transform: rotate(180deg); }
 :is(.fs-menu-copy, .fs-menu-download, .fs-menu-source, .fs-menu-folder, .fs-menu-reload, .fs-menu-open) { min-height: 48px; font: inherit; text-decoration: none; }
 .fs-sheet :is(.fs-menu-copy, .fs-menu-download, .fs-menu-source, .fs-menu-folder, .fs-menu-reload, .fs-menu-open, .fs-pintoggle) { padding-left: 24px; }

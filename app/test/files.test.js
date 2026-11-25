@@ -8,7 +8,7 @@ import assert from 'node:assert/strict'
 
 import { fakeBroker, appAgainst, closing, TOKEN } from './harness.js'
 import { installDom } from './fakedom.js'
-import { filesHref, parseFilesPath, viewOf, capsOf, rootsOf, shortcutsOf, rowsOf, nextOf, readOf, resolveOf, missingSentence, externalHref, vaultUrlRef, formatText, drawnTypeOf, bytesAre, readOnlyReason, metaOf, validName, tileOf } from '../public/files.js'
+import { filesHref, parseFilesPath, viewOf, capsOf, rootsOf, shortcutsOf, rowsOf, nextOf, readOf, resolveOf, missingSentence, externalHref, vaultUrlRef, formatText, drawnTypeOf, bytesAre, readOnlyReason, metaOf, validName, tileOf, linkTarget, createFiles, fileView, fileHeaderParts, addSheet, openFileMenu } from '../public/files.js'
 import { assetPath, PREVIEW_POLICY } from '../src/preview.js'
 import { row, rootsAnswer, listAnswer, readAnswer, PNG } from './fixtures/files-contract.js'
 
@@ -453,5 +453,93 @@ test('chat markdown: file links go to the page’s handler, and nothing else bec
   } finally {
     setFileLinks(null)
     setVaultUrls([])
+  }
+})
+
+test('linkTarget applies one shared panel rule across chats, Files previews, side panel and overlays', () => {
+  // Wide desktop: plain click opens beside; Cmd/Ctrl-click opens in main.
+  assert.equal(linkTarget({}, { wide: true, panel: 'main' }), 'side')
+  assert.equal(linkTarget({}, { wide: true, panel: 'side' }), 'side')
+  assert.equal(linkTarget({ metaKey: true }, { wide: true, panel: 'main' }), 'main')
+  assert.equal(linkTarget({ ctrlKey: true }, { wide: true, panel: 'main' }), 'main')
+  assert.equal(linkTarget({ metaKey: true }, { wide: true, panel: 'side' }), 'main')
+  assert.equal(linkTarget({ ctrlKey: true }, { wide: true, panel: 'side' }), 'main')
+  // Phone / narrow: plain click opens full-screen in main.
+  assert.equal(linkTarget({}, { wide: false, panel: 'main' }), 'main')
+  assert.equal(linkTarget({ metaKey: true }, { wide: false, panel: 'main' }), 'main')
+  // Overlays and explicit panel overrides stay in main.
+  assert.equal(linkTarget({}, { wide: true, panel: 'main', overlay: true }), 'main')
+  assert.equal(linkTarget({}, { wide: true, panel: 'main', forcePanel: 'main' }), 'main')
+})
+
+test('file headers keep only primary actions and move secondary actions into ⋯ across every viewer', () => {
+  installDom()
+  const files = createFiles({ api: async () => ({}), schedule: () => {} })
+  const plugin = files.registry.scope({ id: 'sample' })
+  plugin.places.files.action.add({ id: 'share', slot: 'action', render: () => { const b = document.createElement('button'); b.setAttribute('class', 'sh-sharebtn'); b.textContent = 'Share'; return b } })
+  plugin.places.files.viewer.add({
+    id: 'comments', slot: 'panel',
+    when: c => c.file?.view !== 'markdown',
+    render: () => {
+      const btn = document.createElement('button')
+      btn.setAttribute('class', 'dc-pbtn')
+      btn.textContent = 'Comments · 2'
+      return { action: btn, node: null }
+    },
+  })
+  const walk = (node, out = []) => {
+    if (!node) return out
+    if (Array.isArray(node)) { for (const n of node) walk(n, out); return out }
+    if (node.nodeType === 1) out.push(node)
+    for (const c of node.childNodes ?? []) walk(c, out)
+    return out
+  }
+  const classes = (nodes) => walk(nodes).map(n => n.getAttribute('class') ?? '')
+  const makeFile = (view, path, extra = {}) => ({
+    root: 'vault', path, row: row('vault', path), view, caps: capsOf(row('vault', path)),
+    text: '# Note', saved: '# Note', draft: null, revision: 'r1', textLoaded: true,
+    mode: 'preview', loading: false, error: '', status: null, saving: false, conflict: null,
+    flash: '', fragment: null, blobUrl: view === 'image' ? 'blob:pic' : null, pdfUrl: view === 'pdf' ? '/api/files/pdf?root=vault&path=Notes%2Freport.pdf' : null,
+    liveUrl: view === 'html' ? 'https://preview.example.com/page.html' : null,
+    liveLoading: false, metadataLoading: false, metadataError: '', shareLink: { url: '/files/vault/' + path, kind: 'Loam link' },
+    ...extra,
+  })
+  const cases = [
+    ['html', 'Notes/page.html', {}],
+    ['html', 'Notes/page.html', { mode: 'edit' }],
+    ['markdown', 'Notes/plan.md', {}],
+    ['image', 'Notes/pic.png', {}],
+    ['pdf', 'Notes/report.pdf', {}],
+    ['audio', 'Notes/clip.mp3', {}],
+    ['video', 'Notes/demo.mp4', {}],
+    ['text', 'Notes/readme.txt', {}],
+    ['other', 'Notes/archive.bin', {}],
+  ]
+  for (const [view, path, extra] of cases) {
+    files.st.file = makeFile(view, path, extra)
+    const mainTree = fileView(files, { wide: true, field: () => document.createElement('textarea') })
+    const mainCls = classes(mainTree)
+    assert.ok(!mainCls.some(c => /\bfs-(htmlreload|htmlopen|copylink|dl)\b/.test(c)), `${view} (${extra.mode ?? 'preview'}) main header has no secondary buttons`)
+    assert.ok(mainCls.some(c => c.includes('sh-sharebtn')), `${view} main header keeps Share`)
+    if (view !== 'markdown') assert.ok(mainCls.some(c => c.includes('dc-pbtn')), `${view} main header keeps Comments toggle`)
+    const sideParts = fileHeaderParts(files, files.st.file, { wide: true, side: true })
+    assert.ok(sideParts.actions.some(n => (n.getAttribute('class') ?? '').includes('sh-sharebtn')), `${view} side header keeps Share`)
+    if (view !== 'markdown') assert.ok(sideParts.actions.some(n => (n.getAttribute('class') ?? '').includes('dc-pbtn')), `${view} side header keeps Comments toggle`)
+    for (const side of [false, true]) {
+      openFileMenu(files, files.st.file, null, { side })
+      const sheetNodes = addSheet(files, { close: () => { files.st.sheet = null }, nameField: document.createElement('input') })
+      const sheetCls = classes(sheetNodes)
+      if (view === 'html' && (extra.mode ?? 'preview') === 'preview') {
+        assert.ok(sheetCls.some(c => c.includes('fs-menu-reload')), `HTML ${side ? 'side' : 'main'} menu has Reload`)
+        assert.ok(sheetCls.some(c => c.includes('fs-menu-open')), `HTML ${side ? 'side' : 'main'} menu has Open in new tab`)
+        assert.equal(walk(sheetNodes).find(n => (n.getAttribute('class') ?? '').includes('fs-menu-source')).textContent, 'View source')
+      }
+      if (view === 'html' && extra.mode === 'edit') {
+        assert.equal(walk(sheetNodes).find(n => (n.getAttribute('class') ?? '').includes('fs-menu-source')).textContent, 'Preview')
+      }
+      if (view === 'pdf') {
+        assert.ok(sheetCls.some(c => c.includes('fs-menu-open')), `PDF ${side ? 'side' : 'main'} menu has Open in new tab`)
+      }
+    }
   }
 })

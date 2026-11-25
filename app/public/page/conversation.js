@@ -15,8 +15,8 @@ export function mount(host, options = {}) {
     visitId: () => host.panelId === 'side' ? host.workspaceHistory.current('side')?.id : globalThis.history?.state?.panelVisit ?? 'initial',
     historyButton: (label, surface = host.panelId) => host.backButton(surface, label),
     messageState: options.messageState ?? createMessageState(),
-    renderText: (text, extra = {}) => markdown(text, { ...extra, copy: host.copyButton, onLink: (ref, from, event) => host.openFileRef(ref, from, event, { chat: extra.chatLinks }) }),
-    openRef: (ref, from, event) => host.openFileRef(ref, from, event),
+    renderText: (text, extra = {}) => markdown(text, { ...extra, copy: host.copyButton, onLink: (ref, from, event) => host.openFileRef(ref, from, event) }),
+    openRef: (ref, from, event) => host.openFileRef(ref, from, event, { panel: host.panelId === 'side' ? 'side' : 'main' }),
     // A listing card in an agent's reply (page/market.js).
     marketCards: (refs, context) => host.marketCards?.(refs, context) ?? null,
     stepUI: { fold: host.foldCard, tool: host.toolNode, item: item => host.itemNode({ what: item.kind, item }),

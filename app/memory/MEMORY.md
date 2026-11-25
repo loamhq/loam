@@ -261,3 +261,19 @@ have never met.
   busy-box message. See `test/file-panel.test.js`,
   `test/file-comments-panel-browser.mjs`, and
   `docs/evidence/file-comments-panel/README.md`.
+- **Shared file links and file headers** (`public/markdown.js`, `public/files.js`,
+  `public/page/files.js`, `public/page/side-panel.js`): every inline file link in
+  `markdown()` renders as a plain `<a class="filelink">` with no `.filelink-side`
+  button, and every link click goes through `openFileRef()` + `linkTarget()`
+  (plain click opens in the side panel when wide, Cmd/Ctrl-click opens in main,
+  phone opens full-screen with Back; `openFileRef` inspects both `event.currentTarget`
+  and `event.target` for `[data-panel="side"]` so delegated plugin listeners route
+  correctly, and opens non-vault web URLs synchronously to keep user activation).
+  Main and side file headers share `fileHeaderParts()` and `openFileMenu()` so
+  every viewer (including HTML in side and main) exposes primary actions (Share,
+  `files.viewer` `slot: 'panel'` toggles such as Comments, read-aloud) in the
+  header and keeps secondary actions (Reload, Open in new tab, Copy link, Download,
+  View source / Preview) inside `⋯`. When a custom `files.viewer` plugin owns a
+  file in the side panel, `.side-head` omits duplicate `files.action` / `readAloud`
+  controls. See `test/files-links-headers-browser.mjs` and
+  `docs/evidence/files-links-headers/README.md`.

@@ -7,26 +7,29 @@ view state, with no broker route, server setting or deployment change.
 ## Navigation
 
 From **1180 layout pixels** (after UI scale), a thread row, a file row or file
-shortcut, a frameable app row, and a file link in a document offer a small
-panel action. Alt/Option-click does the same. Existing file menus and the thread
-actions menu also offer **Open to the side**. Touch devices show the small
-action without requiring hover. Files folders continue to browse the list;
-only files open in a pane. External apps retain their existing browser-tab
-behaviour.
+shortcut, and a frameable app row offer a small panel action. Alt/Option-click
+does the same. Existing file menus and the thread actions menu also offer
+**Open to the side**. Touch devices show the small action without requiring
+hover. Files folders continue to browse the list; only files open in a pane.
+External apps retain their existing browser-tab behaviour.
 
-A plain list click opens in main. A file link in a chat message opens in the
-side panel when the layout has room. ⌘-click on Mac or Ctrl-click elsewhere
-opens it in main. On a phone the file fills the screen and Back returns to
-the chat. Ordinary web links open in a new tab. Links in a Files preview
-navigate the containing panel.
+A plain list click opens in main. Any file link — in a chat message, a Files
+preview, the side panel, or a mounted viewer plugin calling `openFileRef` —
+renders as one inline link with no extra side-panel button and follows one
+shared rule (`linkTarget`): a plain click opens the file in the side panel when
+the layout has room, ⌘-click on Mac or Ctrl-click elsewhere opens it in main,
+and on a phone the file fills the screen with Back returning. Ordinary web
+links open in a new tab. Links out of app-wide overlays (Activity, Settings)
+still close the overlay and open in main.
 Either pane can open the same item independently. Promote and Swap are available for distinct destinations. Opening a row in main
 leaves the side document mounted, even when both now show that row.
-The side header offers Promote, Swap, item actions and Close. The app viewer
-groups those actions in its ⋯ menu. The file menu
-contains view modes, copy and download actions where available. For HTML
-previews it also offers **Reload**, plus **Open in new tab** when a live URL
-is available. On a phone these HTML actions are in **This file** when the preview
-was opened from chat. Thread tasks are in the thread actions menu.
+The side header offers Promote, Swap, item actions and Close, plus the same
+primary file actions (`fileHeaderParts`: Share, panel toggles such as Comments,
+read-aloud) for every built-in viewer including HTML. Both main and side keep
+only primary actions in the header and place secondary actions inside the ⋯
+menu: view modes (Preview / View source / Edit), Copy link, Download, plus
+**Reload** and **Open in new tab** for HTML previews (and **Open in new tab**
+for PDFs). Thread tasks are in the thread actions menu.
 Selected rows still mean main. A quiet panel mark identifies the visible side item.
 
 Apps uses the same list column as Chats and Files. Its grouped inventory stays
@@ -244,5 +247,8 @@ interactive checks run with `node test/panel-history-browser.mjs` when
 
 The [chat link and preview gallery](evidence/chat-file-links/README.md) compares
 the chat links, file previews and file actions at phone and desktop widths.
+The [Files link and header gallery](evidence/files-links-headers/README.md) extends
+that check to Files' main view, side panel headers across viewers, and the mounted
+Markdown editor plugin.
 
 The [phone tab bar comparisons](evidence/phone-tab-bar/README.md) show the list roots and full-screen details at 390 and 1440 pixels.

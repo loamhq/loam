@@ -1,5 +1,5 @@
 import { fileEditor } from '../file-editor.js'
-import { parentOf, createFiles, renamedResource, uploadAccept, filesHref, vaultUrlRef, missingSentence, resolveOf, isFolder, externalHref, parseFilesPath, downloadHref, nameOf as fileNameOf, formatText, drawnTypeOf, bytesAre, folderView, fileView, ROOT_LOOK } from "../files.js"
+import { parentOf, createFiles, renamedResource, uploadAccept, filesHref, vaultUrlRef, missingSentence, resolveOf, isFolder, externalHref, parseFilesPath, downloadHref, nameOf as fileNameOf, formatText, drawnTypeOf, bytesAre, folderView, fileView, linkTarget, ROOT_LOOK } from "../files.js"
 import { h, kept, icon } from "../ui.js"
 import { setFileLinks, setVaultUrls } from "../markdown.js"
 import { createPicker } from "../filepicker.js"
@@ -282,33 +282,72 @@ function proceedThen(go) {
 
 
 
-// A reference from a chat or a preview, resolved by the host and answered by
-// its `status`: one file or folder is opened (at its heading, if the link
-// named one), several are a choice the person makes, a link to the web is
-// followed only if it is `http`, `https` or `mailto`, and one that leads
-// nowhere says what the host looked for. A published vault URL is read as the
-// vault path it names first.
-async function openFileRef(ref, from = null, event = null, { chat = false } = {}) {
-  if (navigation && event?.currentTarget?.closest?.('[data-panel]')?.getAttribute('data-panel') === 'side') return host.panels.sideHost.openFileRef(ref, from, event, { chat })
-  const fullView = chat && (event?.metaKey || event?.ctrlKey)
-  const toSide = !fullView && host.panels?.available() && (chat || event?.altKey || event?.openToSide || host.panelId === 'side')
+function sameOriginFileRef(raw) {
+  const origin = globalThis.location?.origin
+  if (!origin || typeof raw !== 'string' || !/^https?:\/\//i.test(raw.trim())) return null
+  try {
+    const url = new URL(raw.trim())
+    if (url.origin !== origin || !url.pathname.startsWith('/files/')) return null
+    let fragment = null
+    if (url.hash.length > 1) {
+      try { fragment = decodeURIComponent(url.hash.slice(1)) } catch { fragment = url.hash.slice(1) }
+    }
+    return { ref: url.pathname, fragment }
+  } catch { return null }
+}
+
+// A reference from a chat, Files preview, side panel, or editor plugin,
+// resolved by the host and answered by its `status`: one file or folder is
+// opened (at its heading, if the link named one), several are a choice the
+// person makes, a link to the web is followed only if it is `http`, `https` or
+// `mailto`, and one that leads nowhere says what the host looked for. A
+// published vault URL or same-origin `/files/` URL is read as the file path it
+// names first.
+async function openFileRef(ref, from = null, event = null, { panel = null } = {}) {
+  const originPanel = (event?.currentTarget?.closest?.('[data-panel]') ?? event?.target?.closest?.('[data-panel]'))?.getAttribute('data-panel')
+  if (navigation && originPanel === 'side') return host.panels.sideHost.openFileRef(ref, from, event, { panel })
   const published = vaultUrlRef(ref, vaultUrls)
-  const asked = published?.ref ?? ref
+  const localFile = published ? null : sameOriginFileRef(ref)
+  if (!published && !localFile) {
+    const direct = externalHref(ref)
+    if (direct) {
+      globalThis.open?.(direct, '_blank', 'noopener,noreferrer')
+      return true
+    }
+  }
+  const target = linkTarget(event, {
+    wide: Boolean(host.panels?.available()),
+    panel: host.panelId ?? 'main',
+    overlay: Boolean(host.panelId !== 'side' && host.state.sheet),
+    forcePanel: panel,
+  })
+  const asked = published?.ref ?? localFile?.ref ?? ref
   let answer
   try {
-    const qs = files.q({ ref: asked, from_root: published ? null : from?.root, from_path: published ? null : from?.path })
+    const qs = files.q({ ref: asked, from_root: published || localFile ? null : from?.root, from_path: published || localFile ? null : from?.path })
     answer = resolveOf(await host.api('GET', `/files/resolve?${qs}`))
   } catch (err) {
     return refNotice(err.status === 404 ? `${ref} is not a file you can open in Files.` : err.message)
   }
-  const fragment = answer.fragment ?? published?.fragment ?? null
+  const fragment = answer.fragment ?? published?.fragment ?? localFile?.fragment ?? null
   const go = (row) => {
     if (files.st.sheet?.kind === 'choose') files.st.sheet = null
     const isFile = !isFolder(row)
     if (isFile) {
+      const sameOpenHeading = Boolean(
+        fragment
+        && host.state.screen === 'files'
+        && files.st.file?.root === row.root
+        && files.st.file?.path === row.path
+        && !event?.altKey
+        && !event?.openToSide
+      )
+      if (sameOpenHeading) return goFiles(row.root, row.path, { isFile: true, row, fragment, panelLink: true })
       const item = { kind: 'file', root: row.root, path: row.path, row, fragment }
-      if (toSide) return host.panels.openSide(item)
-      if (fullView && host.panelId === 'side') return host.panels.openMain(item)
+      if (target === 'side' && host.panels?.available()) return host.panels.openSide(item)
+      if (target === 'main' && host.panelId === 'side') return host.panels.openMain(item)
+    } else if (target === 'main' && host.panelId === 'side') {
+      return host.panels.openMain({ kind: 'directory', id: filesHref(row.root, row.path) })
     }
     return goFiles(row.root, row.path, { isFile, row, fragment, panelLink: true })
   }
@@ -492,10 +531,10 @@ function filesScreen({ list = false } = {}) {
         historyBack: host.backAction('main', globalThis.history?.state?.returnThread ? 'Back to thread' : undefined),
         closeLabel: files.pluginRoot(f.root)?.name ?? files.pathLabels(f.root, parentOf(f.path), f.row).at(-1) ?? ROOT_LOOK[f.root]?.name ?? f.root,
         wide: false,
-        htmlActionsInMenu: files.st.chatFile,
         field: fileFieldFor,
         home: filesHome(),
         go: goFiles,
+        onLink: openFileRef,
         onTool: applyTool,
         embed: embedFor,
         ...fileDictation(),

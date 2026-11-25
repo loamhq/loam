@@ -9,7 +9,7 @@ import { createProfiles, mountProfile } from '../agent-profile.js'
 import { createSchedules } from '../schedules.js'
 import { createActivity } from '../activity.js'
 import { createMessageState } from '../chat-ui.js'
-import { fileView, filePanelActions, folderView, nameOf, parentOf, splitPath, ROOT_LOOK } from '../files.js'
+import { fileView, folderView, fileHeaderParts, hasCustomFileViewer, openFileMenu, nameOf, parentOf, splitPath, ROOT_LOOK } from '../files.js'
 import { agentLook } from '../sessions.js'
 import { h, icon, blob } from '../ui.js'
 import { copyText } from '../clipboard.js'
@@ -158,26 +158,24 @@ export function mountSidePanel(base, activityOptions) {
     return h('header', { class: 'side-head' },
       base.backButton('side'), h('span', { class: 'side-face', 'aria-hidden': 'true' }, icon.file(20)),
       h('div', { class: 'side-heading' }, h('strong', { text: label }), h('span', { text: location, title: location })),
-      fileActions, controls[0], controls[1], f ? h('button', { class: 'iconbtn ghost', title: 'Item actions', 'aria-label': 'Item actions', onclick: () => {
-        if (ownRoot?.menu) host.files.itemsMenu(f.row, ownRoot.menu(f.path))
-        else host.files.resourceMenu(f.row, host.filesHome(), { side: true })
-      } }, icon.dots(18)) : null, controls[2])
+      fileActions, controls[0], controls[1], f ? h('button', { class: 'iconbtn ghost', title: 'Item actions', 'aria-label': 'Item actions', onclick: () => openFileMenu(host.files, f, host.filesHome(), { side: true }) }, icon.dots(18)) : null, controls[2])
   }
   function view() {
     const f = host.files.st.file
     const fileTools = f ? host.fileDictation() : null
+    const home = f ? host.filesHome() : null
     const at = item()
-    const htmlPreview = Boolean(f && f.view === 'html' && f.mode === 'preview')
-    const panelActions = f ? filePanelActions(host.files, { wide: true, side: true, home: host.filesHome(), go: host.goFiles }) : []
-    const actionButtons = f ? [...host.registry.draw('files.action', { slot: 'action', file: f, files: host.files }), ...panelActions] : []
-    const fileToolbar = Boolean(f && !htmlPreview)
-    const panelHeader = fileToolbar ? host.registry.reduce('files.action', { slot: 'toolbar', file: f, files: host.files,
-      defaultView: () => header([fileTools.readAloud?.glyph, ...actionButtons]),
-    }, null) : ['thread', 'app'].includes(at?.kind) ? null : header(htmlPreview ? actionButtons : undefined)
-    return renderPanel({ host, item: at, header: panelHeader, context: { fileTools },
+    const customViewer = f ? hasCustomFileViewer(host.files, f, { wide: true, side: true, go: host.goFiles, home }) : false
+    const headerParts = f && !customViewer
+      ? fileHeaderParts(host.files, f, { wide: true, side: true, go: host.goFiles, home, readAloud: fileTools?.readAloud })
+      : null
+    const panelHeader = f && !customViewer ? host.registry.reduce('files.action', { slot: 'toolbar', file: f, files: host.files,
+      defaultView: () => header(headerParts.actions),
+    }, null) : ['thread', 'app'].includes(at?.kind) ? null : header()
+    return renderPanel({ host, item: at, header: panelHeader, context: { fileTools, headerParts },
       after: [...(at?.kind === 'profile' ? own.profileActivity.dialogNodes() : []), host.editorNodes(), ...host.sheetNodes()] })
   }
-  own.filePanelView = fileTools => host.files.st.file ? fileView(host.files, { wide: true, side: true, field: host.fileFieldFor, home: host.filesHome(), go: host.goFiles, onLink: host.openFileRef,
+  own.filePanelView = (fileTools, headerParts = null) => host.files.st.file ? fileView(host.files, { wide: true, side: true, headerParts, field: host.fileFieldFor, home: host.filesHome(), go: host.goFiles, onLink: host.openFileRef,
     onTool: host.applyTool, embed: host.embedFor, ...fileTools }) : folderView(host.files, { wide: true, go: host.goFiles, home: host.filesHome() })
 
   function afterRender() {

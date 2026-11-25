@@ -1088,7 +1088,7 @@ export function createFiles({
     schedule()
   }
 
-  function resourceMenu(resource, home, { openFolder = null, side = false, htmlActions = false, includeDelete = true } = {}) {
+  function resourceMenu(resource, home, { openFolder = null, side = false, viewer = false, htmlActions = false, includeDelete = true } = {}) {
     let file = null
     if (st.file?.root === resource.root && st.file.path === resource.path) {
       file = st.file
@@ -1102,7 +1102,7 @@ export function createFiles({
     st.notice = ''
     if (!st.archive?.busy) st.archive = null
     st.sheet = { kind: 'resource', resource, name: resource.name ?? nameOf(resource.path), on: home?.isShortcut(resource.root, resource.path),
-      file, side, htmlActions, includeDelete, toggle: () => home?.toggleShortcut(resource.root, resource.path, resource.kind ?? 'file') }
+      file, side, viewer: Boolean(viewer || htmlActions), includeDelete, toggle: () => home?.toggleShortcut(resource.root, resource.path, resource.kind ?? 'file') }
     st.sheet.openFolder = openFolder
     schedule()
   }
@@ -2426,15 +2426,54 @@ export function filePanelActions(files, options = {}) {
   return resolveFilePanels(files, f, options).actions
 }
 
+// Shared link target rule for every link in the app (chats, Files previews,
+// the side panel, and editor plugins): plain click opens beside when the
+// layout has room (or full-screen on phones), Cmd/Ctrl-click opens in main,
+// and links out of app-wide overlays open in main.
+export function linkTarget(event, { wide = false, panel = 'main', overlay = false, forcePanel = null } = {}) {
+  if (forcePanel) return forcePanel
+  if (overlay) return 'main'
+  if (event?.metaKey || event?.ctrlKey) return 'main'
+  if (wide) return 'side'
+  return panel === 'side' ? 'side' : 'main'
+}
+
+export function hasCustomFileViewer(files, f, options = {}) {
+  if (!f) return false
+  const context = { files, file: f, options, slot: 'viewer' }
+  return files.registry.entries('files.viewer', context).some(entry => !entry.component && entry.slot === 'viewer')
+}
+
+// Collect hosted companion panels (`files.viewer`, slot `panel`) and primary
+// header actions (`files.action`, slot `action`, plus panel toggle actions and
+// read-aloud) once for a file, so main and side render the same primary
+// controls (e.g. Share, Comments toggle with count) for every viewer.
+export function fileHeaderParts(files, f, { wide = true, side = false, close = null, go = null, home = null, readAloud = null } = {}) {
+  if (!f) return { hosted: [], panelActions: [], actions: [] }
+  const { actions: panelActions, hosted } = f.loading || f.error
+    ? { actions: [], hosted: [] }
+    : resolveFilePanels(files, f, { wide, side, close, go, home })
+  const pluginActions = files.registry.draw('files.action', { slot: 'action', file: f, files })
+  const actions = [readAloud?.glyph ?? null, ...pluginActions, ...panelActions].filter(Boolean)
+  return { hosted, panelActions, actions }
+}
+
+export function openFileMenu(files, f, home, { openFolder = null, side = false, includeDelete = true } = {}) {
+  if (!f) return
+  const ownRoot = f.plugin ? files.pluginRoot?.(f.root) : null
+  if (ownRoot?.menu) return files.itemsMenu(f.row, ownRoot.menu(f.path))
+  return files.resourceMenu({ ...f.row, root: f.root, path: f.path, kind: 'file' }, home, { openFolder, side, viewer: true, includeDelete })
+}
+
 export function fileView(files, options) {
   const context = { files, file: files.st.file, options, defaultView: () => builtinFileView(files, options) }
   return files.registry.component('core.files.viewer', context)
 }
 
-function builtinFileView(files, { close, closeLabel, historyBack = null, wide, side = false, htmlActionsInMenu = false, field, onLink = null, onTool = null, go = null, returnBack = null, embed = null, mic = null, take = null, notice = null, readAloud = null, audioBar = null, home = null, backToThread = null, openFolder = returnBack ? close : null }) {
+function builtinFileView(files, { close, closeLabel, historyBack = null, wide, side = false, headerParts = null, field, onLink = null, onTool = null, go = null, returnBack = null, embed = null, mic = null, take = null, notice = null, readAloud = null, audioBar = null, home = null, backToThread = null, openFolder = returnBack ? close : null }) {
   const back = backToThread ? { label: 'Back to thread', title: historyBack?.title ?? 'Back to thread',
     go: historyBack?.go ?? backToThread, shortcut: Boolean(historyBack) } : historyBack
-  const context = { files, file: files.st.file, options: { close, closeLabel, wide, field, onLink, onTool, go, returnBack, embed, mic, take, notice, readAloud, audioBar, home }, slot: 'viewer' }
+  const context = { files, file: files.st.file, options: { close, closeLabel, wide, side, field, onLink, onTool, go, returnBack, embed, mic, take, notice, readAloud, audioBar, home }, slot: 'viewer' }
   const viewers = files.registry.entries('files.viewer', context).filter(entry => !entry.component && entry.slot === 'viewer')
   for (let i = viewers.length - 1; i >= 0; i--) {
     if (files.st.file) files.st.file.openFolder = openFolder ?? close
@@ -2469,8 +2508,9 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, s
     ? h('span', { class: 'fs-tag', title: reason || null, text: 'Read-only' }) : null
   const modeLabel = f.mode === 'preview' ? (editable ? 'Edit' : 'Source') : 'Preview'
   const modeToggle = tabs ? h('button', { class: 'iconbtn fs-mode-toggle', title: modeLabel, 'aria-label': modeLabel, onclick: () => files.setMode(f.mode === 'preview' ? 'edit' : 'preview') }, f.mode === 'preview' ? icon.pencil(18) : icon.file(18)) : null
-  // Live HTML has no title/path area, so its folder is reached through ⋯ too.
-  const openMenu = () => files.resourceMenu({ ...f.row, root: f.root, path: f.path, kind: 'file' }, home, { openFolder, htmlActions: htmlActionsInMenu })
+  // Secondary actions (Reload, Open in new tab, Copy link, Download, View source)
+  // live inside ⋯ in main view just as they do in the side panel and on phones.
+  const openMenu = () => openFileMenu(files, f, home, { openFolder, side })
   // The toolbar: in the header on a desktop, and on a phone in a bar of its
   // own under the field, which the viewport keeps above the keyboard.
   const tools =
@@ -2484,35 +2524,33 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, s
         )
       : null
 
-  const { actions: panelActions, hosted: hostedPanels } = resolveFilePanels(files, f, { wide, side, close, go, home })
-  const extraActions = [...files.registry.draw('files.action', { slot: 'action', file: f, files }), ...panelActions]
+  const { hosted: hostedPanels, actions } = headerParts ?? fileHeaderParts(files, f, { wide, side, close, go, home, readAloud })
+  const menuButton = h('button', { class: 'iconbtn fs-filemenu', title: 'This file', 'aria-label': 'This file', onclick: openMenu }, icon.dots(18))
 
-  const head = side ? null : files.registry.reduce('files.action', { slot: 'toolbar', file: f, files, defaultView: () => h(
-    'div',
-    { class: `fs-head fs-edhead${wide && tools ? ' withtools' : ''}${close && !returnBack ? ' folder-back' : ''}` },
-    historyBackButton(back) ?? returnBack ?? (close ? h('button', { class: 'backbtn fs-back', title: closeLabel, onclick: close }, icon.chevronLeft(20), h('span', { text: closeLabel })) : null),
-    h('div', { class: 'headspace' }),
-    wide ? saveWord : null,
-    tabs,
-    modeToggle,
-    readAloud?.glyph,
-    extraActions,
-    wide ? readOnly : null,
-    h('button', { class: 'iconbtn fs-filemenu', title: 'This file', 'aria-label': 'This file', onclick: openMenu }, icon.dots(18)),
-    h('button', { class: 'iconbtn fs-copylink', title: copyLinkLabel(f), 'aria-label': copyLinkLabel(f), disabled: !f.shareLink, onclick: () => files.copyLink(f) }, icon.link(16)),
-    f.caps.download ? h('a', { class: 'iconbtn fs-dl', title: 'Download', href: downloadHref(f.root, f.path), download: name }, icon.send(16)) : null,
-  ) }, null)
+  const head = side ? null : files.registry.reduce('files.action', { slot: 'toolbar', file: f, files, defaultView: () => htmlPreview
+    ? h(
+        'div',
+        { class: 'fs-htmlbar fs-livehead' },
+        historyBackButton(back) ?? returnBack ?? (close ? h('button', { class: 'iconbtn fs-back', title: `Back to ${closeLabel}`, 'aria-label': `Back to ${closeLabel}`, onclick: close }, icon.chevronLeft(18)) : null),
+        h('span', { class: 'fs-htmlmark', text: 'HTML' }),
+        renameTitle(files, f.row, name, 'fs-htmlname'),
+        ...actions,
+        menuButton,
+      )
+    : h(
+        'div',
+        { class: `fs-head fs-edhead${wide && tools ? ' withtools' : ''}${close && !returnBack ? ' folder-back' : ''}` },
+        historyBackButton(back) ?? returnBack ?? (close ? h('button', { class: 'backbtn fs-back', title: closeLabel, onclick: close }, icon.chevronLeft(20), h('span', { text: closeLabel })) : null),
+        h('div', { class: 'headspace' }),
+        wide ? saveWord : null,
+        tabs,
+        modeToggle,
+        ...actions,
+        wide ? readOnly : null,
+        menuButton,
+      )
+  }, null)
   const toolrow = wide && tools ? h('div', { class: 'fs-toolrow' }, tools) : null
-
-  const liveHead = htmlPreview && !side ? h('div', { class: 'fs-htmlbar fs-livehead' },
-    historyBackButton(back) ?? returnBack ?? (close ? h('button', { class: 'iconbtn fs-back', title: `Back to ${closeLabel}`, 'aria-label': `Back to ${closeLabel}`, onclick: close }, icon.chevronLeft(18)) : null),
-    h('span', { class: 'fs-htmlmark', text: 'HTML' }),
-    renameTitle(files, f.row, name, 'fs-htmlname'),
-    extraActions,
-    htmlActionsInMenu ? null : h('button', { class: 'pillbtn fs-htmlreload', title: 'Reload page', disabled: f.liveLoading, text: 'Reload', onclick: () => files.loadLive(f) }),
-    !htmlActionsInMenu && f.liveUrl ? h('a', { class: 'pillbtn fs-htmlopen', href: f.liveUrl, target: '_blank', rel: 'noopener noreferrer', title: 'Open in new tab', 'aria-label': 'Open in new tab' }, icon.external(16)) : null,
-    h('button', { class: 'iconbtn fs-filemenu', title: 'This file', 'aria-label': 'This file', onclick: openMenu }, icon.dots(18)),
-  ) : null
 
   // A supplied editable source opens through the same Files navigation.
   const source =
@@ -2627,7 +2665,7 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, s
   return h(
     'div',
     { class: `fs-file${wide ? ' wide' : ''}${htmlPreview ? ' html-live' : ''}${hostedPanels.length ? ' has-panel' : ''}${hasOpenPanel ? ' panel-open' : ''}`, key: `fs:file:${f.root}:${f.path}` },
-    htmlPreview ? liveHead : head,
+    head,
     audioBar,
     ...renderHostedPanels(hostedPanels, { wide, contentParts }),
   )
@@ -2802,17 +2840,23 @@ export function addSheet(files, { close, nameField, nameValue = () => nameField.
     const archiveKey = folderArchive ? `${folderArchive.root}:${String(folderArchive.path ?? '').replace(/^\/+|\/+$/g, '')}` : null
     const archiveMatch = archiveKey && files.st.archive?.key === archiveKey ? files.st.archive : null
     const f = s.file === files.st.file ? s.file : null
+    const inViewer = Boolean(s.viewer || s.side)
     const htmlPreview = f?.view === 'html' && f.mode === 'preview' && !f.metadataLoading && !f.metadataError
-    const htmlActions = (s.side || s.htmlActions) && htmlPreview
+    const htmlActions = inViewer && htmlPreview
+    const openTabUrl = htmlActions && f.liveUrl
+      ? f.liveUrl
+      : inViewer && f?.view === 'pdf' && f.pdfUrl
+        ? f.pdfUrl
+        : null
     const viewMode = f?.view === 'html'
-      ? s.side && f.mode === 'edit' ? 'Preview' : 'View source'
+      ? f.mode === 'edit' ? 'Preview' : 'View source'
       : s.side && f?.view === 'markdown' && !f.error && !f.loading && !f.owner
         ? f.mode === 'edit' ? 'Preview' : f.caps.write ? 'Edit' : 'View source'
         : null
     return [
       h('div', { class: 'display sheettitle', text: s.name }),
       htmlActions ? h('button', { class: 'sheetrow fs-menu-reload', type: 'button', disabled: f.liveLoading, onclick: () => { close(); files.loadLive(f) } }, icon.refresh(18), h('span', { text: 'Reload' })) : null,
-      htmlActions && f.liveUrl ? h('a', { class: 'sheetrow fs-menu-open', href: f.liveUrl, target: '_blank', rel: 'noopener noreferrer', onclick: close }, icon.external(18), h('span', { text: 'Open in new tab' })) : null,
+      openTabUrl ? h('a', { class: 'sheetrow fs-menu-open', href: openTabUrl, target: '_blank', rel: 'noopener noreferrer', onclick: close }, icon.external(18), h('span', { text: 'Open in new tab' })) : null,
       ...(s.resource ? menuItems(files, s.resource, close) : []),
       !s.side && s.resource && !isFolder(s.resource) && files.side?.()?.available() ? h('button', { class: 'sheetrow', onclick: () => { const row = s.resource; files.st.sheet = null; files.side().openSide({ kind: 'file', root: row.root, path: row.path, row }) } }, icon.panelRight(18), 'Open to the side') : null,
       capsOf(s.resource).rename ? h('button', { class: 'sheetrow fs-menu-rename', onclick: () => files.beginRename(s.resource, s.renameSlot ?? 'row') }, icon.pencil(18), h('span', { text: 'Rename' })) : null,

@@ -381,7 +381,7 @@ let pluginSettingsUI = null
 const coreScope = registry.scope({ id: '@core' })
 const activityOptions = { registry, api, redraw: schedule, agents: () => state.agents.list,
   avatar: (id) => blob(agentLook(id, state.agents), { size: 36, font: 16, className: 'activity-avatar' }),
-  openRef: (ref) => page.openFileRef(ref),
+  openRef: (ref) => page.openFileRef(ref, null, null, { panel: 'main' }),
   chats: (agent) => threads.activityRows(agent),
   chatFace: record => threads.activityFace(record),
   chatInfo: record => threads.activityInfo(record),
