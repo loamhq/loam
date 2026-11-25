@@ -479,6 +479,7 @@ def test_no_collector_never_connects(tmp: Path) -> None:
         "disk_root_total_mb": 40000, "disk_root_used_mb": 8000,
         "disk_data_total_mb": None, "disk_data_used_mb": None,
         "chats_live": 0, "chats_busy": 0, "jobs": 0, "wakes": 0, "crons": 0, "browser_up": False,
+        "owner_services_up": 0, "owner_sites": 0,
     })], now_ts=1795539600.0)
 
     attempts = [0]
@@ -763,6 +764,107 @@ def test_live_broker_nonblocking_and_cli(tmp: Path) -> None:
         scratch_cfg.write_text(orig_cfg, encoding="utf-8")
 
 
+def test_owner_services_and_sites_counts(tmp: Path) -> None:
+    print("\n-- 6. Owner services and sites counts (numbers only, never names) --")
+    fake = tmp / "owner-counts"
+    fake.mkdir()
+    proc = write_fake_proc(fake)
+
+    # System slice with core apps (excluded), live non-core apps (counted, deduplicated),
+    # and a stopped non-core app (empty cgroup.procs -> excluded).
+    sys_slice = fake / "system.slice"
+    app_sub = sys_slice / r"system-loam\x2dapp.slice"
+    for d, pids in (
+        (app_sub / "loam-app@loam-ui.service", "100\n"),
+        (app_sub / "loam-app@files.service", "101\n"),
+        (app_sub / "loam-app@vault.service", "102\n"),
+        (app_sub / "loam-app@secret-owner-app.service", "200\n"),
+        (sys_slice / "loam-app@secret-owner-app.service", "200\n"),  # duplicate name
+        (sys_slice / "loam-app@secret-blog.service", "201\n"),
+        (sys_slice / "loam-app@stopped-app.service", ""),
+    ):
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "cgroup.procs").write_text(pids, encoding="utf-8")
+
+    # User app.slice + gateway.json: one live always_on plugin (+1), one stopped always_on (0),
+    # one live on-demand plugin (0).
+    app_slice = fake / "app.slice"
+    for name, pids in (
+        ("loam-plugin-secret-daemon.service", "300\n"),
+        ("loam-plugin-stopped-daemon.service", ""),
+        ("loam-plugin-ondemand-tool.service", "301\n"),
+    ):
+        d = app_slice / name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "cgroup.procs").write_text(pids, encoding="utf-8")
+    gw_json = fake / "gateway.json"
+    gw_json.write_text(json.dumps({
+        "wanted": {
+            "secret-daemon": {"always_on": True},
+            "stopped-daemon": {"always_on": True},
+            "ondemand-tool": {"always_on": False},
+        },
+    }), encoding="utf-8")
+
+    # Sites dir: 1 permanent site, 1 future-expiring site, 1 expired site (excluded).
+    sites_dir = fake / "sites"
+    sites_dir.mkdir()
+    (sites_dir / "secret-static-site.toml").write_text(
+        'owner = "ada"\nroot = "/srv/site"\n', encoding="utf-8",
+    )
+    (sites_dir / "future-preview.toml").write_text(
+        'owner = "ada"\nport = 9580\nexpires = 2026-12-01\n', encoding="utf-8",
+    )
+    (sites_dir / "expired-preview.toml").write_text(
+        'owner = "ada"\nroot = "/srv/old"\nexpires = 2026-11-20\n', encoding="utf-8",
+    )
+
+    # Deploy dir: core dirs excluded, 2 non-core owner apps counted.
+    deploy_dir = fake / "deploy"
+    for name in ("loam-ui", "files", "vault", "login", "secret-owner-app", "secret-blog"):
+        (deploy_dir / name).mkdir(parents=True)
+        (deploy_dir / name / "deploy.toml").write_text('exposure = "private"\n', encoding="utf-8")
+
+    store = ur.UsageStore(fake / "usage")
+    rec = ur.UsageRecorder(
+        store,
+        meminfo_path=proc["meminfo"], stat_path=proc["stat"],
+        vmstat_path=proc["vmstat"], loadavg_path=proc["loadavg"],
+        proc_dir=proc["proc"], root_disk_path=fake,
+        app_slice_dir=app_slice, system_slice_dir=sys_slice,
+        system_app_cgroup_dir=app_sub / "loam-app@loam-ui.service",
+        gateway_json_path=gw_json, sites_dir=sites_dir, deploy_dir=deploy_dir,
+        browser_state_path=fake / "no-browser.json",
+        limits_events_path=fake / "no-limits.jsonl",
+        clock=lambda: 1795536000.0,  # 2026-11-24T16:00:00Z
+        vcpus_provider=lambda: 2,
+    )
+    rows = rec.tick()
+    s = rows[-1]
+    ur.validate_record(s)
+    # 2 unique live non-core loam-app services + 1 live always_on plugin = 3
+    check("owner_services_up counts unique live non-core apps + always_on plugins",
+          s["owner_services_up"], 3)
+    # 2 non-expired sites + 2 non-core deploy apps = 4
+    check("owner_sites counts non-expired sites + non-core deploy apps",
+          s["owner_sites"], 4)
+
+    # Privacy: zero canary app/site/plugin names in persisted JSONL.
+    raw_jsonl = store.active_path.read_text(encoding="utf-8")
+    leaks = [c for c in ("secret-owner-app", "secret-blog", "secret-daemon", "secret-static-site")
+             if c in raw_jsonl]
+    check("zero owner app/site/plugin names leaked to usage.jsonl", leaks, [])
+
+    # Privacy guard rejects negative or non-int owner counts.
+    for bad_field, bad_val in (("owner_services_up", -1), ("owner_sites", "two"), ("owner_sites", True)):
+        raised = False
+        try:
+            ur.validate_record({**s, bad_field: bad_val})
+        except ValueError:
+            raised = True
+        check(f"validate_record rejects {bad_field}={bad_val!r}", raised, True)
+
+
 def main() -> int:
     tmp = Path(tempfile.mkdtemp(prefix="loam-usage-test-"))
     try:
@@ -771,6 +873,7 @@ def main() -> int:
         test_no_collector_never_connects(tmp)
         test_collector_delivery_outage_and_catchup(tmp)
         test_live_broker_nonblocking_and_cli(tmp)
+        test_owner_services_and_sites_counts(tmp)
     finally:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)

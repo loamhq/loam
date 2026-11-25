@@ -63,6 +63,8 @@ the wire without `type`):
 | `wakes` | integer (`>= 0`) | Active `loam-wake-*` units |
 | `crons` | integer (`>= 0`) | Active `loam-cron-*` and reviewer units |
 | `browser_up` | boolean | Whether `loam-browser` is awake (read from `/run/loam-browser/state.json` without waking Docker or the proxy) |
+| `owner_services_up` | integer (`>= 0`) | Running non-core owner services: live `loam-app@<name>.service` cgroups excluding core apps (`loam-ui`, `files`, `vault`, configured `edge.app`), plus live `always_on` plugin servers from `<state>/plugins/gateway.json` (count only, never names; never wakes Docker or runs `systemctl`) |
+| `owner_sites` | integer (`>= 0`) | Non-expired site records in `<state>/sites/*.toml` plus non-core app records in `deploy/*/deploy.toml` (count only, never names) |
 
 ## Event fields
 
@@ -120,7 +122,7 @@ plan = "4gb"                                     # optional plan size label
   "format": "loam-usage/1",
   "box_id": "box_01j9example",
   "plan": "4gb",
-  "loam_version": "0.2.35",
+  "loam_version": "0.2.38",
   "sent_at": "2026-11-24T17:20:00Z",
   "samples": [
     {
@@ -145,7 +147,9 @@ plan = "4gb"                                     # optional plan size label
       "jobs": 0,
       "wakes": 0,
       "crons": 0,
-      "browser_up": false
+      "browser_up": false,
+      "owner_services_up": 0,
+      "owner_sites": 0
     }
   ],
   "events": [

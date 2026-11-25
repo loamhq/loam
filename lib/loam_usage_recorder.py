@@ -37,7 +37,7 @@ import time
 import tomllib
 import urllib.parse
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -71,7 +71,11 @@ SAMPLE_KEYS = frozenset({
     "disk_root_total_mb", "disk_root_used_mb",
     "disk_data_total_mb", "disk_data_used_mb",
     "chats_live", "chats_busy", "jobs", "wakes", "crons", "browser_up",
+    "owner_services_up", "owner_sites",
 })
+
+CORE_APP_NAMES = frozenset({"loam-ui", "files", "vault"})
+CORE_DEPLOY_NAMES = frozenset({"loam-ui", "files", "vault", "login"})
 
 EVENT_CORE_KEYS = frozenset({
     "type", "seq", "ts", "kind", "outcome", "mem_available_mb", "swap_used_mb",
@@ -293,6 +297,7 @@ def validate_record(row: dict) -> None:
             "mem_total_mb", "mem_used_mb", "mem_available_mb",
             "swap_total_mb", "swap_used_mb",
             "chats_live", "chats_busy", "jobs", "wakes", "crons",
+            "owner_services_up", "owner_sites",
         )
         for k in int_fields:
             if not _is_int(row[k]) or row[k] < 0:
@@ -472,6 +477,109 @@ def read_browser_up(state_path: Path) -> bool:
         return isinstance(data, dict) and data.get("state") == "awake"
     except (OSError, ValueError):
         return False
+
+
+def _cgroup_has_procs(cgroup_dir: Path) -> bool:
+    """Return True if ``cgroup_dir/cgroup.procs`` exists and lists at least one PID."""
+    try:
+        return bool((cgroup_dir / "cgroup.procs").read_text(encoding="utf-8").strip())
+    except OSError:
+        return False
+
+
+def read_owner_services_up(
+    system_slice_dir: Path,
+    app_slice_dir: Path,
+    gateway_json_path: Path | None,
+    core_app_names: frozenset[str] = CORE_APP_NAMES,
+) -> int:
+    """Count running non-core owner services (deployed ``loam-app@<name>.service``
+    units and ``always_on`` plugin servers) without waking Docker or spawning
+    ``systemctl``. Returns a count only — never names."""
+    owner_apps: set[str] = set()
+    for base in (system_slice_dir / r"system-loam\x2dapp.slice", system_slice_dir):
+        try:
+            entries = list(base.iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            name = entry.name
+            if not (name.startswith("loam-app@") and name.endswith(".service")) or not entry.is_dir():
+                continue
+            app_name = name[len("loam-app@"):-len(".service")]
+            if not app_name or app_name in core_app_names:
+                continue
+            if _cgroup_has_procs(entry):
+                owner_apps.add(app_name)
+
+    always_on_plugins = 0
+    if gateway_json_path is not None:
+        gw = _read_json(gateway_json_path)
+        wanted = gw.get("wanted") if isinstance(gw.get("wanted"), dict) else {}
+        for pid, spec in wanted.items():
+            if not isinstance(pid, str) or not isinstance(spec, dict):
+                continue
+            if spec.get("always_on") is not True:
+                continue
+            if _cgroup_has_procs(app_slice_dir / f"loam-plugin-{pid}.service"):
+                always_on_plugins += 1
+
+    return len(owner_apps) + always_on_plugins
+
+
+def _is_expired_date(value: Any, today_utc: str) -> bool:
+    """Return True if a TOML ``expires`` field represents a date strictly before ``today_utc``."""
+    if isinstance(value, datetime):
+        return value.date().isoformat() < today_utc
+    if isinstance(value, date):
+        return value.isoformat() < today_utc
+    if isinstance(value, str):
+        s = value.strip()[:10]
+        if len(s) == 10 and s[4] == "-" and s[7] == "-":
+            return s < today_utc
+    return False
+
+
+def read_owner_sites(
+    sites_dir: Path | None,
+    deploy_dir: Path | None,
+    core_deploy_names: frozenset[str] = CORE_DEPLOY_NAMES,
+    today_utc: str | None = None,
+) -> int:
+    """Count non-expired owner/agent sites in ``<state>/sites/*.toml`` plus
+    non-core app records in ``<root>/deploy/*/deploy.toml``. Numbers only."""
+    day = today_utc or utc_day()
+    count = 0
+    if sites_dir is not None:
+        try:
+            site_files = sorted(sites_dir.glob("*.toml"))
+        except OSError:
+            site_files = []
+        for path in site_files:
+            if not path.is_file():
+                continue
+            try:
+                rec = tomllib.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(rec, dict):
+                continue
+            if _is_expired_date(rec.get("expires"), day):
+                continue
+            count += 1
+
+    if deploy_dir is not None:
+        try:
+            app_files = sorted(deploy_dir.glob("*/deploy.toml"))
+        except OSError:
+            app_files = []
+        for path in app_files:
+            if not path.is_file():
+                continue
+            if path.parent.name in core_deploy_names:
+                continue
+            count += 1
+    return count
 
 
 def _proc_starttime(pid: int, proc_dir: Path = Path("/proc")) -> int | None:
@@ -975,7 +1083,11 @@ class UsageRecorder:
         root_disk_path: Path = Path("/"),
         data_disk_path: Path | None = None,
         app_slice_dir: Path | None = None,
+        system_slice_dir: Path = Path("/sys/fs/cgroup/system.slice"),
         system_app_cgroup_dir: Path | None = None,
+        gateway_json_path: Path | None = None,
+        sites_dir: Path | None = None,
+        deploy_dir: Path | None = None,
         browser_state_path: Path | None = None,
         limits_events_path: Path | None = None,
         chats_provider: Callable[[], tuple[int, int]] | None = None,
@@ -992,11 +1104,19 @@ class UsageRecorder:
         self.root_disk_path = Path(root_disk_path)
         self.data_disk_path = Path(data_disk_path) if data_disk_path is not None else None
         self.app_slice_dir = Path(app_slice_dir) if app_slice_dir is not None else (lc.USER_SLICE / "app.slice")
+        self.system_slice_dir = Path(system_slice_dir)
         self.system_app_cgroup_dir = (
             Path(system_app_cgroup_dir)
             if system_app_cgroup_dir is not None
             else default_app_cgroup_dir(config_path)
         )
+        self.gateway_json_path = (
+            Path(gateway_json_path)
+            if gateway_json_path is not None
+            else (lc.STATE / "plugins" / "gateway.json")
+        )
+        self.sites_dir = Path(sites_dir) if sites_dir is not None else (lc.STATE / "sites")
+        self.deploy_dir = Path(deploy_dir) if deploy_dir is not None else (lc.ROOT / "deploy")
         self.browser_state_path = (
             Path(browser_state_path)
             if browser_state_path is not None
@@ -1074,6 +1194,23 @@ class UsageRecorder:
         disk_data_total, disk_data_used = self._data_disk_usage()
         units = read_unit_counts(self.app_slice_dir)
         browser_up = read_browser_up(self.browser_state_path)
+        raw_cfg = _read_toml(self.config_path)
+        edge_cfg = raw_cfg.get("edge") if isinstance(raw_cfg.get("edge"), dict) else {}
+        core_edge_app = _clean_opt_str(edge_cfg.get("app"), 64)
+        core_apps = CORE_APP_NAMES | ({core_edge_app} if core_edge_app else set())
+        core_deploys = CORE_DEPLOY_NAMES | ({core_edge_app} if core_edge_app else set())
+        owner_services_up = read_owner_services_up(
+            self.system_slice_dir,
+            self.app_slice_dir,
+            self.gateway_json_path,
+            core_app_names=core_apps,
+        )
+        owner_sites = read_owner_sites(
+            self.sites_dir,
+            self.deploy_dir,
+            core_deploy_names=core_deploys,
+            today_utc=utc_day(at),
+        )
 
         if chats_live is None or chats_busy is None:
             if self.chats_provider is not None:
@@ -1205,6 +1342,8 @@ class UsageRecorder:
             "wakes": units["wakes"],
             "crons": units["crons"],
             "browser_up": browser_up,
+            "owner_services_up": owner_services_up,
+            "owner_sites": owner_sites,
         }
         pending_bodies.append(("sample", sample_body))
 
