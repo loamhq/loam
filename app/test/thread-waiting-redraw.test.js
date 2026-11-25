@@ -30,6 +30,13 @@ test('only an actually generating draft gets a reply slot before prose', () => {
   o.thread.members[0].working = false
   assert.equal(showReply(o, draft), false)
   assert.equal(showReply(o, { ...draft, text: 'A notification has arrived.' }), true)
+  // An empty streaming draft for a persona waiting on an unmatched permission card renders no ghost header.
+  o.thread.members[0].working = true
+  o.permissions.set('q1', { request_id: 'q1', persona: 'sprout', after_message: 'm1' })
+  assert.equal(showReply(o, draft), false)
+  assert.equal(showReply(o, { ...draft, text: 'Quick question first:' }), true)
+  o.permissions.delete('q1')
+  assert.equal(showReply(o, draft), true)
 })
 
 test('a parked snapshot does not reserve an empty draft when there is no completed reply', () => {

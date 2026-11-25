@@ -3,7 +3,7 @@ setOwner({ id: 'you', name: 'Sam', accepts: ['you', 'owner', 'person'] })
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 import assert from 'node:assert/strict'
-import { applyThreadEvent, readThreadRecord, readThreadSummary, readThreadList, readAcceptedMessage, compareThreads, recentMembers, messageSegments, firstMessageTitle, groupJoinNotices, messageRecipients } from '../public/thread-record.js'
+import { applyThreadEvent, readThreadRecord, readThreadSummary, readThreadList, readAcceptedMessage, compareThreads, recentMembers, messageSegments, firstMessageTitle, groupJoinNotices, messageRecipients, placePermissions, withPending } from '../public/thread-record.js'
 import { fakeBroker, appAgainst, closing, TOKEN } from './harness.js'
 
 test('an incomplete or mismatched thread record is rejected', () => {
@@ -234,4 +234,67 @@ test('General leads the pinned threads by id; everything else keeps pinned-then-
   assert.deepEqual(ids(rows.filter((t) => t.id !== 'general')), ['newest-pin', 'pin-b', 'pin-c', 'plain-general', 'plain'])
   // The archived view sorts by newest alone, as before.
   assert.deepEqual(ids(rows, { pinned: false }), ['newest-pin', 'plain-general', 'plain', 'pin-b', 'pin-c', 'general'])
+})
+
+test('unmatched permissions record after_message on arrival, preserve it across reconnects, and stay anchored when newer messages arrive', () => {
+  const o = open()
+  applyThreadEvent(o, { type: 'message.done', message: { id: 'm1', author: 'you', kind: 'message', text: 'Set up the weekly review.' } })
+  applyThreadEvent(o, { type: 'turn.started', persona: 'scout', engine: 'claude-code' })
+  applyThreadEvent(o, { type: 'message.delta', persona: 'scout', draft: 'Before I write it, one quick question:' })
+  const req = { type: 'broker.permission_request', kind: 'question', request_id: 'q-1', session_id: 's-1', persona: 'scout', tool_name: 'AskUserQuestion', questions: [{ id: 'pace', header: 'Pace', question: 'Which pace?', options: [{ label: 'Brief' }] }] }
+  applyThreadEvent(o, req)
+  assert.equal(o.permissions.get('q-1').after_message, 'm1', 'anchors to last durable message, not the streaming draft')
+
+  // Before the person sends another message, the card sits below Scout's own streaming intro prose.
+  let placed = placePermissions(o.messages, o.messages, [...o.permissions.values()])
+  assert.deepEqual(placed.beforeAll, [])
+  assert.deepEqual(placed.trailing, [])
+  assert.deepEqual(placed.afterById.get('draft:scout')?.map((p) => p.request_id), ['q-1'])
+
+  // While the person's follow-up is pending or settled, the card stays anchored after m1 above the new message and any reply.
+  const pendingMessages = withPending(o.messages, { id: 'pending-send', author: 'you', kind: 'message', text: '@quill Is Friday open?' })
+  placed = placePermissions(pendingMessages, pendingMessages, [...o.permissions.values()])
+  assert.deepEqual(placed.afterById.get('m1')?.map((p) => p.request_id), ['q-1'])
+  assert.equal(placed.afterById.has('draft:scout'), false)
+
+  applyThreadEvent(o, { type: 'message.done', message: { id: 'm2', author: 'you', kind: 'message', text: '@quill Is Friday open?' } })
+  applyThreadEvent(o, { type: 'turn.started', persona: 'quill', engine: 'claude-code' })
+  applyThreadEvent(o, { type: 'message.delta', persona: 'quill', draft: 'Friday afternoon is clear.' })
+
+  // A reconnect snapshot repeating the pending permission must not move its anchor past m2.
+  applyThreadEvent(o, { type: 'thread.snapshot', turns: [{ persona: 'scout' }, { persona: 'quill' }], pending: [req] })
+  assert.equal(o.permissions.get('q-1').after_message, 'm1')
+  placed = placePermissions(o.messages, o.messages, [...o.permissions.values()])
+  assert.deepEqual(placed.afterById.get('m1')?.map((p) => p.request_id), ['q-1'])
+  assert.deepEqual(placed.trailing, [])
+})
+
+test('placePermissions handles empty threads, grouped join notices, hidden replies, older windows, and unanchored fallbacks', () => {
+  const o = open()
+  applyThreadEvent(o, { type: 'broker.permission_request', request_id: 'r0', session_id: 's', persona: 'scout', tool_name: 'Read', input: {} })
+  assert.equal(o.permissions.get('r0').after_message, null)
+  const msgsAfter = [{ id: 'm1', author: 'you', kind: 'message', text: 'Hello' }]
+  let placed = placePermissions(msgsAfter, msgsAfter, [...o.permissions.values()])
+  assert.deepEqual(placed.beforeAll.map((p) => p.request_id), ['r0'], 'a card raised before m1 stays above m1')
+
+  // Grouped join notice: m3 merged into m2 -> falls back cleanly to m2.
+  const agents = [{ id: 'scout', name: 'Scout' }, { id: 'quill', name: 'Quill' }]
+  const raw = [
+    { id: 'm1', author: 'you', kind: 'message', text: '@scout @quill hi' },
+    { id: 'm2', author: 'system', kind: 'system', text: 'You brought in [[Scout]]' },
+    { id: 'm3', author: 'system', kind: 'system', text: 'You brought in [[Quill]]' },
+    { id: 'm4', author: 'you', kind: 'message', text: 'Next message' },
+  ]
+  const display = groupJoinNotices(raw, agents)
+  placed = placePermissions(raw, display, [{ request_id: 'r-join', persona: 'scout', after_message: 'm3' }])
+  assert.deepEqual(placed.afterById.get('m2')?.map((p) => p.request_id), ['r-join'])
+
+  // Anchor earlier than loaded window goes beforeAll; missing after_message goes to trailing.
+  const windowMsgs = [{ id: 'm20', author: 'you', kind: 'message', text: 'Later' }]
+  placed = placePermissions(windowMsgs, windowMsgs, [
+    { request_id: 'r-old', persona: 'scout', after_message: 'm5' },
+    { request_id: 'r-legacy', persona: 'scout' },
+  ])
+  assert.deepEqual(placed.beforeAll.map((p) => p.request_id), ['r-old'])
+  assert.deepEqual(placed.trailing.map((p) => p.request_id), ['r-legacy'])
 })

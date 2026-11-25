@@ -28,7 +28,7 @@ import { modelsOf, modelLabel, modelTooltip } from './providers.js'
 import { providerMark } from './marks.js'
 import { createLink } from './link.js'
 import { readField, caretPoint, setMarkdown } from './compose.js'
-import { applyThreadEvent, threadTurns, readThreadRecord, readThreadSummary, readThreadList, readAcceptedMessage, compareThreads, messageSegments, messageNumber, firstMessageTitle, groupJoinNotices, withPending, withMarks, createdAgentId } from './thread-record.js'
+import { applyThreadEvent, threadTurns, readThreadRecord, readThreadSummary, readThreadList, readAcceptedMessage, compareThreads, messageSegments, messageNumber, firstMessageTitle, groupJoinNotices, withPending, withMarks, createdAgentId, placePermissions } from './thread-record.js'
 
 const button = (text, onclick, props = {}) => h('button', { class: 'pillbtn', type: 'button', onclick, ...props }, text)
 export function createThreads({ registry = createCoreRegistry(), linePending = () => false, headerActionPending = () => false, api, redraw, agents, changedAgent = () => {}, agentsReady = () => false, loadAgents = () => {}, providers = () => [], rail, nav, enter, leave, compose, openProfile, openSettings = null, openRef, address = () => {}, viewAddress = () => {}, archiveAddress = () => false, historyButton = () => null, visitId = () => null, messageState = createMessageState(), sidebar = null, renderText = markdown, marketCards = null, fixture = false, running = null, stepUI = null, dom = document, navigate = null, side = () => null, sidePanel = false, visible = () => true, listIsMain = () => true, missing = () => {} }) {
@@ -950,8 +950,8 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     } finally { answering.delete(requestId); redraw() }
   } })
   function forgetAnswers(o, requestId) { cards.questionDrafts.delete(requestId) }
-  function permission(p) {
-    return h('div', { class: 'approve tt-approval', key: `permission:${p.request_id}` },
+  function permission(p, { trailing = false } = {}) {
+    return h('div', { class: 'approve tt-approval', key: `permission:${p.request_id}`, ...(trailing ? { 'data-thread-trailing': 'true' } : {}) },
       h('div', { class: 'kicker', text: name(p.persona) }),
       p.kind === 'question' ? h('div', { class: 'question', role: 'form', 'aria-label': 'A question from the agent' }, ...cards.questionBody(p))
         : cards.askRow(p, { agentName: name(p.persona) }, ''))
@@ -1624,9 +1624,10 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
           button('Keep as a note', () => { o.note = null; redraw() }, { class: 'quietlink' }))] :
         button('Ask an agent to answer', () => { o.note.expanded = true; redraw() }, { class: 'quietlink' }))
   }
-  function messageRuns(messages) {
+  function messageRuns(messages, { beforeAll = [], afterById = new Map() } = {}) {
     const out = []
     let run = null
+    if (beforeAll.length) out.push(...beforeAll.map((p) => permission(p)))
     for (const m of messages) {
       if (m.id === st.open.firstUnseen && st.open.openingUnread > 0) {
         run = null
@@ -1634,24 +1635,37 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
           h('span', { class: 'tt-seen-count', text: `${st.open.openingUnread} new from the agents` })))
       }
       const failed = failedTurnInfo(m, { agentName: name, engineOf, providers: providerCatalog() })
-      if (failed) { run = null; out.push(failedTurnLine(m, failed)); continue }
-      const agent = m.kind !== 'system' && (st.open.thread.members.some((a) => a.persona === m.author) || catalog().some((a) => a.id === m.author))
-      if (agent && !showReply(st.open, m)) continue
-      if (!agent) { run = null; out.push(message(m), noteActions(m)); continue }
-      const labels = replyChip(m, fixtureProviders ?? providers())
-      const tooltip = [labels.provider, modelTooltip((fixtureProviders ?? providers()).find((p) => p.id === m.engine), m.model)].filter(Boolean).join(' · ')
-      const identity = JSON.stringify([m.author, m.engine, m.model, m.kind === 'bulletin', m.viewKey])
-      if (run?.identity !== identity) {
-        const node = h('section', { class: 'tt-author-run', key: `author:${m.viewKey ?? m.id}`, 'data-author': m.author, 'aria-label': name(m.author), style: { '--tt-author-tone': look(m.author).color } },
-          h('span', { class: 'tt-author-anchor', 'aria-hidden': 'true' }),
-          h('div', { class: 'tt-speaker' }, h('div', { class: 'tt-author-pill' }, avatar(m.author, 24), h('span', { class: 'tt-author-name', text: name(m.author) }),
-            labels.provider || labels.model ? h('span', { class: 'tt-author-meta', tabindex: '0', role: 'img', title: tooltip, 'aria-label': tooltip },
-              labels.provider ? h('span', { class: 'tt-author-provider' }, providerMark(m.engine, 12, providerGlyph(m.engine))) : null,
-              labels.model ? h('span', { class: 'tt-author-model', text: labels.model }) : null) : null,
-            m.kind === 'bulletin' ? h('span', { class: 'tag', text: 'woke' }) : null)))
-        run = { identity, node }; out.push(node)
+      if (failed) {
+        run = null
+        out.push(failedTurnLine(m, failed))
+      } else {
+        const agent = m.kind !== 'system' && (st.open.thread.members.some((a) => a.persona === m.author) || catalog().some((a) => a.id === m.author))
+        if (agent && !showReply(st.open, m)) continue
+        if (!agent) {
+          run = null
+          out.push(message(m), noteActions(m))
+        } else {
+          const labels = replyChip(m, fixtureProviders ?? providers())
+          const tooltip = [labels.provider, modelTooltip((fixtureProviders ?? providers()).find((p) => p.id === m.engine), m.model)].filter(Boolean).join(' · ')
+          const identity = JSON.stringify([m.author, m.engine, m.model, m.kind === 'bulletin', m.viewKey])
+          if (run?.identity !== identity) {
+            const node = h('section', { class: 'tt-author-run', key: `author:${m.viewKey ?? m.id}`, 'data-author': m.author, 'aria-label': name(m.author), style: { '--tt-author-tone': look(m.author).color } },
+              h('span', { class: 'tt-author-anchor', 'aria-hidden': 'true' }),
+              h('div', { class: 'tt-speaker' }, h('div', { class: 'tt-author-pill' }, avatar(m.author, 24), h('span', { class: 'tt-author-name', text: name(m.author) }),
+                labels.provider || labels.model ? h('span', { class: 'tt-author-meta', tabindex: '0', role: 'img', title: tooltip, 'aria-label': tooltip },
+                  labels.provider ? h('span', { class: 'tt-author-provider' }, providerMark(m.engine, 12, providerGlyph(m.engine))) : null,
+                  labels.model ? h('span', { class: 'tt-author-model', text: labels.model }) : null) : null,
+                m.kind === 'bulletin' ? h('span', { class: 'tag', text: 'woke' }) : null)))
+            run = { identity, node }; out.push(node)
+          }
+          run.node.appendChild(message(m))
+        }
       }
-      run.node.appendChild(message(m))
+      const anchored = afterById.get(m.id)
+      if (anchored?.length) {
+        run = null
+        out.push(...anchored.map((p) => permission(p)))
+      }
     }
     return out
   }
@@ -1949,8 +1963,16 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       text: item.body.text, reply_to: item.body.reply_to, reply_source: item.body.reply_thread ? item.reply : null, attachments: item.attachments, queued: item,
     }))
     const messages = pending.length ? withPending(o.messages, pending) : withPending(o.messages, o.pending)
+    const displayMessages = groupJoinNotices(withMarks(messages, o.marks), catalog())
+    const isMessageVisible = (m) => {
+      if (failedTurnInfo(m, { agentName: name, engineOf, providers: providerCatalog() })) return true
+      const agent = m.kind !== 'system' && (o.thread.members.some((a) => a.persona === m.author) || catalog().some((a) => a.id === m.author))
+      return !agent || showReply(o, m)
+    }
+    const placed = placePermissions(messages, displayMessages, unmatched, isMessageVisible)
     const messageRows = [
-      ...messageRuns(groupJoinNotices(withMarks(messages, o.marks), catalog())), ...unmatched.map(permission),
+      ...messageRuns(displayMessages, placed),
+      ...placed.trailing.map((p) => permission(p, { trailing: true })),
     ]
     const listeners = listeningFaces()
     o.listeningInset = listeningInset(o.listeners.size > 0, o.listeningInset, o.atEnd)

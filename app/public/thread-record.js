@@ -224,7 +224,13 @@ export function applyThreadEvent(open, e) {
     open.permissionState ??= createTranscript()
     apply(open.permissionState, { ...e, seq: undefined })
     const p = open.permissionState.permissions.find((p) => p.request_id === e.request_id)
-    if (p) open.permissions.set(e.request_id, { ...p, persona: e.persona, session_id: e.session_id, message_id: e.message_id })
+    if (p) {
+      const existing = open.permissions.get(e.request_id)
+      const after_message = existing && Object.hasOwn(existing, 'after_message')
+        ? existing.after_message
+        : (open.messages.findLast((m) => !m.streaming)?.id ?? null)
+      open.permissions.set(e.request_id, { ...p, persona: e.persona, session_id: e.session_id, message_id: e.message_id, after_message })
+    }
   }
   if (e.type === 'broker.permission_resolved') {
     open.permissionState ??= createTranscript()
@@ -268,6 +274,57 @@ export function withMarks(messages, marks) {
   return out
 }
 export function messageNumber(id) { return Number(String(id).match(/(\d+)$/)?.[1] ?? 0) }
+
+// Anchor unmatched permission and question cards where they were raised so
+// messages sent while a card is open land below it, in view at the bottom.
+// A card raised during a persona's still-streaming draft sits below that draft
+// until another message lands after its anchor, then stays at the anchor.
+export function placePermissions(messages, displayMessages, permissions, isVisible = () => true) {
+  const beforeAll = [], afterById = new Map(), trailing = []
+  if (!permissions?.length) return { beforeAll, afterById, trailing }
+  const visible = displayMessages.filter((m) => isVisible(m))
+  const visibleIndex = new Map(visible.map((m, i) => [m.id, i]))
+  const firstDurable = messages.find((m) => !m.streaming && /\d+$/.test(String(m.id)))
+  const addAfter = (id, p) => {
+    let list = afterById.get(id)
+    if (!list) { list = []; afterById.set(id, list) }
+    list.push(p)
+  }
+  for (const p of permissions) {
+    if (!Object.hasOwn(p, 'after_message') || p.after_message === undefined) {
+      trailing.push(p)
+      continue
+    }
+    if (p.after_message === null) {
+      const first = visible[0]
+      if (first?.streaming && first.author === p.persona) addAfter(first.id, p)
+      else beforeAll.push(p)
+      continue
+    }
+    let anchorId = null
+    if (visibleIndex.has(p.after_message)) {
+      anchorId = p.after_message
+    } else {
+      const idx = messages.findIndex((m) => m.id === p.after_message)
+      if (idx >= 0) {
+        for (let j = idx - 1; j >= 0; j--) {
+          if (visibleIndex.has(messages[j].id)) { anchorId = messages[j].id; break }
+        }
+        if (anchorId === null) { beforeAll.push(p); continue }
+      } else if (firstDurable && /\d+$/.test(String(p.after_message)) && messageNumber(p.after_message) < messageNumber(firstDurable.id)) {
+        beforeAll.push(p)
+        continue
+      } else {
+        trailing.push(p)
+        continue
+      }
+    }
+    const next = visible[visibleIndex.get(anchorId) + 1]
+    if (next?.streaming && next.author === p.persona) anchorId = next.id
+    addAfter(anchorId, p)
+  }
+  return { beforeAll, afterById, trailing }
+}
 
 export function recentMembers(thread, messages = []) {
   const spoke = new Map()

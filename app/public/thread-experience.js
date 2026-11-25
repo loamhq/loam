@@ -132,6 +132,7 @@ export function replyHasContent(message) {
 export function showReply(open, message) {
   if (replyHasContent(message)) return true
   if ([...open.permissions.values()].some((p) => p.message_id === message.id)) return true
+  if ([...open.permissions.values()].some((p) => p.persona === message.author)) return false
   return Boolean(message.streaming && memberGenerating(open, message.author))
 }
 
