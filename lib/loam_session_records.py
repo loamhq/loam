@@ -95,21 +95,67 @@ def from_log(path: Path) -> dict:
     return found
 
 
+def _tail_last_seq(path: Path, chunk: int = 65536) -> int:
+    """Return the last integer ``seq`` in ``path`` by reading backward from EOF.
+    Avoids re-parsing multi-gigabyte journals on startup when catalog fields are
+    already present."""
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return 0
+    if size <= 0:
+        return 0
+    try:
+        with path.open("rb") as fh:
+            pos = size
+            buf = b""
+            while pos > 0:
+                step = min(chunk, pos)
+                pos -= step
+                fh.seek(pos)
+                buf = fh.read(step) + buf
+                parts = buf.split(b"\n")
+                if pos > 0:
+                    complete, buf = parts[1:], parts[0]
+                else:
+                    complete, buf = parts, b""
+                for raw in reversed(complete):
+                    raw = raw.strip()
+                    if not raw:
+                        continue
+                    try:
+                        event = json.loads(raw)
+                    except (UnicodeDecodeError, ValueError):
+                        continue
+                    if not isinstance(event, dict):
+                        continue
+                    seq = event.get("seq")
+                    if isinstance(seq, int) and not isinstance(seq, bool):
+                        return seq
+    except OSError:
+        return 0
+    return 0
+
+
 def backfill(meta: dict, log_path: Path) -> bool:
     """Fill missing fields without overwriting stored titles, replies or status.
     Advance the sequence to the journal maximum so a resumed session cannot reuse it."""
-    found = from_log(log_path)
     before = dict(meta)
-    if not meta.get("title") and found["title"]:
-        meta["title"] = found["title"]
-    if not meta.get("last_message") and found["last_message"]:
-        meta["last_message"] = found["last_message"]
-    # The journal result distinguishes success from failure when status is missing.
-    if not meta.get("status") and found["result_ok"] is not None:
-        meta["status"] = "done" if found["result_ok"] else "failed"
+    if meta.get("title") and meta.get("last_message") and meta.get("status"):
+        last_seq = _tail_last_seq(log_path)
+    else:
+        found = from_log(log_path)
+        if not meta.get("title") and found["title"]:
+            meta["title"] = found["title"]
+        if not meta.get("last_message") and found["last_message"]:
+            meta["last_message"] = found["last_message"]
+        # The journal result distinguishes success from failure when status is missing.
+        if not meta.get("status") and found["result_ok"] is not None:
+            meta["status"] = "done" if found["result_ok"] else "failed"
+        last_seq = found["last_seq"]
     position = int(meta.get("record_seq") or meta.get("seq") or 0)
     meta.pop("seq", None)
-    meta["record_seq"] = max(position, found["last_seq"])
+    meta["record_seq"] = max(position, last_seq)
     return meta != before
 
 

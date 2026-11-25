@@ -217,6 +217,41 @@ async def main() -> None:
     check("a second start finds nothing left to fill",
           broker_mod.backfill_records()[1], 0)
 
+    # Complete records skip full-journal scans via tail reading, including
+    # multi-chunk (>64 KiB) lines, trailing non-seq lines, and lagging record_seq.
+    import loam_session_records as sr
+    big_log = cfg.SESSION_DIR / "complete_big.jsonl"
+    big_meta = {
+        "session_id": "complete_big", "agent": "ada", "state": "exited",
+        "title": "Already titled", "last_message": "Already answered",
+        "status": "done", "record_seq": 1,
+    }
+    big_log.write_text(
+        json.dumps({"type": "user", "seq": 1, "pad": "a" * 80000}) + "\n"
+        + json.dumps({"type": "assistant", "seq": 7, "pad": "b" * 70000}) + "\n"
+        + '{"type":"note","seq":true}\n'
+        + "not-json-at-eof\n",
+        encoding="utf-8",
+    )
+    orig_from_log = sr.from_log
+    from_log_calls = 0
+
+    def _forbid_from_log(path: Path) -> dict:
+        nonlocal from_log_calls
+        from_log_calls += 1
+        return orig_from_log(path)
+
+    sr.from_log = _forbid_from_log
+    try:
+        advanced = sr.backfill(big_meta, big_log)
+        unchanged = sr.backfill(big_meta, big_log)
+    finally:
+        sr.from_log = orig_from_log
+    check("complete record advances record_seq from multi-chunk tail",
+          (advanced, big_meta["record_seq"]), (True, 7))
+    check("complete record at head of tail is unchanged", unchanged, False)
+    check("complete record never triggers full from_log scan", from_log_calls, 0)
+
     # And it is what the listing answers, which is the point of all of it.
     broker = broker_mod.Broker()
     server = broker_mod.Server(broker)
