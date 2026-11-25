@@ -3282,3 +3282,26 @@ listener for immediate notification in an open page.
   stopping `docker.service` and `containerd.service`. `lib/loam_update.py`
   removes the watcher units automatically when rolling back to a release whose
   `browser-proxy` predates `--after-idle`.
+
+## 2026-11-25 — Browser MCP at v0.0.86 (and bundled proxy schema)
+
+- **Pin & bundled proxy schema move together.** `BROWSER_IMAGE` in
+  `lib/loam_deploy.py` now pins `mcr.microsoft.com/playwright/mcp:v0.0.86`
+  (`Playwright 1.66.0-alpha-2026-11-18`, Ubuntu 24.04.5 LTS Noble + Node
+  `v26.13.1`, Mesa packages bumped `25.2.8-0ubuntu0.24.04.4` → `.5`). When
+  bumping `BROWSER_IMAGE`, also refresh `deploy/browser-tools.json` and the
+  fallback `serverInfo.version` in `lib/loam_browser_proxy.py` so the
+  lazy-wake proxy serves the matching schema before the first `tools/call`
+  and its `code_fingerprint()` triggers a clean reconcile.
+- **Zero tool/parameter surface expansion.** `--help` adds only
+  `--session-name` and `--session-color` (both `--extension` tab-group flags).
+  All 25 default tools and every parameter schema and annotation are identical
+  to v0.0.85; only `browser_close`'s description changed (`Close the page` →
+  `Close the browser and all open tabs.`). `browser_run_code_unsafe` remains
+  in the server's default 25 and out of agent sessions via the per-agent
+  deny rule (24 visible tools).
+- **WebMCP & download behavior verified.** `--no-webmcp` still short-circuits
+  `updateWebMCPTools()` (`coreBundle.js:67461`) alongside Chromium's missing
+  `--enable-features=WebMCP` gate (`coreBundle.js:24725`). Repeated downloads
+  suggesting the same filename now save distinct files (`name.txt`,
+  `name-1.txt`) in `BROWSER_OUTPUT` instead of overwriting.

@@ -821,7 +821,7 @@ in `bin/provision`), rendered from the deployment records.
     browser flag needed. `--no-webmcp` turns that off: on 2026-10-06 a test
     page's `webmcp_loam_probe` was listed and ran without the flag, and with
     it the tool list stayed at the image's 25 (again on v0.0.83, 2026-10-28,
-    and v0.0.85, 2026-11-14).
+    v0.0.85, 2026-11-14, and v0.0.86, 2026-11-25).
   - *Chromium's sandbox* is off (`--no-sandbox`, which the image's own
     entrypoint also passes); the container's own walls are `cap_drop: ALL`,
     `no-new-privileges` and the network above. Same on v0.0.80 to v0.0.83,
