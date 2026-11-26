@@ -1169,11 +1169,15 @@ def main() -> int:
         hook_path = ws / agy.HOOKS_FILE
         expected = agy.images_hook() if "images" in prov.antigravity_mcp(name, ws)["mcpServers"] else None
         try:
-            if agy.workspace_hooks(ws).get(agy.IMAGES_HOOK) != expected:
+            live_hooks = agy.workspace_hooks(ws)
+            if live_hooks.get(agy.IMAGES_HOOK) != expected:
                 findings.append((f"{name} Antigravity Images hook", str(hook_path),
                                  f"Run bin/provision --antigravity {name}."))
+            if live_hooks.get(agy.LOADING_SIZE_HOOK) != agy.loading_size_hook():
+                findings.append((f"{name} Antigravity loading-size hook", str(hook_path),
+                                 f"Run bin/provision --antigravity {name}."))
         except (OSError, ValueError) as exc:
-            findings.append((f"{name} Antigravity Images hook", str(hook_path), str(exc)))
+            findings.append((f"{name} Antigravity hooks", str(hook_path), str(exc)))
 
         # agent.json against what provision renders. The display name and
         # the default provider, model and thinking level are the profile's

@@ -4443,7 +4443,8 @@ relay should spell them `/^\/agents\/([^/]+)$/`, `rest === '/engineers'`,
   "files": {
     "workspace": {"root": "spaces", "path": "ada", "exists": true},
     "soul":   {"root": "spaces", "path": "ada/soul.md", "exists": true},
-    "config": {"root": "spaces", "path": "ada/config.md", "exists": true},
+    "understanding": {"root": "spaces", "path": "ada/understanding.md", "exists": true},
+    "config": {"root": "spaces", "path": "ada/config.md", "exists": false},
     "memory": {"map":        {"root": "spaces", "path": "ada/map.md", "exists": true},
                "folder":     {"root": "spaces", "path": "ada/memory", "exists": true}},
     "skills": {"root": "spaces", "path": "ada/skills", "exists": true,
@@ -4768,21 +4769,22 @@ when the starter agent is not awake. The person writes first.
   ```json
   {"draft": "d-3f9c2a1b", "rev": 1, "by": "iris", "thread": "t-6daf5a6f",
    "id": "juniper", "name": "Juniper",
-   "soul": "...", "config": "...", "wake": null, "provider": null,
+   "soul": "...", "understanding": "...", "wake": null, "provider": null,
    "created": "2026-11-14T23:10:00Z", "updated": "2026-11-14T23:10:00Z",
-   "revisions": [{"rev": 1, "at": "...", "by": "iris", "fields": ["config", "name", "soul", "thread"]}],
+   "revisions": [{"rev": 1, "at": "...", "by": "iris", "fields": ["name", "soul", "thread", "understanding"]}],
    "problems": [], "ready": true,
-   "fleet_clauses": ["Namespace boundaries", "Deletion judgment", "..."]}
+   "fleet_clauses": []}
   ```
 
   `problems` says what stands between the draft and an agent (an id or name
-  taken by any agent, archived ones included; a reserved id; no soul or
-  config); an `emoji` field is refused, 400 (retired 2026-11-16: the face
-  is the theme's until an image is uploaded); `ready` is true when there are none. `fleet_clauses` are
-  the clauses every agent's config carries, which the made `config.md`
-  starts with (below). The thread gets a Loam line: "Iris drafted a new
-  agent: Juniper (draft d-3f9c2a1b, revision 1)". How to draft one (a
-  character, never a job) is the library skill `loam-making-an-agent`.
+  taken by any agent, archived ones included; a reserved id; no soul);
+  `understanding` is optional (empty if omitted; legacy in-flight drafts
+  carrying `config` still confirm into `understanding.md`). An `emoji` field
+  is refused, 400 (retired 2026-11-16: the face is the theme's until an image
+  is uploaded); `ready` is true when there are none. The thread gets a Loam
+  line: "Iris drafted a new agent: Juniper (draft d-3f9c2a1b, revision 1)".
+  How to draft one (a character, never a job) is the library skill
+  `loam-making-an-agent`.
 - `GET /v1/agents/drafts[?thread=<id>]` — `{"drafts": [...]}`, open drafts
   only.
 - `GET /v1/agents/drafts/<draft>` — one draft, made or not.
@@ -4805,12 +4807,9 @@ a draft with problems, or one already made. 201:
  "draft": {"...": "the draft, with made, made_at and yes"}}
 ```
 
-Made: the workspace with `soul.md` (verbatim), `config.md` (the fleet's
-shared clauses, copied from the configs on the box with the new agent's
-name, then the draft's own text under "Its own rules" and its own `##`
-clauses; a clause of the draft that has a fleet clause's title gives way to
-the fleet's), `map.md`, `memory/`, `skills/`,
-`crons/`, `threads/`; `agent.json` with the name and face; then
+Made: the workspace with `soul.md` (verbatim), `understanding.md` (the
+draft's `understanding` — or legacy `config` — verbatim, or empty), `map.md`,
+`memory/`, `skills/`, `crons/`, `threads/`; `agent.json` with the name and face; then
 `bin/provision <id> <wake>` (Claude Code, Codex and Antigravity files, the
 reflection record and its timer). Provision holds Loam's live lock, so a confirm made while a landing
 of Loam is in progress waits for it (up to 20 minutes) before it answers. It

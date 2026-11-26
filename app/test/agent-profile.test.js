@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { once } from 'node:events'
-import { createProfiles, profileStatus } from '../public/agent-profile.js'
+import { createProfiles, mountProfile, profileStatus } from '../public/agent-profile.js'
 import { createApp } from '../src/server.js'
 import { readConfig } from '../src/config.js'
 import { fakeBroker, appAgainst, closing, TOKEN } from './harness.js'
@@ -181,4 +181,54 @@ test('compact Recent caps a mixed feed at four consistent rows and preserves cha
   assert.equal(all(full, 'activity-item').length, 6)
   assert.ok(all(full, 'activity-day-title').length > 0)
   assert.ok(all(full, 'activity-job-context').length > 0)
+})
+
+test('agent profile Files tab shows Understanding when present and omits absent legacy Config', () => {
+  installDom()
+  const ref = (path, exists = true) => ({ root: 'spaces', path, exists })
+  const titlesFor = (files) => {
+    const profiles = {
+      st: {
+        target: { kind: 'agent', id: 'iris' },
+        tab: 'Files',
+        page: 1,
+        data: {
+          identity: { display: 'Iris', face: null, archived: false },
+          status: {},
+          files: {
+            workspace: ref('iris'),
+            soul: ref('iris/soul.md'),
+            memory: { map: ref('iris/map.md'), folder: ref('iris/memory') },
+            skills: { ...ref('iris/skills'), count: 1 },
+            ...files,
+          },
+          schedule: [],
+          plugins: [],
+        },
+      },
+    }
+    const host = {
+      profiles,
+      profileActivity: { view: () => h('div') },
+      state: { agents: { list: [{ id: 'iris', name: 'Iris' }] }, providers: [] },
+      threads: { st: { threads: [] }, create() {}, row: () => h('div') },
+      registry: { entries: () => [] },
+      schedule() {},
+      goFiles() {},
+    }
+    const root = h('div', {}, mountProfile(host).body('iris'))
+    return all(root, 'setrow-title').map(text)
+  }
+  assert.deepEqual(
+    titlesFor({ understanding: ref('iris/understanding.md', true), config: ref('iris/config.md', false) }),
+    ['Open workspace', 'Soul', 'Understanding', 'Every run', 'Memory folder', 'Skills'],
+  )
+  assert.deepEqual(
+    titlesFor({ understanding: ref('iris/understanding.md', false), config: ref('iris/config.md', true) }),
+    ['Open workspace', 'Soul', 'Config', 'Every run', 'Memory folder', 'Skills'],
+  )
+  assert.deepEqual(
+    titlesFor({ understanding: ref('iris/understanding.md', true), config: ref('iris/config.md', true) }),
+    ['Open workspace', 'Soul', 'Understanding', 'Config', 'Every run', 'Memory folder', 'Skills'],
+  )
 })

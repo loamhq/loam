@@ -26,10 +26,6 @@ from pathlib import Path
 
 import loam_config as lc
 
-# `About me.md`'s name (lib/loam_skills.py, which seeds it; not imported, to
-# keep this module light).
-ABOUT_ME = "About me.md"
-
 ARCHIVE_KEY = "archived"
 FACE_KEY = "face"
 FACE_SLOT_KEY = "face_slot"
@@ -41,7 +37,7 @@ RESERVED_IDS = frozenset({
     "everyone", "system", "loam", "engineer", "engineers", "reviewer",
     "owner", "me", "you", lc.OWNER_ID, *lc.LEGACY_OWNER_IDS})
 ID_RE = re.compile(r"^[a-z][a-z0-9-]{1,23}$")
-TEXT_MAX = 64 * 1024            # a soul or a config, in bytes
+TEXT_MAX = 64 * 1024            # a soul or an understanding page, in bytes
 LAYER_MAX = 64 * 1024
 FACE_MAX = 2 * 1024 * 1024      # an uploaded face, in bytes
 FACE_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp",
@@ -49,8 +45,10 @@ FACE_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp",
 YES_WINDOW = timedelta(minutes=30)
 # The starter agent, which "New agent" opens a thread with.
 STARTER = lc.get("agents.starter", "iris")
-# Where the agent's soul and config come from, as fields of a draft.
-DRAFT_TEXT = ("soul", "config", "map")
+# Where the agent's soul, first understanding and map come from, as fields of a draft.
+DRAFT_TEXT = ("soul", "understanding", "map")
+# Accepted for in-flight drafts written before understanding.md replaced config.md.
+LEGACY_DRAFT_TEXT = ("config",)
 DRAFT_FIELDS = ("id", "name", "about", "provider", "wake", *DRAFT_TEXT)
 # The draft card describes the agent in the third person. This text is discarded on creation.
 ABOUT_MAX = 200
@@ -617,7 +615,7 @@ def _from_file(field: str, path, by: str | None) -> str:
 
 def _clean_fields(patch: dict, draft: dict, by: str | None) -> dict:
     out = {}
-    for field in DRAFT_TEXT:
+    for field in (*DRAFT_TEXT, *LEGACY_DRAFT_TEXT):
         if f"{field}_file" in patch:
             patch = {**patch, field: _from_file(field, patch[f"{field}_file"], by)}
     if "name" in patch:
@@ -650,9 +648,17 @@ def _clean_fields(patch: dict, draft: dict, by: str | None) -> dict:
             raise AgentsError("`wake` is the nightly wake's time, HH:MM, or null for "
                               "a free one")
         out["wake"] = v
-    for field in ("soul", "config"):
+    if "soul" in patch:
+        out["soul"] = _clean_text("soul", patch["soul"], TEXT_MAX)
+    for field in ("understanding", "config"):
         if field in patch:
-            out[field] = _clean_text(field, patch[field], TEXT_MAX)
+            v = patch[field]
+            if v is None or (isinstance(v, str) and not v.strip()):
+                out[field] = None
+            else:
+                out[field] = _clean_text(field, v, TEXT_MAX)
+    if "understanding" in out and "config" not in out and "config" in draft:
+        out["config"] = None
     for field in ("map",):
         if field in patch:
             out[field] = (None if patch[field] is None
@@ -686,9 +692,8 @@ def check_new(draft: dict) -> list[str]:
                             f"not know which of them it meant")
     if (draft.get("name") or "").lower() in RESERVED_IDS:
         problems.append(f"{draft['name']!r} is a word the threads keep for themselves")
-    for field in ("soul", "config"):
-        if not draft.get(field):
-            problems.append(f"it has no {field}")
+    if not draft.get("soul"):
+        problems.append("it has no soul")
     return problems
 
 
@@ -758,12 +763,13 @@ def new_draft(payload: dict, by: str | None) -> dict:
     payload = dict(payload or {})
     thread = payload.pop("thread", None)
     payload.pop("by", None)
-    unknown = sorted(set(payload) - set(DRAFT_FIELDS)
-                     - {f"{f}_file" for f in DRAFT_TEXT})
+    allowed = (set(DRAFT_FIELDS) | set(LEGACY_DRAFT_TEXT)
+               | {f"{f}_file" for f in (*DRAFT_TEXT, *LEGACY_DRAFT_TEXT)})
+    unknown = sorted(set(payload) - allowed)
     _refuse_retired(unknown)
     if unknown:
         raise AgentsError(f"a draft has no field {', '.join(unknown)}; it takes "
-                          f"{', '.join(DRAFT_FIELDS)} (soul, config and map "
+                          f"{', '.join(DRAFT_FIELDS)} (soul, understanding and map "
                           f"also as <field>_file)")
     if by and not thread:
         raise AgentsError("pass `thread`: the thread you are drafting in, where "
@@ -789,7 +795,9 @@ def new_draft(payload: dict, by: str | None) -> dict:
 
 def revise(draft_id: str, patch: dict, by: str | None) -> dict:
     patch = {k: v for k, v in (patch or {}).items() if k not in ("by", "thread")}
-    unknown = sorted(set(patch) - set(DRAFT_FIELDS) - {f"{f}_file" for f in DRAFT_TEXT})
+    allowed = (set(DRAFT_FIELDS) | set(LEGACY_DRAFT_TEXT)
+               | {f"{f}_file" for f in (*DRAFT_TEXT, *LEGACY_DRAFT_TEXT)})
+    unknown = sorted(set(patch) - allowed)
     _refuse_retired(unknown)
     if unknown:
         raise AgentsError(f"a draft has no field {', '.join(unknown)}")
@@ -1005,10 +1013,11 @@ def make(agent: str, draft: dict, wake: str, *, provision=None) -> dict:
     import loam_loading  # noqa: PLC0415
     (ws / loam_loading.MAP).write_text(
         draft.get("map") or loam_loading.MAP_SEED, encoding="utf-8")
-    config_text = draft["config"] if draft["config"].endswith("\n") else draft["config"] + "\n"
-    (ws / "config.md").write_text(config_text, encoding="utf-8")
+    raw_page = draft.get("understanding") or draft.get("config") or ""
+    page_text = ((raw_page if raw_page.endswith("\n") else raw_page + "\n")
+                 if raw_page.strip() else "")
+    (ws / loam_loading.UNDERSTANDING).write_text(page_text, encoding="utf-8")
     fleet: list[str] = []
-    loam_loading.ensure_owner_page()
     config = {"name": agent, "display": draft["name"],
               "workspace": str(ws), "vault": str(lc.VAULT)}
     if draft.get("provider"):

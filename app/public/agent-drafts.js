@@ -159,11 +159,11 @@ export function createAgentDrafts({
 
   // The review is a card in the thread's flow, after the line that says the
   // draft was made, where the agent says it is ("below"): the face and name,
-  // one plain line of who they are (draftLine), the whole soul and config rendered behind
-  // one fold, then Create and Ask for changes. A revision number is shown only
-  // once there is more than one ("2nd draft"); the draft's id never is.
-  // Closing hides the card without discarding the draft; a later revision brings
-  // it back collapsed so the person never misses updated work.
+  // one plain line of who they are (draftLine), the whole soul and understanding
+  // rendered behind one fold, then Create and Ask for changes. A revision number
+  // is shown only once there is more than one ("2nd draft"); the draft's id never
+  // is. Closing hides the card without discarding the draft; a later revision
+  // brings it back collapsed so the person never misses updated work.
   function card(d) {
     const id = d.id || d.draft || 'new-agent'
     const name = d.name || 'Your new agent'
@@ -172,7 +172,7 @@ export function createAgentDrafts({
     const draftLabel = ordinalDraft(d.rev)
     const expanded = st.expanded.has(d.draft)
     const soulText = withoutTitle(stripFrontmatter(d.soul), name)
-    const configText = stripFrontmatter(d.config)
+    const understandingText = stripFrontmatter(d.understanding ?? d.config)
     const toggle = () => {
       const next = !expanded
       if (next) st.expanded.add(d.draft); else st.expanded.delete(d.draft)
@@ -201,7 +201,7 @@ export function createAgentDrafts({
           disabled: st.busy,
           onclick: () => dismiss(d),
         }, icon.close(16))),
-      soulText || configText ? h('button', {
+      soulText || understandingText ? h('button', {
         type: 'button',
         class: 'quietlink agent-draft-more',
         'aria-expanded': String(expanded),
@@ -211,9 +211,9 @@ export function createAgentDrafts({
         soulText ? h('section', { class: 'agent-draft-doc', 'aria-label': 'Soul' },
           h('h4', { class: 'kicker', text: 'Who they are' }),
           h('div', { class: 'md' }, renderText(soulText))) : null,
-        configText ? h('section', { class: 'agent-draft-doc', 'aria-label': 'Config' },
-          h('h4', { class: 'kicker', text: 'How they work' }),
-          h('div', { class: 'md' }, renderText(configText))) : null) : null,
+        understandingText ? h('section', { class: 'agent-draft-doc', 'aria-label': 'Understanding' },
+          h('h4', { class: 'kicker', text: 'Their understanding' }),
+          h('div', { class: 'md' }, renderText(understandingText))) : null) : null,
       ...(d.problems || []).map(problem => h('p', { class: 'note warn', text: typeof problem === 'string' ? problem : problem?.message ?? JSON.stringify(problem) })),
       st.busy ? h('p', { class: 'note', role: 'status', text: `Making ${name}… This can take up to 20 minutes. Keep this page open.` }) : null,
       h('div', { class: 'agent-draft-actions' },

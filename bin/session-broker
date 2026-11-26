@@ -3007,7 +3007,7 @@ class Server:
                 meta = threads_rec.create(starter, "New agent")
                 self.agents_line(meta["id"], (
                     f"New agent. Tell {say(starter)} who you'd like: "
-                    f"{say(starter)} drafts their name, face, soul and config, "
+                    f"{say(starter)} drafts their name, soul and understanding, "
                     f"shows you, changes it on your word, and makes them only "
                     f"when you say yes. ({say(starter)}: `settings describe "
                     f"agent.draft` says how; this thread is `{meta['id']}`.)"))

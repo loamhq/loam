@@ -265,3 +265,42 @@ test('sending a message or receiving a turn/reply collapses an expanded draft ca
   assert.equal(returned.getAttribute('data-expanded'), 'false')
   assert.equal(text(find(returned, 'agent-draft-rev')), '2nd draft')
 })
+
+test('draft card shows understanding page, supports legacy in-flight config drafts, and handles soul-only drafts', async () => {
+  const cases = [
+    {
+      label: 'understanding draft',
+      draft: sampleDraft({ understanding: 'Prefers direct feedback and short notes.', config: undefined }),
+      expectCount: 2,
+      expectText: 'Prefers direct feedback and short notes.',
+    },
+    {
+      label: 'legacy config draft',
+      draft: sampleDraft({ understanding: undefined, config: 'Legacy rules text.' }),
+      expectCount: 2,
+      expectText: 'Legacy rules text.',
+    },
+    {
+      label: 'soul-only draft',
+      draft: sampleDraft({ understanding: undefined, config: undefined }),
+      expectCount: 1,
+      expectText: null,
+    },
+  ]
+  for (const tc of cases) {
+    const c = createAgentDrafts({
+      api: async () => ({ drafts: [tc.draft] }),
+      redraw() {},
+      storage: memoryStorage(),
+    })
+    await c.load('t-1')
+    find(find(c.view('t-1'), 'agent-draft-card'), 'agent-draft-more').fire('click')
+    const docs = all(find(c.view('t-1'), 'agent-draft-full'), 'agent-draft-doc')
+    assert.equal(docs.length, tc.expectCount, tc.label)
+    if (tc.expectText) {
+      assert.equal(docs[1].getAttribute('aria-label'), 'Understanding')
+      assert.equal(text(find(docs[1], 'kicker')), 'Their understanding')
+      assert.match(text(docs[1]), new RegExp(tc.expectText))
+    }
+  }
+})

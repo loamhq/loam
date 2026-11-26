@@ -27,10 +27,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 from loam_memory import (  # noqa: E402
     LIMIT_CHARS,
+    UNDERSTANDING_MARK_CHARS,
     LayerError,
     is_auto_loaded,
+    is_understanding,
     load_config,
     project_dir_from,
+    understanding_notice,
 )
 
 # Each tool that leaves content at a path, and the field naming that path.
@@ -87,7 +90,17 @@ def warnings_for(raw: str, workspace: Path | None) -> list[str]:
             f"{raw!r} has {''.join(bad)!r} in its filename, which Android "
             f"cannot store: the file will never reach the phone. Rename it "
             f"(mcp__loam__move_file) if it should.")
-    if workspace is None or not is_auto_loaded(path, workspace):
+    if workspace is None:
+        return out
+    if is_understanding(path, workspace):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return out
+        if len(text) > UNDERSTANDING_MARK_CHARS:
+            out.append(understanding_notice(raw, len(text)))
+        return out
+    if not is_auto_loaded(path, workspace):
         return out
     try:
         text = path.read_text(encoding="utf-8")

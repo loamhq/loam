@@ -294,7 +294,9 @@ export function mountProfile(host, { controller = host.profiles, activity = host
     const chooseTab = tab => { st.tab = tab; st.edit = null; st.faceMenu = false; st.menu = false; host.schedule() }
     const faceSrc = data.identity.face === null ? null : data.identity.face?.url?.replace(/^\/v1\//, '/api/') || look.imageSrc
     const upload = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif', hidden: true, 'aria-label': 'Upload face', onchange: e => { const f = e.target.files[0]; if (f) c.face(f); e.target.value = '' } })
-    const files = [file('Open workspace', data.files.workspace, null, null, { folder: true }), file('Soul', data.files.soul), file('Config', data.files.config),
+    const files = [file('Open workspace', data.files.workspace, null, null, { folder: true }), file('Soul', data.files.soul),
+      data.files.understanding && data.files.understanding.exists !== false ? file('Understanding', data.files.understanding) : null,
+      data.files.config && data.files.config.exists !== false ? file('Config', data.files.config) : null,
       group('Memory', Object.entries(data.files.memory || {}).map(([key, ref]) => file(({ map: 'Every run', folder: 'Memory folder' })[key] || key, ref, null, null, { folder: key === 'folder' }))),
       file('Skills', data.files.skills, null, h('span', { class: 'setrow-value', text: String(data.files.skills?.count ?? '') }), { folder: true })]
     return [h('div', { class: 'agent-profile', key: `agent-profile:${agent}` },

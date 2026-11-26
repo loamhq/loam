@@ -239,7 +239,7 @@ async def main():
         out = await cli(port, "do", "agent.draft",
                         json.dumps({"thread": tid, "name": "Juniper",
                                     "soul_file": "draft-soul.md",
-                                    "config": "Juniper's config.\n"}))
+                                    "understanding": "Juniper's first reading.\n"}))
         ans = out.get("answer", {})
         draft = ans.get("draft")
         check("a draft from a soul file in the drafter's workspace is ready",
@@ -274,10 +274,10 @@ async def main():
         early = server.threads.post_person(tid, "Sounds nice")
         await asyncio.sleep(1.1)
         out = await cli(port, "do", "agent.revise",
-                        json.dumps({"config": "Juniper's own config.\n"}), "--target", draft)
+                        json.dumps({"understanding": "Juniper's revised understanding.\n"}), "--target", draft)
         check("a revision is numbered", out.get("ok")
               and out["answer"].get("rev") == 2
-              and out["answer"].get("config") == "Juniper's own config.\n", out)
+              and out["answer"].get("understanding") == "Juniper's revised understanding.\n", out)
         out = await cli(port, "do", "agent.revise",
                         json.dumps({"emoji": "🌲"}), "--target", draft)
         check("...and a revision with an emoji is refused: retired",
@@ -323,18 +323,17 @@ async def main():
         ws = LABS / "juniper"
         check("the soul is the draft's, verbatim",
               (ws / "soul.md").read_text() == "# Juniper\n\nI am Juniper. I tend things.\n")
-        made_config = (ws / "config.md").read_text()
-        # The new workspace must retain the draft's exact config and use mapped loading.
-        check("the config is the draft's own, verbatim (no fleet clauses)",
-              made_config == "Juniper's own config.\n", made_config)
+        made_understanding = (ws / "understanding.md").read_text()
+        check("the understanding page is the draft's own, verbatim, and no config.md is created",
+              made_understanding == "Juniper's revised understanding.\n"
+              and not (ws / "config.md").exists(), made_understanding)
         check("a map, seeded with its one line",
               (ws / "map.md").read_text() == loam_loading.MAP_SEED)
         check("none of _always.md, _active.md, _reflection.md",
               not any((ws / f).exists() for f in
                       ("_always.md", "_active.md", "_reflection.md")))
-        check("the owner's shared page exists for its import",
-              loam_loading.owner_page().is_file()
-              and loam_loading.owner_page().is_relative_to(LABS))
+        check("no shared owner page is created on a fresh install",
+              not loam_loading.owner_page().exists())
         check("agent.json carries its name and no emoji, in the one order",
               card("juniper")["display"] == "Juniper" and "emoji" not in card("juniper")
               and list(card("juniper"))[:3] == ["name", "display", "workspace"], card("juniper"))
@@ -371,22 +370,42 @@ async def main():
         check("a yes is taken once", not out.get("ok")
               and "taken once" in out.get("error", ""), out)
 
-        # One approval applies to the revision shown in the thread.
+        # One approval applies to the revision shown in the thread (including a soul-only draft).
         status, body = await http(port, "POST", "/v1/agents/new", {})
         t1 = body["id"]
         out = await cli(port, "do", "agent.draft",
-                        json.dumps({"thread": t1, "name": "Wren", "soul": "# Wren\n\nDry.\n",
-                                    "config": "Wren's config.\n"}))
+                        json.dumps({"thread": t1, "name": "Wren", "soul": "# Wren\n\nDry.\n"}))
         d1 = out.get("answer", {}).get("draft")
         threads.append(t1, "iris", "Here is Wren, as drafted: dry, direct. Shall I make her?")
         only = server.threads.post_person(t1, "Yes, make Wren")
         out = await cli(port, "do", "agent.confirm",
                         json.dumps({"rev": 1, "yes": only["id"]}), "--target", d1)
-        check("draft, then show, then one yes: the agent is made on it",
-              out.get("ok") and out["answer"]["agent"]["id"] == "wren", out)
+        check("draft (soul only), then show, then one yes: made with empty understanding.md and no config.md",
+              out.get("ok") and out["answer"]["agent"]["id"] == "wren"
+              and (LABS / "wren" / "understanding.md").read_text() == ""
+              and not (LABS / "wren" / "config.md").exists(), out)
         check("...and the person said yes once",
               [m["text"] for m in threads.read(t1)[1]
                if loam_agents.lc.is_owner(m.get("author"))], ["Yes, make Wren"])
+
+        # An in-flight legacy draft (saved on disk before the update with `config` and no
+        # `understanding`) must still list as ready and confirm cleanly.
+        status, body = await http(port, "POST", "/v1/agents/new", {})
+        t_leg = body["id"]
+        leg_id = "d-11223344"
+        loam_agents._write_json(loam_agents.draft_path(leg_id), {
+            "draft": leg_id, "rev": 1, "by": "iris", "thread": t_leg,
+            "created": "2026-11-24T00:00:00Z", "updated": "2026-11-24T00:00:00Z",
+            "id": "cedar", "name": "Cedar", "soul": "# Cedar\n\nSteady.\n",
+            "config": "Legacy in-flight draft notes.\n", "revisions": [],
+        })
+        leg_yes = server.threads.post_person(t_leg, "Yes, create Cedar")
+        out = await cli(port, "do", "agent.confirm",
+                        json.dumps({"rev": 1, "yes": leg_yes["id"]}), "--target", leg_id)
+        check("an in-flight legacy draft with config still confirms into understanding.md",
+              out.get("ok") and out["answer"]["agent"]["id"] == "cedar"
+              and (LABS / "cedar" / "understanding.md").read_text() == "Legacy in-flight draft notes.\n"
+              and not (LABS / "cedar" / "config.md").exists(), out)
 
         # A yes, then a revision in the same second: the yes was to revision
         # 1 and does not make revision 2, which a one-second stamp alone

@@ -96,35 +96,36 @@ def main() -> int:
     check("...and says so", "set aside" in out.get("resumed", ""), True)
     ws = lc.WORKSPACES / "iris"
     check("the starter agent is made and provisioned once", provisioned, [("iris", out["wake"])])
-    check("...from docs/starter, in the map's shape",
+    check("...from docs/starter, with understanding.md and no config.md",
           sorted(p.name for p in ws.iterdir()),
-          ["agent.json", "config.md", "crons", "how-i-am-here.md", "map.md",
-           "memory", "nights.md", "skills", "soul.md", "threads"])
-    check("her map points at her two files; her nights keep About me.md",
+          ["agent.json", "crons", "how-i-am-here.md", "map.md",
+           "memory", "nights.md", "skills", "soul.md", "threads", "understanding.md"])
+    check("her understanding.md starts empty", (ws / "understanding.md").read_text(), "")
+    check("her map points at her two files; her nights revisit understanding.md",
           ("`how-i-am-here.md`" in (ws / "map.md").read_text(),
            "`nights.md`" in (ws / "map.md").read_text(),
-           "About me.md" in (ws / "nights.md").read_text()), (True, True, True))
+           "understanding.md" in (ws / "nights.md").read_text(),
+           "ask one question" not in (ws / "map.md").read_text().lower()),
+          (True, True, True, True))
     making_skill = "loam-making-an-agent"
     check("her map points to the installed agent-making skill for any thread",
           (f"`{making_skill}`" in (ws / "map.md").read_text(),
            loam_skills.seen_by(ws).get(making_skill)),
           (True, ("loam", loam_skills.loam_dir() / "skills" / making_skill)))
-    # The workspace loading map supplies the path to the owner's page.
-    check("the owner's shared page is made, in this install's workspaces",
-          loam_loading.owner_page(), lc.WORKSPACES / "_shared" / "owner.md")
-    check("...and exists", loam_loading.owner_page().is_file(), True)
+    check("a fresh install creates no shared owner page",
+          loam_loading.owner_page().exists(), False)
     card = json.loads((ws / "agent.json").read_text())
     check("agent.json: its id and name, and no emoji face (retired 2026-11-16)",
           (card["name"], card["display"], "emoji" in card), ("iris", "Iris", False))
     texts = "".join((ws / n).read_text() for n in (
-        "soul.md", "config.md", "map.md", "how-i-am-here.md", "nights.md"))
+        "soul.md", "understanding.md", "map.md", "how-i-am-here.md", "nights.md"))
     check("no placeholder token is left", [t for t in ("{owner}", "@VAULT@", "@WORKSPACES@", "@SYSTEM@") if t in texts], [])
     check("...the install's names are filled in", "Sam" in texts, True)
     check("the soul is the starter's, word for word but the names",
           (ws / "soul.md").read_text(), st.fill((st.STARTER_DIR / "iris" / "soul.md").read_text()))
 
     import loam_identity as identity
-    (ws / "CLAUDE.md").write_text("@soul.md\n@config.md\n@map.md\n")
+    (ws / "CLAUDE.md").write_text("@soul.md\n@understanding.md\n@map.md\n")
     decoy, source = identity.pick_decoy(ws)
     check("a lone starter still probes its real soul against a held-out greeting phrase",
           (source, decoy in st.read_hello()[1], decoy in texts,

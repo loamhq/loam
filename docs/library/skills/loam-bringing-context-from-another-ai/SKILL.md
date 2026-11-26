@@ -109,7 +109,7 @@ Folder names below are a new vault's (`Projects/`, `Attachments/`); this install
 - **Open loops**: in the import note, under their own heading, and tell them they're there.
 - **One import note per import**, in `Inbox/` if the owner already has one or in `Imports/` (for example `Imports/Imported from ChatGPT, 2026-11-17.md`). It holds: where the material came from, which route, the date; the archive's path and sha256 (or the filtered copy's link and the thread holding the original); what was read and what was not, in `coverage`'s words, with its scope; what you wrote where; the conflicts still open; and what was left out at their request (say what kind, never the content).
 
-**Mark what you write as yours.** A note you create gets `created_by: "[[<your name>]]"` and `last_modified_by: "[[<your name>]]"` in its frontmatter. A note you change gets `last_modified_by` only, and its `created_by` stays as it is. Quote the link. Your name is the one in your config.
+**Mark what you write as yours.** A note you create gets `created_by: "[[<your name>]]"` and `last_modified_by: "[[<your name>]]"` in its frontmatter. A note you change gets `last_modified_by` only, and its `created_by` stays as it is. Quote the link. Your name is the one Loam gives you when your session loads.
 
 **Every imported line carries where it came from**, short and at the end:
 

@@ -53,14 +53,16 @@ def draft(root: Path | None = None) -> dict:
     src = (root or STARTER_DIR) / "iris"
     card = json.loads((src / "agent.json").read_text(encoding="utf-8"))
     out = {"id": card["id"], "name": card["name"], "provider": card.get("provider")}
-    for field, name in (("soul", "soul.md"), ("config", "config.md"),
-                        ("map", "map.md")):
+    for field, name in (("soul", "soul.md"), ("map", "map.md")):
         out[field] = fill((src / name).read_text(encoding="utf-8"))
+    understanding = src / "understanding.md"
+    if understanding.is_file():
+        out["understanding"] = fill(understanding.read_text(encoding="utf-8"))
     return out
 
 
 def own_files(root: Path | None = None) -> dict[str, str]:
-    """{name: text} of the starter's files beside soul, config and map."""
+    """{name: text} of the starter's files beside soul, understanding and map."""
     src = (root or STARTER_DIR) / "iris"
     return {name: fill((src / name).read_text(encoding="utf-8"))
             for name in OWN_FILES if (src / name).is_file()}

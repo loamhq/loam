@@ -443,6 +443,7 @@ def files(agent: str) -> dict:
     return {
         "workspace": _ref("spaces", agent, ws),
         "soul": _ref("spaces", f"{agent}/soul.md", ws / "soul.md"),
+        "understanding": _ref("spaces", f"{agent}/understanding.md", ws / "understanding.md"),
         "config": _ref("spaces", f"{agent}/config.md", ws / "config.md"),
         "memory": {
             "map": _ref("spaces", f"{agent}/map.md", ws / "map.md"),

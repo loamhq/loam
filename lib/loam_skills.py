@@ -64,12 +64,11 @@ SKILL_FILE = "SKILL.md"
 LOAM_DIR = "Loam"
 # The person's own shared shelf, beside it.
 OWN_DIR = "skills"
-# The starter vault seeds this page for the owner and their agents.
+# The starter vault seeds an optional personal note for the owner.
 ABOUT_ME = "About me.md"
 ABOUT_ME_TEXT = """# About me
 
-What my agents know about me. They add to it as they learn what lasts; it is
-mine to read and edit.
+A note about me, mine to read and edit.
 """
 # The temporary visual explainer seeded at the top of <projects>/Loam/ on new installs.
 START_HERE = "Start here.html"

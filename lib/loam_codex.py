@@ -385,8 +385,10 @@ def instructions(workspace: Path, provider_line: str = PROVIDER_LINE) -> str:
     from loam_loading import display_name_line
     parts = [provider_line]
     for source in instruction_sources(workspace):
-        text = source.read_text(encoding="utf-8")
-        parts.append(f"Contents of {source}:\n\n{text.strip()}")
+        text = source.read_text(encoding="utf-8").strip()
+        if not text:
+            continue
+        parts.append(f"Contents of {source}:\n\n{text}")
     parts.append(display_name_line(workspace))
     return "\n\n".join(parts) + "\n"
 

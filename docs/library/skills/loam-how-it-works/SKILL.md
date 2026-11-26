@@ -10,12 +10,10 @@ owner. Everything an agent knows and makes is a file on that server.
 
 **An agent** is a folder, its workspace. What it is made of:
 
-- Every conversation, wake and cron loads `soul.md`, who it is (the owner's); its config, which is
-  Loam's short text followed by the owner's words (one page every agent
-  loads, then the agent's own `config.md`); and the agent's own `map.md` if present.
+- Every conversation, wake and cron loads `soul.md`, who it is (the owner's); Loam's short text (the same on every install); the agent's own understanding page (`understanding.md`), where it keeps its living reading of the owner and how to work with them in its own words; and the agent's own `map.md` if present. On older installs, a legacy `config.md` or shared owner page keeps loading while those files remain on disk, until retired.
   A run adds only its own input: a fresh thread session's summary and recent messages, a
   wake's reflection instruction and vault changes, or a cron's file under `crons/`.
-- The workspace is the agent's to shape. The map is paid for on every run,
+- The workspace is the agent's to shape. Because `understanding.md` loads on every run, a write that leaves it past 4,000 characters triggers a one-shot notice with its size and the mark; nothing refuses or truncates it. The map is paid for on every run too,
   so it points to things and does not hold them; past 10,000 characters the
   agent is told, and it still loads. `skills/` holds its own skills (see
   `loam-skills`).
@@ -134,9 +132,9 @@ can switch to Command or Control + Enter to send. The owner’s choice follows
 their browsers, and an agent can change it on their word with
 `settings set composer.send_key` using `enter` or `modifier`. On mobile
 browsers, Return starts a new line and the Send button sends.
-When the owner starts designing an agent in Hello or any other thread, Iris
-asks one question about what they're looking for and hears the answer
-before drafting.
+When the owner asks to make an agent in Hello or any other thread, Iris
+follows `loam-making-an-agent` to explore who they are looking for before
+drafting.
 
 Iris helps with what the owner came for and
 offers an idea when it fits. She can bring over context from another AI
@@ -210,9 +208,11 @@ step where there is one, and clears it when agents can run again. A fresh instal
 **Files** brings together **Your files** (the vault: plain Markdown and files
 written by the owner or their agents, for the owner), **Agent files** (each
 agent's workspace and the shared Commons: theirs to write, the owner's to read),
-and **Shared** when Sharing is on. `About me.md` at the top of the vault is what
-the agents know about the owner (agents add to it, and the owner can read and
-edit it). New installs seed `About me.md`, `Projects/Loam/Start here.html`, and
+and **Shared** when Sharing is on. `About me.md` at the top of the vault is an
+optional personal note the owner and Iris may write together (the owner's to read
+and edit; nothing in Loam relies on it, and each agent keeps its own reading in
+its own `understanding.md`). New installs seed `About me.md`,
+`Projects/Loam/Start here.html`, and
 the machinery folders (no vault-root `README.md`).
 
 Loam's machinery folders — conversations (saved chat records written by Loam;

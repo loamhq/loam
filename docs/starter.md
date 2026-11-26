@@ -17,19 +17,17 @@ and enable the reviewed Garden release. A retry preserves the existing
 plugin and its switch.
 
 **About me.** `seed-vault` also writes `About me.md` at the top of the
-vault: a heading and one line saying it is what the person's agents know
-about them, theirs to read and edit (the owner, 2026-11-16). From 2026-11-18
-to 2026-11-19 Loam's text pointed agents to it
-(`docs/persona/loam.md`); the owner's shorter text of 2026-11-19 does not
-name it. The library's `loam-how-it-works` and Iris's `nights.md` point to it.
+vault as an optional personal note for the owner (theirs to read and edit).
+Nothing in Loam relies on it; Iris may write into it with the owner during
+Hello, while each agent keeps its own reading of the owner in its own
+`understanding.md`.
 
 `seed-starter` makes Iris from `docs/starter/iris/` through
 `loam_agents.make`, the same step L10's create route ends in: her workspace,
-her soul, config and map, `agent.json`, and provisioning on
-every provider. On a box with other agents her
-config takes the fleet's clauses as any new agent's does; on a blank one
-there are none, and the starter's config is what she has. From then on she
-is an ordinary agent: the person can change her, rename her or archive her.
+her soul, an empty `understanding.md`, her map, `agent.json`, and provisioning
+on every provider. Fresh installs create no `config.md` and no shared owner
+page. From then on she is an ordinary agent: the person can change her, rename
+her or archive her.
 
 Then it writes the hello thread: a thread with Iris as its default and only
 member, pinned, with `hello: true` in its frontmatter, and one message, the
@@ -99,10 +97,9 @@ for morning, change the app, build something, or simply keep talking.
 
 When the person asks to make an agent, Iris's map points her to
 `loam-making-an-agent` in any thread, including Hello and Settings › Agents
-› New agent. When the request opens the conversation about who to make,
-she asks one question and hears the answer before drafting. The skill
-guides her through showing and revising the draft and making the version
-the person approves.
+› New agent. The skill guides her through exploring who they are looking for,
+separating soul from first understanding, showing and revising the draft, and
+making the version the person approves.
 
 ## The page's contract (for U4)
 

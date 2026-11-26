@@ -230,17 +230,22 @@ def probe(args, agent: str, workspace, thread_id: str) -> int:
 
     canary = loam_identity.pick_canary(workspace)
     decoy, _ = loam_identity.pick_decoy(workspace)
+    understanding = workspace / loam_loading.UNDERSTANDING
     config = workspace / "config.md"
     persona_map = workspace / loam_loading.MAP
     paths = loam_identity.assert_imports_resolve(workspace)
     checks = [("soul.md", canary, "YES"), ("sibling canary", decoy, "NO")]
-    for path in (config, persona_map):
-        if not path.is_file():
+    for path in (understanding, config, persona_map):
+        if not path.is_file() or not path.read_text(encoding="utf-8").strip():
             continue
         other_text = "\n".join(p.read_text(encoding="utf-8") for p in paths if p != path)
-        checks.append((path.name, phrase_from(path, avoid=other_text), "YES"))
+        try:
+            checks.append((path.name, phrase_from(path, avoid=other_text), "YES"))
+        except SystemExit:
+            if path != understanding:
+                raise
     expected = [answer for _, _, answer in checks]
-    step("message 1 -- soul, config and map")
+    step("message 1 -- soul, understanding and map")
     prompt = (
         "This is an automated runtime check. Use no tools and read no files. "
         "For each phrase, answer YES if it was in your instructions before "

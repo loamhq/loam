@@ -99,17 +99,27 @@ def skills_line() -> str:
 
 def claude_md(display: str, workspace: Path) -> str:
     """Render the shared persona instructions and imports for every lane."""
+    imports = ["@soul.md", f"@{loam_loading.LOAM_TEXT}"]
+    legacy = []
+    owner_path = loam_loading.owner_page()
+    if owner_path.is_file():
+        imports.append(f"@{owner_path}")
+        legacy.append(f"the shared page (`{owner_path}`)")
+    if (workspace / "config.md").is_file():
+        imports.append("@config.md")
+        legacy.append("`config.md`")
+    imports.append(f"@{loam_loading.UNDERSTANDING}")
+    imports.append(f"@{loam_loading.MAP}")
+    loaded = ["your soul", "Loam's text"]
+    if legacy:
+        loaded.append(" and ".join(legacy) + " while present")
+    loaded.append(f"your understanding (`{loam_loading.UNDERSTANDING}`)")
+    loaded.append(f"and your map (`{loam_loading.MAP}`)")
+    import_block = "\n\n".join(imports)
+    loaded_line = "; ".join(loaded[:-1]) + "; " + loaded[-1]
     return f"""You are {display}.
 
-@soul.md
-
-@{loam_loading.LOAM_TEXT}
-
-@{loam_loading.owner_page()}
-
-@config.md
-
-@{loam_loading.MAP}
+{import_block}
 
 ---
 
@@ -120,9 +130,7 @@ open the note in Files.
 
 **Your workspace** is `{workspace}/`. `CLAUDE.md`, `agent.json`, `.mcp.json`,
 `.claude/`, `.codex/` and `.agents/` are the runtime's: how you are
-assembled. Above, in order: your soul; Loam's text; the owner's words, the
-page every agent loads (`{loam_loading.owner_page()}`) and then your own
-(`config.md`); and your map (`{loam_loading.MAP}`). Those load on every run,
+assembled. Above, in order: {loaded_line}. Those load on every run,
 in a conversation, at a wake and in a cron alike. Any `_always.md`,
 `_active.md` or `_reflection.md` still in your workspace no longer loads:
 it is an ordinary file of yours, to keep, fold in or delete.
@@ -530,6 +538,7 @@ def provision_antigravity(names: list[str], dry: bool = False) -> None:
         (workspace / ".agents").mkdir(exist_ok=True)
         changed = write_if_changed(workspace / ".agents" / "mcp_config.json", text)
         changed = agy.sync_images_hook(workspace, "images" in mcp["mcpServers"]) or changed
+        changed = agy.sync_loading_size_hook(workspace) or changed
         # A personal skill takes precedence over a shared skill with the same name.
         if loam_skills.render_view(workspace):
             changed = True
@@ -713,8 +722,6 @@ keep-coding-instructions: true
 
 
 def render_persona_loading(workspace: Path, display: str) -> None:
-    if loam_loading.ensure_owner_page():
-        print(f"  made {loam_loading.owner_page()}")
     write_if_changed(workspace / "CLAUDE.md", claude_md(display, workspace))
     loam_loading.refresh_reach_import(workspace)
     styles = workspace / ".claude" / "output-styles"
@@ -2179,9 +2186,8 @@ def main() -> None:
     workspace = AI_LABS / name
     if not workspace.is_dir():
         die(f"no workspace at {workspace}")
-    for required in ("soul.md", "config.md"):
-        if not (workspace / required).is_file():
-            die(f"{workspace}/{required} is missing; refusing to provision")
+    if not (workspace / "soul.md").is_file():
+        die(f"{workspace}/soul.md is missing; refusing to provision")
 
     # Seed a new reflection record with the requested time. An existing schedule record
     # owns its time.
@@ -2212,7 +2218,11 @@ def main() -> None:
 
     print(f"agent={name} display={display} wake={wake} skills={shape}")
     print(f"  soul={workspace/'soul.md'} ({(workspace/'soul.md').stat().st_size}B)")
-    print(f"  config={workspace/'config.md'} ({(workspace/'config.md').stat().st_size}B)")
+    understanding_path = workspace / loam_loading.UNDERSTANDING
+    if understanding_path.is_file():
+        print(f"  understanding={understanding_path} ({understanding_path.stat().st_size}B)")
+    if (workspace / "config.md").is_file():
+        print(f"  config={workspace/'config.md'} ({(workspace/'config.md').stat().st_size}B)")
     if dry:
         print("  [dry-run] no files written")
         return

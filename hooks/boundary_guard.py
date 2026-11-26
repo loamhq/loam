@@ -56,6 +56,7 @@ import loam_config as lc  # noqa: E402
 
 from loam_memory import (  # noqa: E402
     LIMIT_CHARS,
+    UNDERSTANDING_LAYER,
     LayerError,
     is_auto_loaded,
     load_config,
@@ -364,7 +365,7 @@ ENGINEER_WRITABLE_IN_WORKSPACE = frozenset({
 # The self-authored files, named only so the refusal can say WHICH rule it is.
 # The rule itself is the inverse of the set above, so a file an agent invents
 # tomorrow is covered today.
-ENGINEER_SELF_AUTHORED = ("soul.md", "map.md")
+ENGINEER_SELF_AUTHORED = ("soul.md", UNDERSTANDING_LAYER, "map.md")
 
 
 def engineer_boundary(

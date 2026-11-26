@@ -380,26 +380,28 @@ ENTRIES: list[Entry] = [
           "POST /api/agents/drafts", route="POST /v1/agents/drafts",
           unattended=False,
           values='{"thread": <this thread\'s id>, "name": "Juniper", '
-                 '"soul": <text> or "soul_file": <path>, "config": <text> '
-                 'or "config_file": <path>}; optional "id" (the folder name, '
-                 'from the name), "about" (one plain line for the person, in the '
-                 'third person: "A warm, practical cook who keeps Sam company '
-                 'in the kitchen"; the draft card shows it), "provider", '
-                 '"wake" (HH:MM), "active"/"reflection" (their loading files; '
-                 'plain starters otherwise)',
+                 '"soul": <text> or "soul_file": <path>}; optional '
+                 '"understanding": <text> or "understanding_file": <path> '
+                 '(first reading of the owner and how to work with them, in '
+                 'plain prose, not quotes; empty if omitted), "id" (the '
+                 'folder name, from the name), "about" (one plain line for '
+                 'the person, in the third person: "A warm, practical cook '
+                 'who keeps Sam company in the kitchen"; the draft card shows '
+                 'it), "provider", "wake" (HH:MM), "map" (or "map_file")',
           body=lambda v, m: dict(v) if isinstance(v, dict) else {"name": v},
           note="How to make an agent: read the library skill "
                "loam-making-an-agent first (a character, never a job). Draft "
-               "their name, soul and config here before you describe them; "
-               "the face is the theme's until the person uploads one "
-               "(agent.face). Then show the person a short version of this "
-               "draft (and the whole soul if they ask), so their one yes is "
-               "to it; change it with agent.revise on their word and show "
-               "it again, and once they say yes to the version shown, "
-               "agent.confirm with that revision and the id of their yes "
-               "message. A yes given before a revision does not make it. The answer's `problems` say what "
-               "still stands in the way. Their files are theirs from the "
-               "moment they are made."),
+               "their name, soul and (when you have one) first understanding "
+               "page here before you describe them; the face is the theme's "
+               "until the person uploads one (agent.face). Then introduce "
+               "them briefly in conversation (no sample reply, and not the "
+               "whole soul unless asked), so their one yes is to the draft; "
+               "change it with agent.revise on their word and show it again, "
+               "and once they say yes to the version shown, agent.confirm "
+               "with that revision and the id of their yes message. A yes "
+               "given before a revision does not make it. The answer's "
+               "`problems` say what still stands in the way. Their files are "
+               "theirs from the moment they are made."),
     Entry("agent.revise", "action", "Change a draft on the person's word",
           "PATCH /api/agents/drafts/{draft}", route="PATCH /v1/agents/drafts/{draft}",
           target="draft id (d-...)", unattended=False,

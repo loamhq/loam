@@ -37,6 +37,11 @@ NEAR_LIMIT_CHARS = 9_000
 # over 9 characters. Every reporter now warns and the run goes ahead.
 
 MAP_LAYER = "map.md"
+UNDERSTANDING_LAYER = "understanding.md"
+# ONE authority for the understanding page's soft size mark (characters).
+# Post-write hooks notice when a write leaves the page past this mark; nothing
+# refuses, truncates or repeats it.
+UNDERSTANDING_MARK_CHARS = 4_000
 CRON_LANE_DIR = "crons"
 
 FRONTMATTER_RE = re.compile(r"\A---\r?\n(?:.*?\r?\n)?---\r?\n*", re.DOTALL)
@@ -78,6 +83,24 @@ def is_auto_loaded(target: Path, workspace: Path) -> bool:
         return True
     lanes = workspace / CRON_LANE_DIR
     return target.is_relative_to(lanes) and target.suffix == ".md"
+
+
+def is_understanding(target: Path, workspace: Path) -> bool:
+    """Whether ``target`` is this persona's understanding page."""
+    try:
+        return target.resolve() == (workspace / UNDERSTANDING_LAYER).resolve()
+    except OSError:
+        return False
+
+
+def understanding_notice(raw: str, size: int) -> str:
+    """The one-shot post-write notice when an understanding page passes its mark."""
+    return (
+        f"{raw!r} is now {size:,} characters, over the "
+        f"{UNDERSTANDING_MARK_CHARS:,}-character mark for your understanding "
+        f"page. The edit landed. This page loads on every run, so keep it "
+        f"to what matters."
+    )
 
 
 def over_limit(text: str) -> bool:

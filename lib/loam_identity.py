@@ -29,7 +29,7 @@ from pathlib import Path
 import loam_config as lc
 
 from loam_account import AccountRefused, refusal
-from loam_memory import MAP_LAYER
+from loam_memory import MAP_LAYER, UNDERSTANDING_LAYER
 
 CLAUDE = str(lc.CLAUDE_BIN)
 
@@ -43,7 +43,7 @@ IMPORT_RE = re.compile(r"^@(\S+)\s*$", re.MULTILINE)
 AI_LABS = lc.WORKSPACES
 
 # A soul probe needs a phrase unique among the loaded persona files.
-SIBLING_FILES = ("config.md", MAP_LAYER)
+SIBLING_FILES = ("config.md", UNDERSTANDING_LAYER, MAP_LAYER)
 
 # Imports allowed from outside the project root: the shared reach.md
 # (2026-11-10), which Claude Code loads because provision and the launcher
@@ -90,9 +90,15 @@ def assert_imports_resolve(project: Path) -> list[Path]:
     paths = imported_paths(project)
     if not paths:
         raise IdentityError(f"{project}/CLAUDE.md declares no @ imports")
+    optional = {
+        project / MAP_LAYER,
+        project / UNDERSTANDING_LAYER,
+        project / "config.md",
+        loam_loading.owner_page().resolve(),
+    }
     for path in paths:
         if not path.is_file():
-            if path == project / MAP_LAYER and not path.exists():
+            if path in optional and not path.exists():
                 continue
             raise IdentityError(f"CLAUDE.md imports {path}, which does not exist")
         if not path.is_relative_to(project) and path not in _shared_imports():

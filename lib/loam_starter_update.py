@@ -96,7 +96,7 @@ def refresh() -> None:
         if ws.is_symlink() or not (ws / "agent.json").is_file():
             return
         refresh_legacy_layers(ws, draft)
-        files = {name + ".md": draft[name] for name in ("soul", "config", "map")}
+        files = {name + ".md": draft[name] for name in ("soul", "map")}
         for name, replacement in (files | starter.own_files()).items():
             refresh_file(ws / name, replacement,
                          (starter.fill(t) for t in versions("iris/" + name)))

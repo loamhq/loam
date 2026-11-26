@@ -55,6 +55,11 @@ RULES_FILE = Path(".agents") / "rules" / "loam-persona.md"
 MCP_FILE = Path(".agents") / "mcp_config.json"
 HOOKS_FILE = Path(".agents") / "hooks.json"
 IMAGES_HOOK = "loam-images"
+LOADING_SIZE_HOOK = "loam-loading-size"
+LOADING_SIZE_MATCHER = (
+    "^(write_file|edit_file|write_to_file|replace_file_content"
+    "|multi_replace_file_content|.*move_file)$"
+)
 
 PROVIDER_LINE = ("You are running on Antigravity through Loam's broker: the "
                  "box's shell and Antigravity's own tools, and the MCP tools "
@@ -585,6 +590,17 @@ def images_hook() -> dict:
     }]}
 
 
+def loading_size_hook() -> dict:
+    cmd = "python3 " + shlex.quote(str(lc.ROOT / "hooks" / "antigravity_loading_size.py"))
+    return {
+        "PostToolUse": [{
+            "matcher": LOADING_SIZE_MATCHER,
+            "hooks": [{"type": "command", "timeout": 15, "command": cmd}],
+        }],
+        "PostInvocation": [{"type": "command", "timeout": 10, "command": cmd}],
+    }
+
+
 def workspace_hooks(workspace: Path) -> dict:
     path = workspace / HOOKS_FILE
     try:
@@ -606,6 +622,17 @@ def sync_images_hook(workspace: Path, enabled: bool) -> bool:
         hooks[IMAGES_HOOK] = desired
     else:
         del hooks[IMAGES_HOOK]
+    _write_workspace_file(workspace / HOOKS_FILE, json.dumps(hooks, indent=2) + "\n")
+    return True
+
+
+def sync_loading_size_hook(workspace: Path) -> bool:
+    """Keep Loam's post-write size-notice hook group in the workspace file."""
+    hooks = workspace_hooks(workspace)
+    desired = loading_size_hook()
+    if hooks.get(LOADING_SIZE_HOOK) == desired:
+        return False
+    hooks[LOADING_SIZE_HOOK] = desired
     _write_workspace_file(workspace / HOOKS_FILE, json.dumps(hooks, indent=2) + "\n")
     return True
 

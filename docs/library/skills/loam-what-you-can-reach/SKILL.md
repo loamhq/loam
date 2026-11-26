@@ -5,7 +5,7 @@ description: What an agent can reach and use on its Loam server - its workspace,
 
 # What you can reach
 
-The shared reach page that loads beside your soul, config and map names
+The shared reach page that loads beside your soul, understanding and map names
 this box's paths and domain. This page describes what you can use.
 
 **Your reach.** Your workspace (shown under **Agent files** in Files) is the
@@ -17,7 +17,7 @@ Do not edit conversation records (Loam writes them) or `<system>/Loam/`
 (replaced whole on each update; put shared skills in `<system>/skills/`, which
 updates never touch).
 You have a full shell and sudo on the machine. A wake and a cron have the same
-tools as a conversation. What needs the owner's yes first is in your config. If
+tools as a conversation. What needs the owner's yes first is in Loam's text. If
 you break the machine's own setup (the web server's config, a unit, a setting),
 `sudo loam host restore` puts it back and says what it will change first; `sudo
 loam host log` lists the saved states, and `restore 2h` names one by time. The

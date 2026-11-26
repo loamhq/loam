@@ -4,7 +4,7 @@ A blank Loam install ships one agent, Iris, and one thread: the hello
 thread. After sign-in a phone shows Hello unread in Chats, and a wide screen opens it. Everything here is copied
 into the install once, by `bin/library seed-starter` (lib/loam_starter.py),
 and belongs to the person. Updates can refresh a stock greeting and stock files until they have been personalized. They can change, rename or archive
-Iris. Her soul, config and map load on every run.
+Iris. Her soul, Loam's text, her understanding page (`understanding.md`) and her map load on every run.
 
 The words are the owner's approved starter (2026-11-16), which replaced the
 placeholders of 2026-11-14. The source is the design note "Starter Iris: soul
@@ -15,8 +15,7 @@ guidance on 2026-11-21.
 |---|---|
 | `iris/agent.json` | Iris's id and name (her face is the theme's until the person uploads one) |
 | `iris/soul.md` | her `soul.md`: who she is (character, values and identity, nothing about how she works) |
-| `iris/config.md` | her `config.md`: the owner's words for her alone (one line at first; Loam's text and the owner's shared page load beside it) |
-| `iris/map.md` | her `map.md`, the one file of her own that loads on every run: it points at the two below |
+| `iris/map.md` | her `map.md`, the pointer file that loads on every run: it points at the two below (her `understanding.md` starts empty) |
 | `iris/how-i-am-here.md` | her conversation guidance, including the first visit and when to offer the Garden; her map tells her to read it before her first reply |
 | `iris/nights.md` | her nightly wake, including the first morning and the one-week occasion; her map tells her to read it when she wakes |
 | `hello.md` | the hello thread's title (frontmatter) and Iris's first message (the body), which greets the owner by name |
