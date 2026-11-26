@@ -589,13 +589,18 @@ def run_codex(project: Path, agent: str, vault: Path, started: str,
     Claude half records them, with the same stages and exit codes.
 
     The identity gate asks the same canary/decoy question of a Codex thread
-    composed exactly as the wake's will be (an ephemeral one, so no rollout
-    is kept). The run is lib/loam_codex_wake.py's: an app-server in the
-    workspace, a thread with the persona's own instructions plus this lane's
-    file, subagents on, every approval granted, and a subagent or call that
-    finishes after the root's turn handed back to it."""
+    carrying only the persona's shared instructions (never the cron body, and
+    with tools disabled; an ephemeral thread so no rollout is kept). The run
+    is lib/loam_codex_wake.py's: an app-server in the workspace, a thread with
+    the persona's own instructions plus this lane's file, subagents on, every
+    approval granted, and a subagent or call that finishes after the root's
+    turn handed back to it."""
     import loam_codex_wake as cw  # noqa: PLC0415
-    from loam_identity import IdentityError, preflight_identity  # noqa: PLC0415
+    from loam_identity import (  # noqa: PLC0415
+        IdentityError,
+        ProbeMisbehaved,
+        preflight_identity,
+    )
 
     global LANE_MODEL
     step("identity")
@@ -603,14 +608,26 @@ def run_codex(project: Path, agent: str, vault: Path, started: str,
     if refused_login:
         return account_refused(agent, vault, started, lane, "identity", refused_login)
     label = f"cron `{cron}`" if cron else "reflection wake"
+    probe_text = cw.instructions(project, label, None, None)
     text = cw.instructions(project, label, lane_path, lane_text)
     env = cw.env_for_lane()
+    probe_warning: str | None = None
     try:
         canary, decoy_owner = preflight_identity(
             project, model=LANE_MODEL,
-            ask=lambda q: cw.ask(project, text, LANE_MODEL, q, env=env))
+            ask=lambda q: cw.ask(project, probe_text, LANE_MODEL, q, env=env))
     except AccountRefused as exc:
         return account_refused(agent, vault, started, lane, "identity", str(exc))
+    except ProbeMisbehaved as exc:
+        # Structural checks passed and the model did not return a wrong-soul
+        # verdict (NO NO / NO YES / YES YES) or an account refusal; the probe
+        # itself misbehaved even after retry. Proceed rather than failing the
+        # owner's wake, and record the diagnostic warning on stderr + the log.
+        canary = getattr(exc, "canary", None)
+        decoy_owner = getattr(exc, "decoy_owner", None)
+        probe_warning = str(exc)
+        print(f"preflight warning: {lane} identity probe misbehaved after retry "
+              f"({probe_warning}); proceeding", file=sys.stderr)
     except (IdentityError, cw.CodexWakeError, subprocess.SubprocessError, OSError) as exc:
         reason = f"{lane} identity preflight refused: {exc}"
         print(reason, file=sys.stderr)
@@ -679,6 +696,7 @@ def run_codex(project: Path, agent: str, vault: Path, started: str,
         **common, "ok": True, "vault_ref": head,
         "num_turns": None, "max_turns": None, "hit_turn_cap": False,
         "identity_canary": canary, "identity_decoy_from": decoy_owner,
+        **({"identity_probe_warning": probe_warning} if probe_warning else {}),
         "lane_chars": len(lane_text or ""),
     })
     print(out.reply)
@@ -698,7 +716,11 @@ def run(project: Path, agent: str, vault: Path, started: str,
         cron: str | None = None) -> int:
     # Preflight: the true abort. Never launch a session that would run
     # without its self-model.
-    from loam_identity import IdentityError, preflight_identity  # noqa: PLC0415
+    from loam_identity import (  # noqa: PLC0415
+        IdentityError,
+        ProbeMisbehaved,
+        preflight_identity,
+    )
     from loam_memory import (  # noqa: PLC0415
         LIMIT_CHARS,
         LayerError,
@@ -765,10 +787,17 @@ def run(project: Path, agent: str, vault: Path, started: str,
                          lane_text, lane_path if cron else None)
 
     step("identity")
+    probe_warning: str | None = None
     try:
         canary, decoy_owner = preflight_identity(project, model=LANE_MODEL)
     except AccountRefused as exc:
         return account_refused(agent, vault, started, lane, "identity", str(exc))
+    except ProbeMisbehaved as exc:
+        canary = getattr(exc, "canary", None)
+        decoy_owner = getattr(exc, "decoy_owner", None)
+        probe_warning = str(exc)
+        print(f"preflight warning: {lane} identity probe misbehaved after retry "
+              f"({probe_warning}); proceeding", file=sys.stderr)
     except (IdentityError, subprocess.SubprocessError, OSError) as exc:
         reason = f"{lane} identity preflight refused: {exc}"
         print(reason, file=sys.stderr)
@@ -937,6 +966,7 @@ def run(project: Path, agent: str, vault: Path, started: str,
         "total_cost_usd": cost,
         "identity_canary": canary,
         "identity_decoy_from": decoy_owner,
+        **({"identity_probe_warning": probe_warning} if probe_warning else {}),
         "lane_chars": len(lane_text or ""),
         "session_id": envelope.get("session_id"),
         **spent,

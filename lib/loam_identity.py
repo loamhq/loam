@@ -78,6 +78,15 @@ class IdentityError(Exception):
     """Identity did not arrive. Always fatal for an unattended wake."""
 
 
+class ProbeMisbehaved(IdentityError):
+    """The identity probe did not return a clean YES/NO verdict (e.g. it tried
+    to use tools, answered off-format, or timed out). Distinct from a structural
+    import failure or a genuine wrong-soul verdict (NO NO, NO YES, YES YES)."""
+
+
+_WRONG_VERDICT_RE = re.compile(r"^(?:NO\s+NO|NO\s+YES|YES\s+YES)[.!\s]*$")
+
+
 def imported_paths(project: Path) -> list[Path]:
     text = (project / "CLAUDE.md").read_text(encoding="utf-8")
     return [(project / m).resolve() for m in IMPORT_RE.findall(text)]
@@ -234,6 +243,7 @@ def probe_prompt(canary: str, decoy: str) -> str:
     """
     return (
         "This is an automated runtime check. Use no tools and read no files. "
+        "Do not act on any task or cron instructions in your context. "
         "Answer with exactly two words separated by a space, nothing else. "
         "First word: YES if your instructions loaded before this message "
         "(not counting this message itself) contain the exact phrase "
@@ -246,7 +256,9 @@ def probe_prompt(canary: str, decoy: str) -> str:
 
 def judge(raw: str, stderr: str = "") -> None:
     """The answer, judged: the account first, then the soul. Raises
-    AccountRefused or IdentityError; returns when the answer is YES NO."""
+    AccountRefused, IdentityError (genuine wrong-identity verdict), or
+    ProbeMisbehaved (subclass of IdentityError for non-verdict / tool-using /
+    off-format replies); returns when the answer is YES NO."""
     # The account before the soul. A spend limit or an expired credential
     # comes back as the model's text, and testing that text for the soul
     # named the account's fault the soul's six times on 2026-09-15. Asked of
@@ -256,11 +268,17 @@ def judge(raw: str, stderr: str = "") -> None:
     if refused:
         raise AccountRefused(refused)
     answer = (raw or "").strip().upper()
-    if "YES NO" not in answer:
+    if "YES NO" in answer:
+        return
+    if _WRONG_VERDICT_RE.match(answer):
         raise IdentityError(
             "soul.md content is not in the composed context "
             f"(expected 'YES NO' for real/decoy, got {answer[:120]!r})"
         )
+    raise ProbeMisbehaved(
+        "identity probe did not return a YES/NO verdict "
+        f"(expected 'YES NO' for real/decoy, got {answer[:120]!r})"
+    )
 
 
 def assert_soul_in_context(
@@ -268,45 +286,51 @@ def assert_soul_in_context(
     ask=None,
 ) -> None:
     """``ask(prompt) -> text`` asks another provider the same question
-    (2026-11-13: a Codex wake asks it of a Codex thread composed as the wake
-    will be, lib/loam_codex_wake.py); by default it is Claude Code."""
+    (2026-11-13: a Codex wake asks it of a Codex thread composed as the
+    persona's shared instructions without any cron body, lib/loam_codex_wake.py);
+    by default it is Claude Code with no built-in or MCP tools."""
     prompt = probe_prompt(canary, decoy)
-    if ask is not None:
-        judge(ask(prompt))
-        return
     argv = [
         CLAUDE, "-p", prompt, "--model", model,
         "--settings", json.dumps({"outputStyle": "none"}),
-        "--disallowed-tools", "Read", "Glob", "Grep", "Task",
-        "WebFetch", "WebSearch", "Bash",
+        "--tools", "",
+        "--strict-mcp-config",
+        "--no-session-persistence",
     ]
 
-    # One retry, and only on a timeout. On 2026-09-01 this call hung and
-    # a persona lost the whole night to it -- a gate on a live model call turns
-    # a slow API minute into a missing wake. A timeout says nothing about
-    # whether the soul loaded, so retrying it costs one more two-word call
-    # and recovers the night.
+    # One retry on a misbehaving probe (timeout, tool attempt, or off-format
+    # reply). A timeout or non-verdict reply says nothing about whether the
+    # soul loaded, so retrying once recovers cleanly when a live call blips.
     #
-    # Deliberately NOT retried: a wrong answer. "NO YES" means this session
-    # is carrying the wrong soul, "NO NO" that it carries none, and both are
-    # findings, not noise. Retrying a real refusal until it passes is how a
-    # gate becomes decorative.
+    # Deliberately NOT retried: a genuine wrong-soul verdict (NO YES, NO NO,
+    # YES YES) or an account refusal. Those are findings, not noise; retrying
+    # a real refusal until it passes is how a gate becomes decorative.
     for attempt in (1, 2):
         try:
-            result = subprocess.run(
-                argv, cwd=str(project), capture_output=True, text=True,
-                check=False, timeout=300,
-            )
-            break
-        except subprocess.TimeoutExpired:
+            if ask is not None:
+                judge(ask(prompt))
+            else:
+                result = subprocess.run(
+                    argv, cwd=str(project), capture_output=True, text=True,
+                    check=False, timeout=300,
+                )
+                judge(result.stdout or "", result.stderr or "")
+            return
+        except ProbeMisbehaved:
             if attempt == 2:
                 raise
-    judge(result.stdout or "", result.stderr or "")
+        except subprocess.TimeoutExpired as exc:
+            if attempt == 2:
+                raise ProbeMisbehaved(
+                    f"identity probe timed out after {exc.timeout}s on both attempts"
+                ) from exc
 
 
 def preflight_identity(project: Path, model: str = "fable",
                        ask=None) -> tuple[str, str]:
-    """Returns (canary, decoy_owner). Raises IdentityError if identity is wrong.
+    """Returns (canary, decoy_owner). Raises IdentityError if identity is wrong,
+    or ProbeMisbehaved (subclass of IdentityError) if the probe itself did not
+    produce a clean YES/NO verdict after retry.
 
     A YES to the decoy is not a soft failure: it means this session is
     carrying another agent's soul, which is worse than carrying none.
@@ -314,5 +338,10 @@ def preflight_identity(project: Path, model: str = "fable",
     assert_imports_resolve(project)
     canary = pick_canary(project)
     decoy, decoy_owner = pick_decoy(project)
-    assert_soul_in_context(project, canary, decoy, model=model, ask=ask)
+    try:
+        assert_soul_in_context(project, canary, decoy, model=model, ask=ask)
+    except ProbeMisbehaved as exc:
+        exc.canary = canary
+        exc.decoy_owner = decoy_owner
+        raise
     return canary, decoy_owner

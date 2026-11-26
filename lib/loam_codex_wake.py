@@ -41,9 +41,11 @@ from __future__ import annotations
 
 import json
 import queue
+import re
 import subprocess
 import threading
 import time
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -57,9 +59,11 @@ PROVIDER_LINE = codex.PROVIDER_LINE.replace(
     "with you, and a question for a person gets no answer)", 1)
 
 REQUEST_TIMEOUT_S = 90
+PROBE_TIMEOUT_S = 120.0
 # How long to wait for anything at all from the app-server before checking
 # that it is still alive; not a clock on the run (a wake has none).
 POLL_S = 5.0
+_MCP_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 # Server requests that are an approval: granted, as bypassPermissions would.
 APPROVALS = ("item/commandExecution/requestApproval",
@@ -290,10 +294,62 @@ def open_server(workspace: Path, env: dict | None = None,
     return server
 
 
+def probe_refuse_answer(method: str, params: dict) -> dict | None:
+    """What an identity probe answers any server approval request with: never
+    approve a tool, file change, permission, or MCP call."""
+    if method not in APPROVALS:
+        return None
+    if method == "item/tool/requestUserInput":
+        return {"answers": {}}
+    if method == "mcpServer/elicitation/request":
+        return {"action": "decline"}
+    if method == "item/permissions/requestApproval":
+        return {"permissions": {}, "scope": "turn"}
+    if method in ("execCommandApproval", "applyPatchApproval"):
+        return {"decision": "denied"}
+    return {"decision": "decline"}
+
+
+def probe_argv(workspace: Path) -> list[str]:
+    """App-server command line for the identity probe: read-only, no shell,
+    no subagents, no web search, and every configured MCP server disabled so
+    the probe neither spawns MCP subprocesses nor can execute any tool."""
+    argv = [
+        codex.CODEX, *codex.APP_SERVER_ARGV,
+        "-c", 'web_search="disabled"',
+        "-c", "features.shell_tool=false",
+        "-c", "features.unified_exec=false",
+        "-c", "features.multi_agent=false",
+        "-c", "features.multi_agent_v2=false",
+        "-c", "features.apps=false",
+        "-c", 'sandbox_mode="read-only"',
+        "-c", 'approval_policy="on-request"',
+    ]
+    seen: set[str] = set()
+    for cfg_path in (workspace / ".codex" / "config.toml", codex.CODEX_HOME / "config.toml"):
+        try:
+            data = tomllib.loads(cfg_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        servers = data.get("mcp_servers")
+        if not isinstance(servers, dict):
+            continue
+        for name in sorted(servers):
+            if isinstance(name, str) and name not in seen and _MCP_KEY_RE.match(name):
+                seen.add(name)
+                argv.extend(["-c", f"mcp_servers.{name}.enabled=false"])
+    return argv
+
+
 def start_thread(server: AppServer, workspace: Path, instructions_text: str,
-                 model: str | None, ephemeral: bool = False) -> dict:
-    params = {"cwd": str(workspace), "baseInstructions": instructions_text,
-              "developerInstructions": codex.SUBAGENT_ASK}
+                 model: str | None, ephemeral: bool = False, *,
+                 probe: bool = False) -> dict:
+    params: dict = {"cwd": str(workspace), "baseInstructions": instructions_text}
+    if probe:
+        params["sandbox"] = "read-only"
+        params["approvalPolicy"] = "on-request"
+    else:
+        params["developerInstructions"] = codex.SUBAGENT_ASK
     if model:
         params["model"] = model
     if ephemeral:
@@ -303,13 +359,15 @@ def start_thread(server: AppServer, workspace: Path, instructions_text: str,
 
 def drive(server: AppServer, thread_id: str, prompt: str, *,
           model: str | None = None, effort: str | None = None,
-          outcome: Outcome | None = None, deadline: float | None = None) -> Outcome:
+          outcome: Outcome | None = None, deadline: float | None = None,
+          allow_approvals: bool = True) -> Outcome:
     """Run ``prompt`` as a root turn of ``thread_id`` and everything it
     leads to: subagents that finish after the root's turn, and calls the
     root left running, each handed back in a new root turn, until nothing
     is left running. Raises ``subprocess.TimeoutExpired`` past ``deadline``
     (a monotonic time; None, every lane since 2026-11-10, is none)."""
     out = outcome or Outcome(thread_id=thread_id)
+    started_at = time.monotonic()
 
     def turn(text: str) -> None:
         params = {"threadId": thread_id, "input": [{"type": "text", "text": text}]}
@@ -332,7 +390,9 @@ def drive(server: AppServer, thread_id: str, prompt: str, *,
     turn(prompt)
     while True:
         if deadline is not None and time.monotonic() > deadline:
-            raise subprocess.TimeoutExpired("codex app-server", 0)
+            raise subprocess.TimeoutExpired(
+                "codex app-server", max(round(deadline - started_at), 0)
+            )
         if not root_open and not running and not late and not owed:
             break
         if not root_open and owed and not running and not late:
@@ -349,7 +409,8 @@ def drive(server: AppServer, thread_id: str, prompt: str, *,
         method = obj.get("method")
         params = obj.get("params") if isinstance(obj.get("params"), dict) else {}
         if "id" in obj and method:
-            answer = unattended_answer(method, params)
+            answer = (unattended_answer(method, params) if allow_approvals
+                      else probe_refuse_answer(method, params))
             if answer is None:
                 server.send({"id": obj["id"], "error": {
                     "code": -32601, "message": f"{method} is not handled by this client"}})
@@ -475,17 +536,20 @@ def rollout(thread_id: str | None) -> Path | None:
 
 
 def ask(workspace: Path, instructions_text: str, model: str | None,
-        prompt: str, env: dict | None = None) -> str:
-    """One question to a fresh, ephemeral thread composed exactly as the
-    wake's will be (the identity preflight's half on Codex). Answers the
-    reply's text; an account refusal comes back as Codex's own sentence,
-    which ``loam_identity.judge`` reads before the soul."""
-    server = open_server(workspace, env)
+        prompt: str, env: dict | None = None,
+        timeout: float = PROBE_TIMEOUT_S) -> str:
+    """One question to a fresh, ephemeral, tool-less thread carrying the
+    persona's shared instructions (the identity preflight's half on Codex).
+    Answers the reply's text; an account refusal comes back as Codex's own
+    sentence, which ``loam_identity.judge`` reads before the soul."""
+    server = open_server(workspace, env, argv=probe_argv(workspace))
     try:
         started = start_thread(server, workspace, instructions_text, model,
-                               ephemeral=True)
+                               ephemeral=True, probe=True)
         tid = (started.get("thread") or {}).get("id")
-        out = drive(server, tid, prompt, model=model)
+        out = drive(server, tid, prompt, model=model,
+                    deadline=time.monotonic() + timeout,
+                    allow_approvals=False)
     except CodexWakeError as exc:
         return str(exc)
     finally:
