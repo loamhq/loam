@@ -8,9 +8,34 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import subprocess
 import time
 from pathlib import Path
+
+
+def _make_writable(root: Path) -> None:
+    """Restore u+rwx on directories under `root` (e.g. systemd's 0555/0000
+    inaccessible/ subtree) without following symlinks so rmtree can remove it."""
+    try:
+        top = root.lstat()
+    except OSError:
+        return
+    if not stat.S_ISDIR(top.st_mode):
+        return
+    try:
+        os.chmod(root, top.st_mode | 0o700)
+    except OSError:
+        return
+    for dirpath, dirnames, _ in os.walk(root, followlinks=False, onerror=lambda e: None):
+        for name in dirnames:
+            p = os.path.join(dirpath, name)
+            try:
+                st = os.lstat(p)
+                if stat.S_ISDIR(st.st_mode):
+                    os.chmod(p, st.st_mode | 0o700)
+            except OSError:
+                pass
 
 SYSTEMD = next((p for p in ("/lib/systemd/systemd", "/usr/lib/systemd/systemd")
                 if os.path.exists(p)), "/lib/systemd/systemd")
@@ -144,4 +169,5 @@ class PrivateManager:
             else:
                 os.environ[key] = value
         self._saved = {}
+        _make_writable(self.root / "run")
         shutil.rmtree(self.root / "run", ignore_errors=True)

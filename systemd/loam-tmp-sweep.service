@@ -13,7 +13,6 @@ Type=oneshot
 TimeoutStartSec=30min
 Nice=10
 IOSchedulingClass=idle
-ExecStart=/usr/bin/python3 -I -X pycache_prefix=@PYCACHE@ @ROOT@/bin/sweep-tmp
 # The Python prefix cache outlives test scratch and job clones. Sudo keeps
 # the prefix for Python commands, so the user's cache can contain root-owned
 # directories. Pass the rendered prefix explicitly when sweeping as root.
@@ -31,3 +30,6 @@ ExecStart=-/usr/bin/python3 -X pycache_prefix=@PYCACHE@ @ROOT@/bin/clear-agy-fil
 ExecStart=-/usr/bin/python3 -X pycache_prefix=@PYCACHE@ @ROOT@/bin/github-app check
 ExecStart=-/usr/bin/python3 -X pycache_prefix=@PYCACHE@ @ROOT@/bin/check-plugin-updates
 ExecStart=-/usr/bin/python3 -X pycache_prefix=@PYCACHE@ @ROOT@/bin/loam-report check
+# Run /tmp sweep last without a leading `-`: a failed removal still marks the
+# unit failed so monitoring sees it, without skipping the housekeeping above.
+ExecStart=/usr/bin/python3 -I -X pycache_prefix=@PYCACHE@ @ROOT@/bin/sweep-tmp

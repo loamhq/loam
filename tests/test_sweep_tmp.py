@@ -76,5 +76,34 @@ def test() -> None:
     print("PASS sweep-tmp sudo fallback is limited to non-symlink job scratch")
 
 
+def test_restore_writable() -> None:
+    mod = _load_sweep()
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        # Outside target that must not be touched via symlink.
+        outside = root / "outside-ro"
+        outside.mkdir()
+        outside.chmod(0o555)
+
+        tree = root / "loam-schedule-test-abc"
+        inacc = tree / "systemd" / "run" / "systemd" / "inaccessible"
+        inner = inacc / "dir"
+        inner.mkdir(parents=True)
+        (inner / "file").write_text("x")
+        (tree / "link-out").symlink_to(outside)
+        inner.chmod(0o000)
+        inacc.chmod(0o555)
+
+        try:
+            assert mod.remove(str(tree), allow_sudo=False) is True
+            assert not tree.exists()
+            assert (outside.stat().st_mode & 0o777) == 0o555
+        finally:
+            outside.chmod(0o755)
+
+    print("PASS sweep-tmp restores u+rwx on owned read-only subdirs without following symlinks")
+
+
 if __name__ == "__main__":
     test()
+    test_restore_writable()
