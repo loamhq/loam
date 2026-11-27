@@ -503,9 +503,9 @@ export function mount(host) {
     const access = network && touches.server ? 'Network and server access'
       : network ? 'Network access' : touches?.server ? 'Runs on your server' : null
     const appearance = kindOf(entry) === 'theme' && declaration && !declaration.page_code
-    const excerpt = note.changed?.[0] || access || (appearance ? reachOf(declaration, 'theme').text : note.summary)
-    return h('button', { class: `market-note-link${access || note.changed?.length ? ' has-detail' : ''}`,
-      type: 'button', 'aria-haspopup': 'dialog', 'aria-label': `Read Loam’s note on ${entry.name}. ${excerpt}`, title: note.changed?.[0] || note.summary,
+    const excerpt = note.changed?.[0] || note.differences?.[0] || access || (appearance ? reachOf(declaration, 'theme').text : note.summary)
+    return h('button', { class: `market-note-link${access || note.changed?.length || note.differences?.length ? ' has-detail' : ''}`,
+      type: 'button', 'aria-haspopup': 'dialog', 'aria-label': `Read Loam’s note on ${entry.name}. ${excerpt}`, title: note.changed?.[0] || note.differences?.[0] || note.summary,
       onclick: () => { sheet().noteFor = entry.id; host.schedule() } },
       h('span', { class: 'market-note-price', text: 'Free' }),
       h('span', { class: 'market-note-label', text: 'Loam’s note' }),
@@ -533,6 +533,7 @@ export function mount(host) {
         h('p', { class: 'market-loam-note-sub', text: `${sub}. Not the maker’s words.` }),
         h('p', { class: 'market-loam-note-summary', text: note.summary }),
         group('changed', note.since ? `New since ${note.since}` : 'New in this version', ' market-note-changed'),
+        group('differences', 'Differences from its description', ' market-note-differences'),
         ...NOTE_GROUPS.map(([key, title]) => group(key, title))))
     return menuSurface(card, { title: `Loam’s note on ${entry.name}`, close, heading: false, width: 580,
       anchor: '.market-note-link', centered: matchMedia('(min-width: 700px)').matches, initialFocus: 'heading' })
@@ -712,7 +713,9 @@ export function mount(host) {
   // ------------------------------------------------------------ the install sheet
   async function openInstall(id, candidate = null) {
     if (!candidate && !st.list) await load()
-    const entry = candidate ?? entryOf(id)
+    const listed = entryOf(id)
+    const samePin = listed?.review && (!candidate?.pinned_link || candidate.pinned_link === (listed.pinned_link ?? listed.link))
+    const entry = candidate ? (candidate.review || !samePin ? candidate : { ...candidate, review: listed.review }) : listed
     if (!entry) { st.install = { id, phase: 'gone' }; host.schedule(); return }
     st.install = { id, entry, phase: 'reading', preview: null, error: '' }
     host.schedule()
@@ -880,6 +883,7 @@ export function mount(host) {
     const verb = update ? 'Update' : theme ? 'Get' : 'Install'
     const additions = Boolean(update && Object.keys(p.added ?? {}).length)
     const lines = p ? plainTouches(additions ? { touches: p.added, overrides: p.added.overrides, page_code: p.added.page_code } : p.declaration, kind, additions) : []
+    const differences = !link ? (entry?.review?.note?.differences ?? []) : []
     const description = entry?.description ?? p?.description
     const from = link && p?.source ? `from github.com/${p.source.repo}` : null
     async function decide(review) {
@@ -914,6 +918,14 @@ export function mount(host) {
       // From a link (the owner, 2026-11-19): nobody reviewed it, and the one
       // sentence that says so comes before the yes, above what it declares.
       link && !done && p ? h('p', { class: 'market-unreviewed', role: 'note' }, icon.info(15), h('span', { text: kind === 'theme' && !p.declaration?.page_code && !p.declaration?.touches?.server ? 'Nobody at Loam has looked at this. A theme changes only how Loam looks.' : 'Nobody at Loam has looked at this. Once installed, it can do anything you can on this machine.' })) : null,
+      // Differences from the plugin's own description (2026-11-27): shown right
+      // where the owner reads before installing or updating, never collapsed.
+      !done && differences.length ? h('section', { class: 'market-install-differences', 'aria-labelledby': 'market-install-diff-title' },
+        h('div', { class: 'market-diff-head' },
+          h('img', { class: 'market-diff-mark', src: '/icon.svg', alt: '' }),
+          h('h3', { class: 'market-diff-title', id: 'market-install-diff-title', text: 'Differences Loam noted' })),
+        h('ul', { class: `market-diff-list${differences.length === 1 ? ' market-diff-list-one' : ''}` },
+          ...differences.map((line, i) => h('li', { key: `d:${i}`, text: line })))) : null,
       !done ? h('section', { class: 'market-install-touches', 'aria-label': update ? 'Added in this version' : 'Before you say yes' },
         h('h3', { class: 'market-facts-title', text: update ? (Object.keys(p.added ?? {}).length ? 'New in this version' : 'Nothing new in what it touches') : 'Before you say yes' }),
         job.phase === 'reading' ? h('p', { class: 'note market-reading', role: 'status' }, h('span', { class: 'market-pulse', 'aria-hidden': 'true' }), 'Reading what it declares, from its own link…')

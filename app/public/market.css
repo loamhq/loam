@@ -401,6 +401,8 @@
 .market-note-list li { font-size: 15px; line-height: 1.55; color: var(--paper-ink-2); }
 .market-note-list li::marker { color: var(--paper-ink-3); }
 .market-note-changed { margin-bottom: 14px; padding: 14px 18px; border: 0; border-radius: var(--radius-lg); background: var(--paper-card); }
+.market-note-differences { margin-bottom: 14px; padding: 14px 18px; border: 0; border-radius: var(--radius-lg); background: var(--paper-card); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--signal-crema) 42%, var(--paper-rule)); }
+.market-note-differences .market-note-list li::marker { color: var(--signal-crema); }
 .market-review-sheet[data-menu-layout="sheet"] .market-loam-note-head { padding: 6px 18px 14px; }
 .market-review-sheet[data-menu-layout="sheet"] .market-note-scroll { padding: 18px 22px calc(22px + env(safe-area-inset-bottom, 0px)); }
 .market-side { position: sticky; top: 24px; display: flex; flex-direction: column; gap: 28px; min-width: 0; }
@@ -515,6 +517,19 @@
 .market-install-desc, .market-install-done { margin: 0; font-size: 15px; line-height: 1.5; color: var(--paper-ink-2); }
 .market-install-done { font-size: var(--type-lead); color: var(--paper-ink); }
 .market-install-touches { padding: var(--space-md) var(--space-lg); border-radius: var(--radius-lg); background: var(--paper-raised); box-shadow: 0 0 0 1px var(--paper-rule); }
+.market-install-differences {
+  display: flex; flex-direction: column; gap: var(--space-sm);
+  padding: var(--space-md) var(--space-lg); border-radius: var(--radius-lg);
+  background: var(--paper-card); color: var(--paper-ink);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--signal-crema) 42%, var(--paper-rule));
+}
+.market-diff-head { display: flex; align-items: center; gap: 8px; }
+.market-diff-mark { flex: none; width: 18px; height: 18px; }
+.market-diff-title { margin: 0; font-size: 13.5px; font-weight: 600; line-height: 1.3; color: var(--paper-ink); }
+.market-diff-list { margin: 0; padding: 0 0 0 18px; display: flex; flex-direction: column; gap: 6px; }
+.market-diff-list-one { padding-left: 0; list-style: none; }
+.market-diff-list li { font-size: 14px; line-height: 1.5; color: var(--paper-ink-2); overflow-wrap: anywhere; }
+.market-diff-list li::marker { color: var(--signal-crema); }
 .market-yes-once, .market-root { margin: 0; }
 .market-install-acts { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-sm); margin-top: var(--space-xs); }
 .market-progress { height: 4px; border-radius: 2px; background: var(--paper-card); overflow: hidden; }

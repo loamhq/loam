@@ -20,7 +20,7 @@ import loam_plugin_servers
 import loam_plugins as plugins
 
 DAY = 86400
-REVIEW_FORMAT = 4
+REVIEW_FORMAT = 5
 _lock = threading.Lock()
 
 
@@ -131,7 +131,9 @@ def inspect(pid, line, entry, market_state):
         return result
     if via == "link" and candidate["ref_kind"] != "tag":
         return result
-    held = bool(built or preview["added"] or not line.get("declaration")
+    review_diffs = (((entry or {}).get("review") or {}).get("note") or {}).get("differences") or []
+    held = bool(built or preview["added"] or (via == "market" and review_diffs)
+                or not line.get("declaration")
                 or source["repo"].lower() != candidate["repo"].lower())
     result["candidate"] = {"id": pid, "version": preview["version"],
                            "source": {**candidate, "via": via}, "files": preview["files"],
@@ -141,7 +143,8 @@ def inspect(pid, line, entry, market_state):
         result["match_only"] = True
     result.update(commit=candidate["commit"], version=preview["version"],
                   link=candidate["url"], confirm=preview["confirm"], held=held,
-                  added=preview["added"])
+                  added=preview["added"],
+                  **({"differences": review_diffs} if via == "market" and review_diffs else {}))
     return result
 
 
@@ -213,7 +216,7 @@ def check(nightly=False):
                 if entry:
                     cache["entries"][pid] = {k: entry[k] for k in
                                               ("id", "author", "repo", "ref", "path", "pin",
-                                               "version", "link", "pinned_link")
+                                               "version", "link", "pinned_link", "review")
                                               if k in entry}
                 try:
                     record = inspect(upstream_id, line, entry, catalogue["state"])
@@ -297,10 +300,13 @@ def check(nightly=False):
                 continue
             if record.get("held"):
                 if not record.get("notified"):
+                    detail = (json.dumps(record["added"]) if record.get("added")
+                              else json.dumps({"differences": record["differences"]})
+                              if record.get("differences") else None)
                     told = loam_attention.tell(
                         f"{pid} {record['version']} needs your yes. Review the update in Settings › Plugins.",
                         by="plugin-updates", key=f"{pid}-{record['commit']}", evidence=record["link"],
-                        detail=json.dumps(record["added"]) if record["added"] else None)
+                        detail=detail)
                     if told in ("told", "repeat"):
                         record["notified"] = True
                         cache_changed = True

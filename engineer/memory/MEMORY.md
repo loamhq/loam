@@ -3399,3 +3399,45 @@ listener for immediate notification in an open page.
     hydrates live steps on `thread.snapshot`, and clears empty drafts/step
     state when a quiet `_tail` notification turn ends (`working: false` outside
     `activeTurns`).
+
+## 2026-11-27 — Market standards: imprecise passes with `note.differences`, concealing is refused
+
+- **Reviewer policy & schema (`loamhq/marketplace`, mirrored in `docs/marketplace/`):**
+  - Updated three passages in `review/STANDARDS.md`: Test 3 now judges truthfulness
+    across `touches`, description, and README together — honest imprecision passes
+    with explicit `note.differences`, while anything leaving an owner believing
+    something false (or an undeclared host named nowhere, or a quiet widening on
+    update) is refused. Test 2 (nothing nefarious) and fail-closed steering-lead
+    rulings are unchanged.
+  - `review/review.py` adds `note.differences` (list of plain owner-facing
+    sentences) and boolean `words_mislead_owner` to `SCHEMA`. `shape()` and
+    `decide.final()` refuse on `words_mislead_owner: true`, fail closed as `error`
+    if `declaration_matches_code: false` is passed with empty `note.differences`,
+    and allow an imprecise pass once `note.differences` names each difference.
+  - `build.py` copies non-empty `differences` into `list.json` (`NOTE_LISTS`) and
+    omits empty lists so existing `list.json` entries stay byte-identical and older
+    Loams (`<= 0.2.40`) ignore unknown note keys cleanly.
+  - Proof set grew from 17 to 23 cases (`imprecise-schedule-server`,
+    `imprecise-tool-server`, `imprecise-readme-host`, `concealing-record-write`,
+    `concealing-extra-context`, `concealing-declared-host-why`), with
+    `expect_differences` enforced in `review/proof.py`.
+- **App, broker, updates, and persona reach (`lib/loam_marketplace.py`, `lib/loam_plugin_updates.py`, `bin/loam-market`, `app/public/page/market.js`, `app/public/market.css`):**
+  - `lib/loam_marketplace.py` reads `differences` in `NOTE_LISTS` and returns
+    `differences` (when non-empty) on `search()` results; `bin/loam-market` prints
+    them in `list` and `search`.
+  - `lib/loam_plugin_updates.py` bumps `REVIEW_FORMAT` to `5`, caches `"review"`
+    in `updates["entries"]`, and holds automatic Market updates when
+    `review.note.differences` is non-empty so the owner reviews them on the update
+    sheet.
+  - Install and update sheets (`installNodes`) render a calm, uncollapsed
+    **Differences Loam noted** card directly above "Before you say yes" / "New in
+    this version" / "Nothing new in what it touches" whenever `differences` is
+    non-empty; listings with no differences render zero extra nodes. Loam's note
+    sheet adds **Differences from its description**, and the listing note button
+    previews the first difference when there is no update change.
+- **Landing order:** Loam landed and deployed live first, then `loamhq/marketplace`
+  merged after CI `review-tests` and `review-proof` went green, so the public
+  standards page never got ahead of the reviewer or install screen. `review/config.json`
+  stays pinned on Loam `0.2.40` because `prepare.py` only reads `lib/loam_plugins.py`
+  (unchanged); stock installs on `<= 0.2.40` need the next Loam release (`0.2.41`)
+  to display `note.differences`, while continuing to install listings safely until then.

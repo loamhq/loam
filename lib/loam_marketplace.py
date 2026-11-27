@@ -210,7 +210,7 @@ def check_entry(entry) -> tuple[dict | None, str | None]:
 # Every field is optional and bounded here; a value that is not one is left
 # out, never the listing.
 
-NOTE_LISTS = ("touches", "may_change", "worth_knowing", "changed")
+NOTE_LISTS = ("touches", "may_change", "worth_knowing", "differences", "changed")
 NOTE_ITEMS, NOTE_ITEM_MAX, NOTE_SUMMARY_MAX = 8, 400, 600
 SHA = re.compile(r"^[0-9a-f]{40}$")
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}")
@@ -1107,12 +1107,14 @@ def search(q: str = "", kind: str = "all", limit: int = SEARCH_LIMIT,
     for pid in ids[:max(1, min(int(limit or SEARCH_LIMIT), 20))]:
         e = by_id[pid]
         listed_only = [k for k in e["kind"] if k in loam_plugins.LISTED_ONLY]
+        diffs = ((e.get("review") or {}).get("note") or {}).get("differences") or []
         results.append({
             "id": pid, "name": e["name"], "author": e["author"], "kind": e["kind"],
             **({"downloads": e["downloads"]} if "downloads" in e else {}),
             "creator": e.get("creator") or {"name": e["author"], "links": []},
             "description": e.get("description") or "",
             **({"cover": e["cover_url"]} if e.get("cover_url") else {}),
+            **({"differences": diffs} if diffs else {}),
             "installed": bool(e.get("installed")),
             "installable": not listed_only,
             **({"why_not": f"Loam lists {listed_only[0]} packages and installs none yet"}

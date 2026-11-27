@@ -529,7 +529,7 @@
       },
       {
         "name": "market",
-        "description_sha256": "cbbeb9ff828a3f020a389ac393226bffffe8b74d9fa5884e11f565ff7212f34f",
+        "description_sha256": "20cf1a794240fc1792cb7a2cd709a6f06e333f678da2576ec72192ed0288190d",
         "inputSchema": {
           "properties": {
             "query": {

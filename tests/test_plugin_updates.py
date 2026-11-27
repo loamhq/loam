@@ -763,6 +763,24 @@ class Updates(unittest.TestCase):
         self.assertTrue(updates.check(nightly=True)["plugins"]["notes"]["held"])
         self.assertEqual(plugins.load_list()["plugins"]["notes"]["version"], "1.0.0")
 
+    def test_market_update_with_note_differences_is_held_and_cached_with_review(self):
+        self.install()
+        self.release("1.1.0")
+        diff_line = "The plugin says it runs no server code; it runs a Python script on your server every night."
+        entry = {"id": "notes", "name": "Notes", "version": "1.1.0", "author": "Maker",
+                 "kind": "extension", "link": "https://github.com/maker/notes/tree/v1.1.0",
+                 "review": {"commit": self.git("rev-parse", "v1.1.0"),
+                            "version": "1.1.0",
+                            "note": {"summary": "Reviewed this release.", "differences": [diff_line]}}}
+        self.listfile.write_text(json.dumps({"plugins": [entry]}))
+        checked = updates.check(nightly=True)
+        self.assertFalse(checked["errors"])
+        self.assertTrue(checked["plugins"]["notes"]["held"])
+        self.assertEqual(plugins.one("notes")["plugin"]["version"], "1.0.0")
+        self.assertEqual(checked["entries"]["notes"]["review"]["note"]["differences"], [diff_line])
+        self.tell.assert_called_once()
+        self.assertIn(diff_line, self.tell.call_args.kwargs.get("detail") or "")
+
 
 if __name__ == "__main__":
     unittest.main()

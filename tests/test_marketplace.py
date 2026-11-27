@@ -324,7 +324,9 @@ try:
     # Read the review note from the catalog record.
     sha = "a" * 40
     note = {"summary": "  Counts   words. ", "touches": ["Nothing off the page.", 7, ""],
-            "may_change": ["x" * 900], "worth_knowing": [], "changed": ["Now reads threads."],
+            "may_change": ["x" * 900], "worth_knowing": [],
+            "differences": ["The plugin says it runs no server code; it runs a script on your server.", ""],
+            "changed": ["Now reads threads."],
             "since": "1.0.0", "extra": "dropped"}
     reviewed, why = mk.check_entry(entry("pet", review={"commit": sha, "version": "1.0.0",
                                                         "reviewed_at": "2026-11-19T10:00:00Z",
@@ -332,9 +334,15 @@ try:
     check("a reviewed listing keeps its note, bounded, and nothing else in it",
           (why, reviewed["review"]["note"]["summary"], reviewed["review"]["note"]["touches"],
            len(reviewed["review"]["note"]["may_change"][0]), "worth_knowing" in reviewed["review"]["note"],
+           reviewed["review"]["note"]["differences"],
            "extra" in reviewed["review"]["note"], reviewed["review"]["note"]["since"],
            reviewed["review"]["reviewed_at"]),
-          (None, "Counts words.", ["Nothing off the page."], 400, False, False, "1.0.0", "2026-11-19"))
+          (None, "Counts words.", ["Nothing off the page."], 400, False,
+           ["The plugin says it runs no server code; it runs a script on your server."],
+           False, "1.0.0", "2026-11-19"))
+    reviewed_no_diff, _ = mk.check_entry(entry("pet", review={"commit": sha, "version": "1.0.0",
+                                                              "note": {"summary": "Clean.", "differences": []}}))
+    check("empty note.differences is omitted", "differences" in reviewed_no_diff["review"]["note"], False)
     check("and is read and installed at the commit the review read, not its tag",
           (reviewed["pinned_link"], reviewed["pin"], reviewed["link"]),
           (f"https://github.com/friend/loam-pet/tree/{sha}/pet", {"ref": sha, "path": "pet"},
@@ -696,18 +704,27 @@ try:
     ANSWERS["/list.json"] = (200, json.dumps({"version": 1, "plugins": [
         entry("pet", name="A pet", description="A small animal.", cover="art/pet.webp",
               author="A friend", creator={"name": "A friend", "links": [
-                  {"label": "", "url": "https://ko-fi.com/friend"}]})]}))
+                  {"label": "", "url": "https://ko-fi.com/friend"}]},
+              review={"commit": "b" * 40, "version": "1.0.0",
+                      "note": {"summary": "A pet.", "differences": [
+                          "The plugin says it runs no server code; it runs a helper script on your server."]}})]}))
     mk.read(refresh=True)
     rich = mk.search("animal")["results"][0]
-    check("a result carries the creator's links, with kinds, and the cover's public address",
-          (rich["creator"], rich["cover"]),
+    check("a result carries the creator's links, with kinds, the cover's public address, and note differences",
+          (rich["creator"], rich["cover"], rich["differences"]),
           ({"name": "A friend", "links": [{"label": "Ko-fi", "url": "https://ko-fi.com/friend", "kind": "kofi"}]},
-           "https://raw.githubusercontent.com/friend/loam-pet/v1.0.0/pet/art/pet.webp"))
+           "https://raw.githubusercontent.com/friend/loam-pet/v1.0.0/pet/art/pet.webp",
+           ["The plugin says it runs no server code; it runs a helper script on your server."]))
     cli_rich = subprocess.run([str(ROOT / "bin" / "loam-market"), "search", "animal"],
                               capture_output=True, text=True, timeout=60).stdout
-    check("loam market search prints the links and the cover",
-          ("A friend: Ko-fi https://ko-fi.com/friend" in cli_rich, "cover: https://raw.githubusercontent.com" in cli_rich),
-          (True, True))
+    check("loam market search prints the links, the cover, and note differences",
+          ("A friend: Ko-fi https://ko-fi.com/friend" in cli_rich, "cover: https://raw.githubusercontent.com" in cli_rich,
+           "Loam's note difference: The plugin says it runs no server code" in cli_rich),
+          (True, True, True))
+    cli_list = subprocess.run([str(ROOT / "bin" / "loam-market"), "list"],
+                              capture_output=True, text=True, timeout=60).stdout
+    check("loam market list prints note differences too",
+          "Loam's note difference: The plugin says it runs no server code" in cli_list, True)
     ANSWERS.pop("/list.json", None)
     mk.read(refresh=True)
 
