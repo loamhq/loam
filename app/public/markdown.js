@@ -695,6 +695,19 @@ function tableAt(lines, at) {
     return filled.length > 0 && filled.every(isNumeric) ? 'right' : null
   })
 
+  const parsedHead = head.map(parseInline)
+  const parsedRows = rows.map((row) => row.map(parseInline))
+  // Classify each column by visible body-cell length so short values stay
+  // unbroken while prose columns wrap with a sensible minimum width.
+  const cols = parsedHead.map((_, n) => {
+    const filled = parsedRows.map((row) => stripInline(row[n]).trim()).filter((cell) => cell !== '')
+    if (filled.length === 0) return null
+    const maxLen = filled.reduce((max, cell) => Math.max(max, cell.length), 0)
+    if (maxLen <= 14 || (align[n] === 'right' && maxLen <= 22)) return 'compact'
+    if (maxLen <= 28) return 'medium'
+    return 'prose'
+  })
+
   return {
     block: {
       type: 'table',
@@ -703,8 +716,9 @@ function tableAt(lines, at) {
       // as not the composer, which sends markdown.
       source: lines.slice(at, i).map((row) => row.trim()).join('\n'),
       align,
-      head: head.map(parseInline),
-      rows: rows.map((row) => row.map(parseInline)),
+      cols,
+      head: parsedHead,
+      rows: parsedRows,
     },
     end: i,
   }
@@ -1163,20 +1177,31 @@ const CALLOUTS = {
 // its width, and what does not fit slides sideways *inside* the bubble rather
 // than pushing the thread out past the edge of the screen.
 function renderTable(block) {
-  const cell = (tag, cells, align) =>
-    h(
-      'tr',
-      {},
-      ...cells.map((children, n) => h(tag, align[n] ? { class: `ta-${align[n]}` } : {}, ...renderInline(children))),
-    )
+  const headCell = (children, n) => {
+    const props = {}
+    if (block.align[n]) props.class = `ta-${block.align[n]}`
+    if (block.cols?.[n]) props['data-col'] = block.cols[n]
+    if (stripInline(children).trim().length > 18) props['data-wrap'] = ''
+    return h('th', props, ...renderInline(children))
+  }
+  const bodyCell = (children, n) => {
+    const props = {}
+    if (block.align[n]) props.class = `ta-${block.align[n]}`
+    if (block.cols?.[n]) props['data-col'] = block.cols[n]
+    if (block.cols?.[n] !== 'compact') {
+      const len = stripInline(children).trim().length
+      if (len > 0 && len <= 14) props['data-nowrap'] = ''
+    }
+    return h('td', props, ...renderInline(children))
+  }
   return h(
     'div',
     { class: 'tablewrap' },
     h(
       'table',
       {},
-      h('thead', {}, cell('th', block.head, block.align)),
-      ...(block.rows.length === 0 ? [] : [h('tbody', {}, ...block.rows.map((row) => cell('td', row, block.align)))]),
+      h('thead', {}, h('tr', {}, ...block.head.map(headCell))),
+      ...(block.rows.length === 0 ? [] : [h('tbody', {}, ...block.rows.map((row) => h('tr', {}, ...row.map(bodyCell))))]),
     ),
   )
 }

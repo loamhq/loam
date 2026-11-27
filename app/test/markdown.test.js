@@ -120,7 +120,7 @@ test('no reply, however it is written, can produce anything but these nodes', ()
     '|', '---', ':--', '--:', '| a |',
   ]
   const ALLOWED = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'pre', 'code', 'ul', 'ol', 'li', 'blockquote', 'hr', 'a', 'strong', 'em', 'del', 'br', 'div', 'table', 'thead', 'tbody', 'tr', 'th', 'td'])
-  const ATTRS = new Set(['class', 'href', 'target', 'rel'])
+  const ATTRS = new Set(['class', 'href', 'target', 'rel', 'data-col', 'data-wrap', 'data-nowrap'])
 
   let seed = 20260918
   const next = (n) => {
@@ -257,12 +257,30 @@ test('a three-column table is a table, header and body apart', () => {
     draw(src),
     'div.tablewrap(' +
       'table(' +
-      'thead(tr(th("Agent"),th.ta-right("Chats"),th.ta-right("Spend")))' +
+      'thead(tr(th[data-col=compact]("Agent"),th.ta-right[data-col=compact]("Chats"),th.ta-right[data-col=compact]("Spend")))' +
       ',tbody(' +
-      'tr(td("Scout"),td.ta-right("12"),td.ta-right("$3.40"))' +
-      ',tr(td("Sable"),td.ta-right("3"),td.ta-right("$0.18"))' +
+      'tr(td[data-col=compact]("Scout"),td.ta-right[data-col=compact]("12"),td.ta-right[data-col=compact]("$3.40"))' +
+      ',tr(td[data-col=compact]("Sable"),td.ta-right[data-col=compact]("3"),td.ta-right[data-col=compact]("$0.18"))' +
       ')))',
   )
+})
+
+test('columns classify compact, medium, prose, short cells in mixed columns, and long headers', () => {
+  const src = [
+    '| Operation | Time | What happened during this rollout |',
+    '| --- | --- | --- |',
+    '| Build image | 4 min 10 s | Rebuilt the worker image and pushed layers to the registry. |',
+    '| Health check | Waiting for probe reply | OK |',
+  ].join('\n')
+  const table = markdown(src)[0].childNodes[0]
+  const ths = table.childNodes[0].childNodes[0].childNodes
+  assert.deepEqual(ths.map((n) => n.getAttribute('data-col')), ['compact', 'medium', 'prose'])
+  assert.deepEqual(ths.map((n) => n.hasAttribute('data-wrap')), [false, false, true])
+
+  const row1 = table.childNodes[1].childNodes[0].childNodes
+  const row2 = table.childNodes[1].childNodes[1].childNodes
+  assert.deepEqual(row1.map((n) => n.hasAttribute('data-nowrap')), [false, true, false])
+  assert.deepEqual(row2.map((n) => n.hasAttribute('data-nowrap')), [false, false, true])
 })
 
 test('the dashes say how a column lines up, and a column of numbers says so itself', () => {
@@ -286,8 +304,8 @@ test('a cell is markdown, and a pipe a writer meant is a pipe', () => {
   assert.equal(
     draw(src),
     'div.tablewrap(table(' +
-      'thead(tr(th("what"),th("how")))' +
-      ',tbody(tr(td(strong("bold")," and ",code("code")),td("a | b"))))' +
+      'thead(tr(th[data-col=compact]("what"),th[data-col=compact]("how")))' +
+      ',tbody(tr(td[data-col=compact](strong("bold")," and ",code("code")),td[data-col=compact]("a | b"))))' +
       ')',
   )
 })
@@ -305,7 +323,7 @@ test('a table can follow a sentence with no blank line, and ends where it ends',
   assert.equal(
     draw(src),
     'p("Here is what ran:") ' +
-      'div.tablewrap(table(thead(tr(th.ta-right("a"),th.ta-right("b"))),tbody(tr(td.ta-right("1"),td.ta-right("2"))))) ' +
+      'div.tablewrap(table(thead(tr(th.ta-right[data-col=compact]("a"),th.ta-right[data-col=compact]("b"))),tbody(tr(td.ta-right[data-col=compact]("1"),td.ta-right[data-col=compact]("2"))))) ' +
       'p("and that was all.")',
   )
 })

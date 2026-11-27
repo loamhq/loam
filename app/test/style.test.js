@@ -137,44 +137,58 @@ test('a row’s chat name is the 17px slot and the agent’s name is the muted o
   assert.match(CSS, /\.srow-line \.srow-name\s*\{[^}]*min-width:\s*0/)
 })
 
-// A table is drawn by nodes `test/markdown.test.js` asserts and by four rules
-// nothing but this file can see — the padding, the rule between the rows, the
-// header's own fill, and the scroller that keeps a wide one inside its bubble.
-test('a table is padded, ruled between its rows, and scrolls inside its bubble', () => {
+// A table is drawn by nodes `test/markdown.test.js` asserts and by calm
+// document-style rules: fit the column first with wrapping prose, keep short
+// values unbroken, fade overflowing edges, and keep the owner bubble consistent.
+test('a table is calm, wraps prose to fit the column, and fades edges when it scrolls', () => {
   const wrap = /\.md \.tablewrap\s*\{([^}]*)\}/.exec(CSS)
   assert.notEqual(wrap, null, 'a table has no scroller of its own, so a wide one pushes the thread sideways')
   assert.match(wrap[1], /overflow-x:\s*auto/)
   assert.match(wrap[1], /max-width:\s*100%/)
+  assert.doesNotMatch(wrap[1], /border-radius:/, 'a table should not be framed in a rounded box')
+  for (const edge of ['right', 'left', 'both']) {
+    assert.match(CSS, new RegExp(`\\.md \\.tablewrap\\[data-edges="${edge}"\\]\\s*\\{[^}]*mask-image:\\s*linear-gradient`), `missing edge fade mask for ${edge}`)
+  }
 
-  // Wider than the scroller when its columns need it, and never narrower than
-  // it when they do not.
+  // Fits the column first (never `width: max-content`), with tabular numerals
+  // and natural word wrapping.
   const table = /\.md table\s*\{([^}]*)\}/.exec(CSS)
   assert.notEqual(table, null)
-  assert.match(table[1], /width:\s*max-content/)
-  assert.match(table[1], /min-width:\s*100%/)
-  // The bubble is `pre-wrap`; a cell that inherited it would be one line
-  // however long it is, and the scroller would be the whole table's width.
+  assert.match(table[1], /width:\s*100%/)
+  assert.doesNotMatch(table[1], /width:\s*max-content/)
+  assert.match(table[1], /font-size:\s*15px/)
+  assert.match(table[1], /line-height:\s*1\.45/)
+  assert.match(table[1], /font-variant-numeric:\s*tabular-nums/)
   assert.match(table[1], /white-space:\s*normal/)
+  assert.match(table[1], /overflow-wrap:\s*break-word/)
 
   const cells = /\.md th, \.md td\s*\{([^}]*)\}/.exec(CSS)
   assert.notEqual(cells, null, 'the cells have no padding rule')
-  assert.match(cells[1], /padding:\s*\d/)
+  assert.match(cells[1], /padding:\s*10px/)
 
-  // The header row is told apart by a fill, and the rows by one hairline in the
-  // colour the rest of `.md` rules in — the same token as the `hr`.
-  assert.match(/\.md thead th\s*\{([^}]*)\}/.exec(CSS)[1], /background:\s*var\(--paper-pane\)/)
-  const rule = /\.md tbody tr \+ tr td[^{]*\{([^}]*)\}/.exec(CSS)
+  // Quiet label header row: muted ink, transparent fill, one rule under it;
+  // lighter hairlines between body rows.
+  const head = /\.md thead th\s*\{([^}]*)\}/.exec(CSS)
+  assert.notEqual(head, null)
+  assert.match(head[1], /background:\s*transparent/)
+  assert.match(head[1], /font-size:\s*12\.5px/)
+  assert.match(head[1], /font-weight:\s*600/)
+  assert.match(head[1], /color:\s*var\(--paper-ink-3\)/)
+  assert.match(head[1], /border-bottom:\s*1px solid var\(--paper-rule-strong\)/)
+  const rule = /\.md tbody tr \+ tr td\s*\{([^}]*)\}/.exec(CSS)
   assert.notEqual(rule, null, 'there is no rule between a table’s rows')
-  assert.match(rule[1], /border-top:\s*1px solid var\(--paper-rule-strong\)/)
-  assert.match(/\.md hr\s*\{([^}]*)\}/.exec(CSS)[1], /var\(--paper-rule-strong\)/, 'the two rules in a reply are drawn in different colours')
+  assert.match(rule[1], /border-top:\s*1px solid var\(--paper-rule\)/)
+  assert.match(CSS, /\.md td\[data-col="compact"\],\s*\.md td\[data-nowrap\]\s*\{[^}]*white-space:\s*nowrap/)
+  assert.match(CSS, /\.md td\[data-col="prose"\]\s*\{[^}]*min-width:/)
 
   // What the parser's alignment classes are for. Right is the one the numbers
   // get, and it has to exist for the column to move at all.
   assert.match(CSS, /\.md td\.ta-right\s*\{[^}]*text-align:\s*right/)
   assert.match(CSS, /\.md td\.ta-center\s*\{[^}]*text-align:\s*center/)
-  // The person's bubble is the accent fill, so its header and its rules are the
-  // bubble's own ink rather than a surface colour that would vanish into it.
+  // The person's bubble is the surface fill, so its header and its rules are
+  // derived from currentColor via color-mix.
   assert.match(CSS, /\.say\.user\.md thead th\s*\{[^}]*currentColor/)
+  assert.match(CSS, /\.say\.user\.md tbody tr \+ tr td\s*\{[^}]*currentColor/)
 })
 
 test('the composer clears the phone’s own strip, and the app can be sized to the visual viewport', () => {
@@ -656,11 +670,11 @@ test('a sheet’s handle row takes the touch, and the ✕ is the design’s 32px
   assert.match(all.find((r) => r.selector === '.scrim').body, /touch-action:\s*none/)
 })
 
-// The owner, 2026-09-30: a formatted block "is its own separate scrollable
-// container". A code block and a table slide sideways and never up and down, so
-// a vertical swipe that lands on one is the thread's; and the copy button is a
-// ghost a pointer finds on hover and a phone always sees.
-test('a code block and a table scroll sideways only, and the copy button shows by hover or always', () => {
+// A formatted block scrolls sideways and never up and down, so a vertical
+// swipe that lands on one belongs to the thread. Desktop reveals Copy on hover;
+// touch keeps Copy on code blocks while dropping the permanent pill and 52px
+// band on tables.
+test('a code block and a table scroll sideways only, and touch drops the permanent table Copy band', () => {
   const all = rules(CSS)
   for (const selector of ['.md pre', '.md .tablewrap']) {
     const rule = all.find((r) => r.selector === selector && r.media.length === 0)
@@ -675,7 +689,9 @@ test('a code block and a table scroll sideways only, and the copy button shows b
   assert.match(hovering.find((r) => r.selector === '.copyblk').body, /opacity:\s*0/)
   assert.ok(hovering.some((r) => r.selector.includes('.block:hover .copyblk')), 'hovering a block does not show its button')
   const touch = all.filter((r) => r.media.some((m) => /hover:\s*none/.test(m)))
-  assert.match(touch.find((r) => r.selector === '.copyblk').body, /opacity:\s*1/, 'a phone cannot see the button')
+  assert.match(touch.find((r) => r.selector === '.code-frame .copyblk').body, /opacity:\s*1/, 'a phone cannot see the code block copy button')
+  assert.match(touch.find((r) => r.selector === '.table-frame .copyblk').body, /opacity:\s*0/, 'a phone still shows a permanent Copy pill on tables')
+  assert.equal(touch.some((r) => r.selector === '.md .table-frame' && /padding-top/.test(r.body)), false, 'a phone still adds a top band to tables')
 })
 
 test('the line where the reply will be is a calm dot that is still under reduced motion', () => {

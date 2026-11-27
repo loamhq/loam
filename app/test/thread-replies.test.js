@@ -184,9 +184,11 @@ test('holds, selection drags and interactive targets never become replies or con
   selected = false
   gesture.down(event(), original); gesture.move(event(65, 0, { preventDefault() {} })); selected = true; gesture.up()
   selected = false
-  for (const extra of [{ pointerType: 'mouse' }, { isPrimary: false }, { target: { closest: () => ({}) } }]) {
+  let seenSelector = ''
+  for (const extra of [{ pointerType: 'mouse' }, { isPrimary: false }, { target: { closest: (sel) => { seenSelector = sel; return {} } } }]) {
     gesture.down(event(0, 0, extra), original); gesture.move(event(90)); gesture.up()
   }
+  assert.match(seenSelector, /\.tablewrap/, 'horizontal table scrolling must not trigger swipe-to-reply')
   assert.equal(replies, 0)
 })
 test('message context menus and touch starts keep their native defaults without custom overlays', (t) => {

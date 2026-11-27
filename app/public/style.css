@@ -678,13 +678,13 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
 }
 /* A code block or a table with its copy button: the block in a frame of its
  * own, and the button in the frame's top-right corner rather than inside the
- * scroller, so it stays put while the block slides sideways under it. A ghost —
- * no border, no fill of its own beyond the block's — which a pointer finds on
- * hover and a phone always sees, muted, because a phone has no hover. It is not
- * selectable, so a long-press that selects the code selects the code and not the
- * word "Copy". */
+ * scroller, so it stays put while the block slides sideways under it. A pointer
+ * finds it on hover; on touch, code blocks keep their bar while tables stay
+ * uncluttered (copying the whole reply or selecting text still works). */
 .md .block { position: relative; margin: 8px 0; max-width: 100%; min-width: 0; }
-.md .block > pre, .md .block > .tablewrap { margin: 0; }
+.md .table-frame { width: fit-content; min-width: min(100%, 44ch); max-width: 100%; margin: 12px 0; }
+.md .block > pre { margin: 0; }
+.md .block > .tablewrap { width: 100%; min-width: 0; margin: 0; }
 .copyblk {
   position: absolute; top: 5px; right: 5px; z-index: 1;
   display: flex; align-items: center; gap: 4px;
@@ -694,51 +694,104 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
   transition: opacity .15s ease;
 }
 .code-frame .copyblk { background: var(--surface-code); color: var(--text-code-muted); }
-.table-frame .copyblk { background: var(--paper-pane); color: var(--paper-ink); }
+.table-frame .copyblk {
+  top: -8px; right: 0; padding: 0 10px;
+  background: transparent; color: var(--paper-ink-2);
+}
+.table-frame .copyblk::before {
+  content: ''; position: absolute; inset: 8px 0; z-index: -1; border-radius: 999px;
+  background: var(--paper-raised); border: 1px solid var(--paper-rule);
+  box-shadow: var(--shadow-float);
+  transition: background-color .15s ease;
+}
 .copyblk.done { opacity: 1; }
 @media (hover: hover) {
-  .copyblk { opacity: 0; }
-  .block:hover .copyblk, .copyblk:focus-visible, .copyblk.done { opacity: 1; }
+  .copyblk { opacity: 0; pointer-events: none; }
+  .block:hover .copyblk, .copyblk:focus-visible, .copyblk.done { opacity: 1; pointer-events: auto; }
   .code-frame .copyblk:hover { color: var(--text-code); }
   .table-frame .copyblk:hover { color: var(--paper-ink); }
+  .table-frame .copyblk:hover::before { background: var(--paper-hover); }
 }
-/* On a phone the button is always there, so the block makes room for it rather
- * than covering the end of the first line or the last header. */
+/* On a phone, code blocks keep their Copy bar above the first line; tables stay
+ * calm without a permanent Copy pill or top band. */
 @media (hover: none) {
   .md .code-frame > pre { padding-top: 54px; }
-  .md .table-frame { padding-top: 52px; }
-  .copyblk { opacity: 1; }
+  .code-frame .copyblk { opacity: 1; }
+  .table-frame .copyblk { opacity: 0; pointer-events: none; }
+  .table-frame .copyblk:is(:focus-visible, .done) { opacity: 1; pointer-events: auto; }
   .copyblk.done { opacity: 1; }
 }
 .md strong { font-weight: 700; }
 .md em { font-style: italic; }
 .md del { text-decoration: line-through; color: var(--paper-ink-3); }
 
-/* Wide tables scroll inside the bubble. Narrow tables fill it, and cell text can wrap independently of the bubble. */
-.md .tablewrap { max-width: 100%; overflow-x: auto; overflow-y: hidden; margin: 8px 0; border-radius: 12px; overscroll-behavior-x: contain; }
-.md table {
-  border-collapse: collapse; width: max-content; min-width: 100%;
-  font-size: 14.5px; line-height: 1.35; white-space: normal;
+/* Document-style tables: fit the column first with wrapping prose and unbroken
+ * short values, scrolling horizontally with edge fades only when columns truly
+ * cannot fit. */
+.md .tablewrap {
+  width: fit-content; min-width: min(100%, 44ch); max-width: 100%;
+  overflow-x: auto; overflow-y: hidden; margin: 12px 0;
+  overscroll-behavior-x: contain;
 }
-.md th, .md td { padding: 7px 12px; text-align: left; vertical-align: top; }
-/* The header row is the surface under it rather than a heavier rule: the design
- * has no table, and a fill is the quietest way to say which row is the labels
- * in a bubble that is already a fill of its own. */
-.md thead th { background: var(--paper-pane); font-weight: 700; white-space: nowrap; }
-/* One hairline between the rows, in the colour the rest of `.md` draws a rule
- * in — the `hr` and the quote's edge are the same token. */
-.md tbody tr + tr td, .md tbody tr:first-child td { border-top: 1px solid var(--paper-rule-strong); }
+.md .tablewrap:focus-visible { outline: 2px solid var(--signal-crema); outline-offset: 2px; border-radius: 4px; }
+.md .tablewrap[data-edges="right"] {
+  -webkit-mask-image: linear-gradient(to right, var(--mask-opaque) calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, var(--mask-opaque) calc(100% - 28px), transparent);
+}
+.md .tablewrap[data-edges="left"] {
+  -webkit-mask-image: linear-gradient(to right, transparent, var(--mask-opaque) 28px);
+  mask-image: linear-gradient(to right, transparent, var(--mask-opaque) 28px);
+}
+.md .tablewrap[data-edges="both"] {
+  -webkit-mask-image: linear-gradient(to right, transparent, var(--mask-opaque) 28px, var(--mask-opaque) calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, transparent, var(--mask-opaque) 28px, var(--mask-opaque) calc(100% - 28px), transparent);
+}
+.md table {
+  border-collapse: collapse; width: 100%;
+  font-size: 15px; line-height: 1.45; font-variant-numeric: tabular-nums;
+  white-space: normal; overflow-wrap: break-word;
+}
+.md th, .md td { padding: 10px 8px; text-align: left; vertical-align: top; }
+.md th:first-child, .md td:first-child { padding-left: 0; }
+.md th:last-child, .md td:last-child { padding-right: 0; }
+/* Quiet small label row over one rule, with lighter hairlines between rows. */
+.md thead th {
+  padding-top: 4px; padding-bottom: 8px;
+  background: transparent;
+  font-size: 12.5px; line-height: 1.35; font-weight: 600;
+  color: var(--paper-ink-3);
+  vertical-align: bottom; white-space: nowrap;
+  border-bottom: 1px solid var(--paper-rule-strong);
+}
+.md thead th[data-wrap] { white-space: normal; }
+.md th code { font-size: .92em; }
+.md td[data-col="compact"], .md td[data-nowrap] { white-space: nowrap; }
+.md td[data-col="medium"] { min-width: 6.5rem; }
+.md td[data-col="prose"] { min-width: 8.5rem; }
+.md td a, .md td code, .md th a, .md th code { overflow-wrap: anywhere; }
+.md tbody tr + tr td { border-top: 1px solid var(--paper-rule); }
+@media (min-width: 720px) {
+  .md th, .md td { padding: 10px 12px; }
+  .md th:first-child, .md td:first-child { padding-left: 0; }
+  .md th:last-child, .md td:last-child { padding-right: 0; }
+  .md td[data-col="medium"] { min-width: 7.5rem; }
+  .md td[data-col="prose"] { min-width: 10.5rem; }
+}
 /* What the dashes asked for, and what a column of nothing but numbers gets
  * without asking. */
 .md th.ta-right, .md td.ta-right { text-align: right; }
 .md th.ta-center, .md td.ta-center { text-align: center; }
 .md th.ta-left, .md td.ta-left { text-align: left; }
-/* In the person's own bubble the fill is the surface, so the two colours above
- * are answered in the bubble's own ink — the same rule the inline code and the
- * quote on this side already follow. */
-.say.user.md thead th { background: color-mix(in srgb, currentColor 16%, transparent); }
-.say.user.md tbody tr + tr td, .say.user.md tbody tr:first-child td {
-  border-top-color: color-mix(in srgb, currentColor 30%, transparent);
+/* In the person's own bubble the fill is the surface, so the header ink and
+ * rules are answered in the bubble's own ink — the same rule inline code and
+ * quotes on this side already follow. */
+.say.user.md .table-frame, .say.user.md > .tablewrap { min-width: 0; width: 100%; }
+.say.user.md thead th {
+  color: color-mix(in srgb, currentColor 72%, transparent);
+  border-bottom-color: color-mix(in srgb, currentColor 26%, transparent);
+}
+.say.user.md tbody tr + tr td {
+  border-top-color: color-mix(in srgb, currentColor 14%, transparent);
 }
 
 /* The person's own message, rendered by the same renderer. Its bubble is the
@@ -2104,12 +2157,8 @@ a.ghline { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
   .fs-edhead.folder-back .fs-mode-toggle { display: flex; }
 }
 .fs-preview { min-width: 0; }
-.fs-preview :is(:not(pre) > code, thead th, .table-frame .copyblk) { background: var(--paper-card); color: var(--paper-card-ink); }
-.fs-preview .tablewrap { width: 100%; }
-.fs-preview table { overflow-wrap: normal; word-break: normal; }
-.fs-preview .tablewrap[data-edges="right"] { mask-image: linear-gradient(to right, var(--mask-opaque) calc(100% - 28px), transparent); }
-.fs-preview .tablewrap[data-edges="left"] { mask-image: linear-gradient(to right, transparent, var(--mask-opaque) 28px); }
-.fs-preview .tablewrap[data-edges="both"] { mask-image: linear-gradient(to right, transparent, var(--mask-opaque) 28px, var(--mask-opaque) calc(100% - 28px), transparent); }
+.fs-preview :not(pre) > code { background: var(--paper-card); color: var(--paper-card-ink); }
+.fs-preview .tablewrap { width: 100%; min-width: 0; }
 .fs-htmlframe { flex: 1; min-height: 0; min-width: 0; width: 100%; overflow: hidden; display: flex; flex-direction: column; }
 .fs-htmlbar { display: flex; flex: none; align-items: center; gap: 10px; min-height: 56px; padding: 0 14px; border-bottom: 1px solid var(--paper-pressed); }
 .fs-htmlmark { font-family: var(--font-mono); font-size: 9px; font-weight: 600; letter-spacing: .04em; color: var(--paper-ink-2); background: var(--paper-card); padding: 4px 6px; border-radius: 6px; }

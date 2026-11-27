@@ -311,3 +311,21 @@ have never met.
   `test/threads.test.js`, `test/thread-waiting-redraw.test.js`,
   `test/permission-card-scroll-browser.mjs`, and
   `docs/evidence/permission-card-scroll/README.md`.
+- **Document-style Markdown tables** (`public/markdown.js`, `public/style.css`,
+  `public/files.js`, `public/thread-replies.js`): `.md table` uses `width: 100%`
+  inside a `fit-content` frame (`min-width: min(100%, 44ch); max-width: 100%`)
+  rather than `width: max-content`, with `15 px / 1.45` tabular-numeral body
+  rows, `12.5 px` weight-`600` muted headers over a single `--paper-rule-strong`
+  rule, lighter `--paper-rule` row hairlines, and `color-mix()` rules in
+  `.say.user.md`. `tableAt()` / `renderTable()` emit `data-col`
+  (`compact` / `medium` / `prose`), `data-nowrap` for short cells (`<= 14`
+  chars) in mixed columns, and `data-wrap` for long headers (`> 18` chars) so
+  short values stay unbroken while prose columns wrap with sensible minimum
+  widths and links/code wrap cleanly (`overflow-wrap: anywhere` on `a`/`code`,
+  `break-word` on `table`). `fitPreviewTables(root)` observes every
+  `.md .tablewrap` for `data-edges` fade masks across chat and Files preview,
+  `replyGesture` excludes `.tablewrap` so touch swipes never fight horizontal
+  scroll, and `@media (hover: none)` drops the permanent table Copy pill and
+  `52 px` top band while desktop keeps the hover Copy pill. See
+  `test/markdown.test.js`, `test/style.test.js`, `test/chat-tables-browser.mjs`,
+  and `docs/evidence/chat-tables/README.md`.

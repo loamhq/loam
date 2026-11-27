@@ -2675,17 +2675,19 @@ function builtinFileView(files, { close, closeLabel, historyBack = null, wide, s
 // and its table so fonts, images and pane resizes update the hint as well.
 let tableObserver = null
 function tableEdges(wrap) {
+  if (!wrap || wrap.isConnected === false) return
   const left = wrap.scrollLeft > 1
   const right = wrap.scrollWidth - wrap.clientWidth - wrap.scrollLeft > 1
-  wrap.setAttribute('data-edges', left && right ? 'both' : left ? 'left' : right ? 'right' : 'none')
+  const edges = left && right ? 'both' : left ? 'left' : right ? 'right' : 'none'
+  if (wrap.getAttribute('data-edges') !== edges) wrap.setAttribute('data-edges', edges)
   if (left || right) {
-    wrap.setAttribute('tabindex', '0')
-    wrap.setAttribute('role', 'region')
-    wrap.setAttribute('aria-label', 'Table, scroll horizontally')
+    if (wrap.getAttribute('tabindex') !== '0') wrap.setAttribute('tabindex', '0')
+    if (wrap.getAttribute('role') !== 'region') wrap.setAttribute('role', 'region')
+    if (wrap.getAttribute('aria-label') !== 'Table, scroll horizontally') wrap.setAttribute('aria-label', 'Table, scroll horizontally')
   } else {
-    wrap.removeAttribute('tabindex')
-    wrap.removeAttribute('role')
-    wrap.removeAttribute('aria-label')
+    if (wrap.hasAttribute('tabindex')) wrap.removeAttribute('tabindex')
+    if (wrap.hasAttribute('role')) wrap.removeAttribute('role')
+    if (wrap.hasAttribute('aria-label')) wrap.removeAttribute('aria-label')
   }
 }
 
@@ -2694,9 +2696,12 @@ export function fitPreviewTables(root) {
     for (const { target } of entries) tableEdges(target.tagName === 'TABLE' ? target.parentElement : target)
   })
   tableObserver?.disconnect()
-  for (const wrap of root.querySelector?.('.fs-preview')?.querySelectorAll?.('.tablewrap') ?? []) {
+  for (const wrap of root.querySelectorAll?.('.tablewrap') ?? []) {
     tableEdges(wrap)
-    on(wrap, 'scroll', () => tableEdges(wrap))
+    if (!wrap.__tableEdgesBound) {
+      wrap.__tableEdgesBound = true
+      wrap.addEventListener?.('scroll', () => tableEdges(wrap), { passive: true })
+    }
     tableObserver?.observe(wrap)
     if (wrap.firstElementChild) tableObserver?.observe(wrap.firstElementChild)
   }

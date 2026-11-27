@@ -54,7 +54,7 @@ export function replyQuotes({ read, changed, active = () => true }) {
   }
 }
 
-// Keep vertical scrolling, links, code scrolling and text selection native.
+// Keep vertical scrolling, links, code/table scrolling and text selection native.
 // A horizontal drag alone claims the gesture; threshold feedback is a small
 // resisted snap, with an optional single device pulse where supported.
 export function replyGesture({ reply, reduced = () => false }) {
@@ -78,7 +78,7 @@ export function replyGesture({ reply, reduced = () => false }) {
     reset, paint,
     down(event, message) {
       reset()
-      if (event.pointerType !== 'touch' || event.isPrimary === false || selecting() || !canReply(message) || event.target.closest?.('button,a,input,textarea,pre,code,[contenteditable]')) return
+      if (event.pointerType !== 'touch' || event.isPrimary === false || selecting() || !canReply(message) || event.target.closest?.('button,a,input,textarea,pre,code,.tablewrap,[contenteditable]')) return
       const g = gesture = { node: event.currentTarget, message, x: event.clientX, y: event.clientY, pointer: event.pointerId }
       g.timer = setTimeout(() => {
         if (gesture !== g) return
