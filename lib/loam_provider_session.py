@@ -1925,6 +1925,12 @@ class CodexSession(Session):
         # Spawned Agent tool calls still awaiting their child thread's finish:
         # child_thread_id -> (call_id, parent_tool_use_id).
         self._open_agent_calls: dict[str, tuple[str, str | None]] = {}
+        # Subagent threads that have actually opened a turn (`turn/started`)
+        # and not yet closed it. Codex 0.170.0 emits an initial
+        # `thread/status/changed: idle` when creating a child thread before its
+        # `turn/started`; gating finish signals on this set ensures that
+        # creation-time idle never closes the Agent call prematurely.
+        self._running_subagents: set[str] = set()
         # Direct-child subagents running as part of the current open root turn.
         self._active_subagents: dict[str, dict] = {}
         # Whether a Codex root RPC turn (`turn/started`..`turn/completed`) is
@@ -1974,6 +1980,8 @@ class CodexSession(Session):
             self._wakes.clear()
         if hasattr(self, "_active_subagents"):
             self._active_subagents.clear()
+        if hasattr(self, "_running_subagents"):
+            self._running_subagents.clear()
         if hasattr(self, "_open_agent_calls"):
             self._open_agent_calls.clear()
         if hasattr(self, "_root_calls"):
@@ -2395,6 +2403,9 @@ class CodexSession(Session):
         ``background_tasks`` and ``_wake``.
         """
         if not running:
+            if thread not in self._running_subagents:
+                return
+            self._running_subagents.discard(thread)
             said = self._agent_said.pop(thread, None)
             await self._close_agent_call(thread, said)
             task = self._active_subagents.pop(thread, None)
@@ -2410,6 +2421,7 @@ class CodexSession(Session):
                 return
             await self._task_ended(thread, said)
             return
+        self._running_subagents.add(thread)
         parent_thread = self._agent_parents.get(thread, self.thread_id)
         is_direct = parent_thread == self.thread_id
         if is_direct and (self._root_turn_active or self._holding_for_subagents):

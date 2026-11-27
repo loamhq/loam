@@ -1080,7 +1080,6 @@ class Translator:
                      is_error: bool = False,
                      parent: str | None = None) -> dict:
         """Close a spawned Codex subagent's Agent tool call once its thread finishes."""
-        self._started_agents.discard(call_id)
         return self._base("user", parent_tool_use_id=parent,
                           message={"role": "user", "content": [{
                               "type": "tool_result", "tool_use_id": call_id,

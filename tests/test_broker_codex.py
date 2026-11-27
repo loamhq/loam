@@ -460,6 +460,11 @@ async def offline_broker_cases(root: Path) -> None:
         "type": "subAgentActivity", "id": "call_1", "kind": "started",
         "agentThreadId": "sub", "agentPath": "/root/worker",
         "model": "gpt-6.2-sol", "reasoningEffort": "xhigh"}})
+    # Codex 0.170.0 emits an initial thread/status/changed: idle on the new
+    # child thread BEFORE its turn/started and before item/completed; this must
+    # neither prematurely close call_1 nor duplicate the Agent tool_use.
+    await feed("thread/status/changed", {"threadId": "sub",
+                                         "status": {"type": "idle"}})
     await feed("item/completed", {"threadId": "th", "turnId": "u2", "item": {
         "type": "subAgentActivity", "id": "call_1", "kind": "started",
         "agentThreadId": "sub", "agentPath": "/root/worker"}})
