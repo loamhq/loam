@@ -631,61 +631,60 @@ file on disk says. A background task is a child of a CLI process: a record
 left claiming two by a broker that was killed would draw a badge for two
 subagents that stopped days ago.
 
-**On a Codex chat the background tasks are its subagents** (2026-10-02).
-Codex states no list, so the broker keeps it from the one signal it has: the
-app-server puts every subagent's notifications on the root's stream under the
-subagent's own `threadId`, and a thread other than the record's
-`thread_id` is in `background_tasks` from its `turn/started` to its
-`turn/completed` (or a `thread/status/changed` to idle, or `thread/closed`).
-Neither of those is the root's turn opening or closing, and the subagent's
-token usage is not the row's context. Its messages and tool calls are on the
-stream with `parent_tool_use_id` set to the id of the `subAgentActivity`
-call that spawned it (2026-11-13; `codex-subagent:<thread id>` when that call
-was not seen), as a Claude subagent's events carry their `Agent` call's id,
-so a subagent's words are never the persona's: until then they went out with
-a null parent and a thread could post a subagent's sentence as the persona's
-reply. `broker.background_tasks` carries each as
-`{task_id: <thread id>, task_type: "subagent", description: "/root/<name>"}`.
-So the statuses are the Claude ones with nothing added: `working` while the
-root's turn is open, `waiting` once it has ended with a subagent still
-running. Before this, Ada's chat 7bcccd28 read `done`, `0`, while its
-subagent held an engineer call for half an hour after the root's turn ended.
+**On a Codex chat, in-turn helpers stay part of the open turn** (updated
+2026-11-26; previously every subagent entered `background_tasks` on
+2026-10-02). Codex states no background task list of its own: its
+app-server puts every subagent's notifications on the root's stream under
+the subagent's own `threadId`. A `subAgentActivity` spawn (`kind: "started"`)
+translates into a Claude-shaped `Agent` `tool_use` carrying the plain helper
+name (`helper_name("/root/critics") -> "critics"`), silent on internal
+`interacted`/`completed`/`interrupted` bookkeeping, and closed by a matching
+`tool_result` when the child thread finishes. The child's messages and tool
+calls carry `parent_tool_use_id` set to the spawning call's id
+(`codex-subagent:<thread id>` when unseen), so they nest under the `Agent`
+step and never become the persona's top-level reply, and its token usage is
+not the row's context.
 
-**Subagents are on** (2026-11-13). Every thread is started and resumed with
-`developerInstructions` set to Loam's explicit ask to delegate when it helps
-(`loam_codex.SUBAGENT_ASK`), because Codex's own rule (`explicitRequestOnly`)
-spawns only when instructions explicitly ask, and its `multiAgentMode:
-"proactive"` is accepted but not honoured on 0.169.0. Whether a turn
-delegates is the model's judgment, as on Claude Code.
+While direct-child helpers are running during an open root turn, they stay
+in `_active_subagents` rather than `background_tasks` (matching Claude's
+synchronous `Agent` call). Non-commentary root `agentMessage` events are
+buffered while helpers are still out: if the helpers finish before the root's
+`turn/completed`, the buffer flushes immediately; if the root closes its turn
+while helpers are still running (which `effort: ultra` proactive delegation
+otherwise does when it omits `wait_agent`), `CodexSession` discards the
+premature draft, holds the turn open (`status: "working"`, no `result` yet),
+waits for all active helpers to finish, and sends one continuation
+`turn/start` wrapped in `<task-notification>` carrying every helper's
+findings so one complete reply lands. After `MAX_HOLD_CYCLES` (2), any
+still-running helpers are promoted into `background_tasks` (with plain
+`helper_name` descriptions) before `result`.
 
-**A subagent that finishes after the root's turn wakes the root**
-(2026-10-09), because Codex does not: on its own it hands the report to the
-root's *next* turn, which waits for the person's next message (proved
-2026-10-02, job 20261002-083948-afa17a01). The broker does what the Claude
-CLI does instead. It puts a `system`/`task_notification` on the stream
-(`task_id` the subagent's thread, `summary` its last message), then starts a
-root turn whose input is a `<task-notification>` envelope carrying that
-message. The page sees what a Claude notification gives it: no
-`broker.user_message`, then an `init`, the turn's work and a `result`. The
-row goes `waiting`/1 → `working`/0 → `done`. Subagents that end within one
-second of each other share one woken turn. If the root's turn is still open
-when a subagent ends, nothing new starts, because Codex hands the report to
-that turn. Only the root's own children wake it.
+**Subagents are on** (2026-11-13, conversation-lane addition 2026-11-26).
+Every wake thread uses `loam_codex.SUBAGENT_ASK` as `developerInstructions`;
+conversation threads use `loam_codex.CHAT_SUBAGENT_ASK`, which adds one
+sentence asking the model to wait for helpers with `wait_agent` before its
+final answer. Whether a turn delegates is still the model's judgment (and on
+`gpt-6.2-sol` / `gpt-6.2-astra`, `effort: ultra` enables Codex's proactive
+delegation mode automatically, spawning helpers at `xhigh`).
 
-The same applies to an MCP call the root left running when its turn
-completed. On Codex the model calls tools from a code cell, and Ada's
-a9c8ec2c ended a turn with a `brief` still in flight. Such a call is in
-`background_tasks` as `{task_type: "mcp_call", description:
-"mcp__<server>__<tool>"}` until its `item/completed`, which wakes the root
-with its result. So does a command the root left running: a code cell
-yields after 30 s and leaves its command going (probe f35cc554's `sleep 30`
-read `done`/0 while it ran). Such a command is in `background_tasks` as
-`{task_type: "local_bash", description: <the command, out of Codex's
-/bin/bash -lc wrapper, cut at 60 characters>}` and its end wakes the root
-with its output. One that a later turn finishes (the model polled it) leaves
+**Out-of-turn background work still wakes the root** (2026-10-09). A root
+MCP call or command left running when the root's turn completes — or a
+subagent running outside an open root turn (or promoted after
+`MAX_HOLD_CYCLES`) — enters `background_tasks` (`mcp_call`, `local_bash`, or
+`subagent`). When it finishes after the root's turn has ended, Codex does
+not start a new turn on its own, so the broker emits
+`system`/`task_notification` and starts one root turn whose input is a
+`<task-notification>` envelope carrying what finished. Tasks ending within
+`WAKE_GATHER_S` (1 s) share one woken turn; one ending while a root turn is
+already open wakes nothing because Codex hands that turn the report itself.
+Only the root's own children wake it.
+
+Root MCP calls are listed as `{task_type: "mcp_call", description:
+"mcp__<server>__<tool>"}` and root commands as `{task_type: "local_bash",
+description: <the command, out of Codex's /bin/bash -lc wrapper, cut at 60
+characters>}`. One that a later turn finishes (the model polled it) leaves
 the list and wakes nothing. Subagent bookkeeping (`subAgentActivity`,
-`collabAgentToolCall`) never does either: it straddles the root's turn end
-by an event or two as a matter of course.
+`collabAgentToolCall`) never enters `background_tasks` either.
 
 ```jsonc
 { "session_id": "940380fd-…", "status": "waiting",

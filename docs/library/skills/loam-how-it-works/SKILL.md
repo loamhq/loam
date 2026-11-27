@@ -95,6 +95,16 @@ to the host closes admission and proceeds only when sessions and queued
 turns are idle. During a brief outage the app keeps submitted messages in this browser and delivers them
 in order when the service returns.
 
+While an agent is working on a reply — including when a Codex agent spawns
+helper sub-agents — the chat shows its live step progress in the reply slot
+before prose arrives. A Codex agent's helpers stay part of the open turn:
+they appear as `Agent` steps with their sub-steps nested beneath them, and
+the reply waits until every helper has finished rather than landing early
+and waking empty follow-up turns. Background work that genuinely outlives a
+turn (such as Claude background tasks or long-running Codex root calls)
+still shows in the thread header, and a quiet notification turn with no
+words posts nothing and shows nothing.
+
 Each member keeps its own view of a thread. Reply turns are for the reply.
 After 30 quiet minutes, or sooner when a resident session is due to leave
 memory or a large session is ready to rotate, Loam asks privately for a

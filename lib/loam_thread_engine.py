@@ -160,8 +160,18 @@ def step_label(block: dict) -> str:
                 "url", "query", "prompt"):
         value = args.get(key)
         if isinstance(value, str) and value.strip():
+            if key == "command":
+                from loam_provider_session import command_description  # noqa: PLC0415
+                desc = command_description(value, limit=80)
+                return f"{name}: {desc}" if desc else name
             value = " ".join(value.split())
             return f"{name}: {value[:80]}{'…' if len(value) > 80 else ''}"
+    if name == "apply_patch" and isinstance(args.get("changes"), list):
+        paths = [os.path.basename(str(c["path"])) for c in args["changes"]
+                 if isinstance(c, dict) and c.get("path")]
+        if paths:
+            shown = ", ".join(paths[:3]) + (f" (+{len(paths) - 3})" if len(paths) > 3 else "")
+            return f"{name}: {shown[:80]}{'…' if len(shown) > 80 else ''}"
     return name
 
 
@@ -681,9 +691,11 @@ class ThreadEngine:
             member["background_tasks"] = background_list(
                 session, self.task_origins.get((row["id"], member["persona"])))
             # The turn in flight is working unless it is parked on its
-            # background tasks; then, as any other member, its session says.
+            # background tasks after its own turn closed; then, as any other
+            # member, its session says.
             member["working"] = (bool(member.get("running"))
-                                 and not turn.get("on_background")) \
+                                 and (not turn.get("on_background")
+                                      or bool(turn.get("turn_open")))) \
                 or working_now(session)
             # Messages waiting for this member's turn to end (2026-11-10),
             # and what the member will do about them, in words.
@@ -1220,7 +1232,7 @@ class ThreadEngine:
             return False
         if not turn.get("on_background") or turn.get("handing"):
             return False
-        if working_now(self.turn_sessions.get(key)):
+        if working_now(self.turn_sessions.get(key)) or turn.get("turn_open"):
             return False
         if not TAKES_INPUT_WHILE_BACKGROUND.get(turn.get("engine"), False):
             if not turn.get("said_later"):
@@ -1854,10 +1866,17 @@ class ThreadEngine:
         ended = None
         exit_reason = None
         waiting = False
+        turn_open = True
+        self.turns[turn.key]["turn_open"] = True
 
         def step(label: str, top: bool = True, ends: bool | None = None,
                  **extra) -> None:
             reply.step(label, top, ends)
+            active = self.turns.get(turn.key)
+            if active is not None and not extra.get("waiting"):
+                active["step"] = label
+                active["steps"] = len(reply.did)
+                active["did"] = [dict(d) for d in reply.did[-50:]]
             self.publish(turn.thread_id, {
                 "type": "turn.step", "persona": turn.persona,
                 "label": label, "steps": len(reply.did), **extra})
@@ -1865,6 +1884,8 @@ class ThreadEngine:
         def parked_done() -> bool:
             """A parked turn whose session has nothing out and is not
             mid-turn: what the last `result` was waiting for has settled."""
+            if turn_open:
+                return False
             behind = getattr(session, "working_behind", None)
             return not (callable(behind) and behind()) and not working_now(session)
 
@@ -1906,6 +1927,11 @@ class ThreadEngine:
             msg = self.post_reply(turn, session, reply, engine, model, why)
             posted.append(msg)
             reply = Reply()
+            active = self.turns.get(turn.key)
+            if active is not None:
+                active.pop("step", None)
+                active.pop("steps", None)
+                active.pop("did", None)
 
         import loam_recent  # noqa: PLC0415
         try:
@@ -2022,6 +2048,9 @@ class ThreadEngine:
                         reply.draft += chunk
                         shown = self.shown_draft(turn, reply)
                         if shown is not None:
+                            active = self.turns.get(turn.key)
+                            if active is not None:
+                                active.pop("step", None)
                             self.publish(turn.thread_id, {
                                 "type": "message.delta", "persona": turn.persona,
                                 **shown})
@@ -2066,6 +2095,10 @@ class ThreadEngine:
                 elif kind == "result" and top:
                     heard = False
                     empty_until = None
+                    turn_open = False
+                    active = self.turns.get(turn.key)
+                    if active is not None:
+                        active["turn_open"] = False
                     behind = getattr(session, "working_behind", None)
                     more = (event["working_behind"] if "working_behind" in event
                             else bool(callable(behind) and behind()))
@@ -2098,6 +2131,10 @@ class ThreadEngine:
                 elif kind == "broker.background_tasks":
                     self.members_changed(turn.thread_id)
                 elif kind == "system" and event.get("subtype") == "init":
+                    turn_open = True
+                    active = self.turns.get(turn.key)
+                    if active is not None:
+                        active["turn_open"] = True
                     if empty_until is not None and not waiting:
                         empty_until = None   # the steered message's own turn
                     if waiting:

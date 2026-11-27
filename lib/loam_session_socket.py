@@ -81,7 +81,7 @@ async def stream(session, since, writer):
         await write_frame(writer, {"attached": initial, "through": cut})
         sequence = since
 
-        async def send(event):
+        async def send(event, *, live_state=False):
             nonlocal sequence
             seq = event.get("seq")
             if seq is not None:
@@ -89,8 +89,19 @@ async def stream(session, since, writer):
                     raise BrokerError(409, f"journal missing sequence {sequence + 1}")
                 sequence = seq
             frame = {"event": event}
-            if seq is None or event.get("type") == "result":
+            kind = event.get("type")
+            if seq is None or kind == "result":
                 frame["behind"] = session.working_behind()
+            if live_state and (seq is None or kind in (
+                    "result", "broker.background_tasks", "broker.user_message",
+                    "broker.permission_request", "broker.permission_resolved",
+                    "broker.exit") or (kind == "system" and event.get("subtype") in (
+                    "init", "task_notification"))):
+                frame["behind"] = session.working_behind()
+                frame["status"] = session.status()
+                frame["busy"] = session.busy()
+                if kind == "broker.background_tasks":
+                    frame["task_times"] = dict(getattr(session, "_task_seen", {}))
             await write_frame(writer, frame)
 
         if since < cut:
@@ -108,7 +119,7 @@ async def stream(session, since, writer):
                 raise BrokerError(503, "reader fell behind; reconnect at its last sequence")
             if event is None:
                 break
-            await send(event)
+            await send(event, live_state=True)
             if event.get("type") == "broker.exit":
                 break
         await write_frame(writer, {"ended": sequence})

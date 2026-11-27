@@ -27,6 +27,7 @@ class RemoteSession:
         self.background_tasks = view["background"]["tasks"]
         self._behind = view["behind"]
         self._busy = view["busy"]
+        self._status = self.record["status"]
         self._init_model = view["running_model"]
         self._task_seen = view["task_times"]
         self.STEERS = view["steers"]
@@ -36,6 +37,8 @@ class RemoteSession:
 
     def update_record(self, record):
         self.record = record
+        if "status" in record:
+            self._status = record["status"]
         for key in ("agent", "model", "provider", "effort", "state", "turns", "thread_id",
                     "cli_session_id", "last_event_at", "title"):
             setattr(self, key, record.get(key))
@@ -44,7 +47,7 @@ class RemoteSession:
         return self.record
 
     def status(self):
-        return self.record["status"]
+        return self._status
 
     def busy(self):
         return self._busy
@@ -53,7 +56,7 @@ class RemoteSession:
         return self.record["live"]
 
     def working_behind(self):
-        return self._behind
+        return bool(self._behind or self.background_tasks)
 
     def pending_events(self):
         return self.permissions
@@ -79,8 +82,12 @@ class RemoteSession:
         # A lost reply is ambiguous until the host answers for the same key.
         while True:
             try:
-                return await self.control("dispatch", id=key, text=text,
-                                          attachments=attachments, steer=steer)
+                seq = await self.control("dispatch", id=key, text=text,
+                                         attachments=attachments, steer=steer)
+                if not steer:
+                    self._status = "working"
+                    self._busy = "working"
+                return seq
             except (OSError, ConnectionError):
                 await asyncio.sleep(.25)
 
@@ -112,19 +119,28 @@ class RemoteSession:
         try:
             while True:
                 try:
+                    caught_up = False
                     async with self.client.request("watch", session_id=self.id, since=self.seq) as reader:
                         while True:
                             frame = await self.client.receive(reader)
-                            if "behind" in frame:
-                                self._behind = frame["behind"]
                             if "attached" in frame:
                                 view = frame["attached"]
                                 if view["incarnation"] != self.incarnation and view["record"]["state"] == "running":
                                     raise BrokerError(409, "session binding changed while reading")
+                                caught_up = False
                                 self.apply(view)
                             elif "event" in frame:
-                                self.event(frame["event"])
+                                if "behind" in frame:
+                                    self._behind = frame["behind"]
+                                if "status" in frame:
+                                    self._status = frame["status"]
+                                if "busy" in frame:
+                                    self._busy = frame["busy"]
+                                if "task_times" in frame:
+                                    self._task_seen = frame["task_times"]
+                                self.event(frame["event"], live=caught_up)
                             elif "caught_up" in frame:
+                                caught_up = True
                                 retry = .1
                                 if not ready.done():
                                     ready.set_result(None)
@@ -146,22 +162,22 @@ class RemoteSession:
             for queue in self.subscribers:
                 queue.put_nowait(None)
 
-    def event(self, event):
+    def event(self, event, *, live=True):
         seq = event.get("seq")
         if seq is not None:
             self.seq = seq
             if not self.subscribers:
                 self.events.append(event)
-        if event["type"] == "broker.session":
-            self.update_record(event)
-        elif event["type"] == "broker.background_tasks":
-            self.background_tasks = event["tasks"]
-
-        elif event["type"] == "broker.permission_request":
-            if not any(p["request_id"] == event["request_id"] for p in self.permissions):
-                self.permissions.append(event)
-        elif event["type"] == "broker.permission_resolved":
-            self.permissions = [p for p in self.permissions if p["request_id"] != event["request_id"]]
+        if live:
+            if event["type"] == "broker.session":
+                self.update_record(event)
+            elif event["type"] == "broker.background_tasks":
+                self.background_tasks = event["tasks"]
+            elif event["type"] == "broker.permission_request":
+                if not any(p["request_id"] == event["request_id"] for p in self.permissions):
+                    self.permissions.append(event)
+            elif event["type"] == "broker.permission_resolved":
+                self.permissions = [p for p in self.permissions if p["request_id"] != event["request_id"]]
         for queue in self.subscribers:
             queue.put_nowait(event)
 

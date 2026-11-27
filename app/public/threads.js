@@ -1564,12 +1564,15 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       })
     const full = !m.preset && !mine && !m.streaming && !Array.isArray(m.steps), load = st.open.replySteps?.entries.get(m.id)
     const generating = m.streaming && memberGenerating(st.open, m.author)
+    const hasSteps = !mine && segments.some((part) => part.did?.length || part.steps?.length)
     return h('article', { class: `tt-message${mine ? ' mine' : ''}${st.open.highlightedReply === m.id ? ' tt-reply-highlight' : ''}${canReply(m) ? ' tt-replyable' : ''}`, tabindex: '-1', key: m.viewKey ?? m.id, 'data-message-id': m.id, 'data-full-steps': full ? '' : null, 'data-live-member': generating ? m.author : null,
       onpointerdown: (e) => gesture.down(e, m), onpointermove: (e) => gesture.move(e), onpointerup: () => gesture.up(), onpointercancel: () => gesture.reset(), onclick: (e) => gesture.click(e) },
       canReply(m) ? h('span', { class: 'tt-swipe-reply', 'aria-hidden': 'true', text: '↩' }) : null,
       !mine ? messageQuote(m) : null,
-      generating && !replyHasContent(m) ? waitingLine(m.author) : body,
-      generating && replyHasContent(m) && (!m.text || st.open.waiting?.has(m.author) || st.open.steps?.get(m.author)?.waiting) ? waitingLine(m.author) : null,
+      generating && !replyHasContent(m) && !hasSteps ? waitingLine(m.author) : body,
+      generating && (replyHasContent(m)
+        ? (!m.text || st.open.waiting?.has(m.author) || st.open.steps?.get(m.author)?.waiting)
+        : (hasSteps && (st.open.waiting?.has(m.author) || st.open.steps?.get(m.author)?.waiting || !st.open.steps?.get(m.author)))) ? waitingLine(m.author) : null,
       !mine && lastText < 0 ? files : null, !mine && lastText < 0 ? footer : null,
       load?.status === 'error' ? h('div', { class: 'tt-steps-retry muted', role: 'status' }, 'Steps couldn’t be loaded. ', button('Try again', () => st.open.replySteps.ensure(m.id, true), { class: 'quietlink' })) : null,
       ...permissions.map(permission), branchLinks(m))

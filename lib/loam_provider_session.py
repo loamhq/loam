@@ -1793,13 +1793,18 @@ class Session:
         return
 
 
+def _safe_envelope_text(text: str | None) -> str:
+    cleaned = (text or "").strip() or "(it said nothing)"
+    return cleaned.replace("</task-notification>", "< /task-notification>")
+
+
 def wake_envelope(task: dict) -> str:
     """What a woken Codex root is told a background task finished with: the
     tag Claude's CLI hands a persona its task notification in, so the model
     reads it as the same thing and the transcript writer drops it as the same
     thing (`loam_transcript._HARNESS_ENVELOPES`), not as the owner's words."""
     name = task.get("description") or task.get("task_type") or "A background task"
-    said = (task.get("said") or "").strip() or "(it said nothing)"
+    said = _safe_envelope_text(task.get("said"))
     return ("<task-notification>\n"
             f"<task-id>{task.get('task_id')}</task-id>\n"
             "<status>completed</status>\n"
@@ -1807,6 +1812,45 @@ def wake_envelope(task: dict) -> str:
             "What it finished with is below.</summary>\n"
             f"<result>\n{said}\n</result>\n"
             "</task-notification>")
+
+
+def subagent_continuation_envelope(results: list[dict],
+                                   held_draft: str | None = None) -> str:
+    """What a held Codex root turn is handed once all its in-turn helpers
+    finish. Wrapped in ``<task-notification>`` so the transcript writer drops
+    it as harness machinery rather than owner speech."""
+    blocks = []
+    for task in results:
+        name = task.get("description") or task.get("task_type") or "helper"
+        said = _safe_envelope_text(task.get("said"))
+        blocks.append(
+            "<task-notification>\n"
+            f"<task-id>{task.get('task_id')}</task-id>\n"
+            "<status>completed</status>\n"
+            f"<summary>Helper '{name}' finished. Its findings are below.</summary>\n"
+            f"<result>\n{said}\n</result>\n"
+            "</task-notification>"
+        )
+    if held_draft:
+        note = (
+            "<task-notification>\n"
+            "<status>pending_reply</status>\n"
+            "<summary>Your earlier reply was held back because your helpers "
+            "were still running, so the user has not seen it yet. Write your "
+            "single complete reply now, incorporating the helper findings "
+            "above.</summary>\n"
+            "</task-notification>"
+        )
+    else:
+        note = (
+            "<task-notification>\n"
+            "<status>pending_reply</status>\n"
+            "<summary>All of your helpers have finished and the user is "
+            "waiting for your reply. Write your single complete reply now, "
+            "incorporating the helper findings above.</summary>\n"
+            "</task-notification>"
+        )
+    return "\n\n".join([*blocks, note])
 
 
 def command_description(command, limit: int = 60) -> str:
@@ -1831,9 +1875,10 @@ def command_description(command, limit: int = 60) -> str:
 
 class CodexSession(Session):
     """Run a Codex app-server in the persona workspace and translate its RPC events into the
-    common session journal. The root thread owns the turn; child threads remain
-    background work, with their items nested under the spawning call. Deliver late child
-    results to the root so a finished root turn cannot strand a report.
+    common session journal. The root thread owns the turn; direct-child subagents spawned
+    during an open turn stay part of that turn (holding the final reply until they finish),
+    with their items nested under the spawning Agent call. Root MCP calls and commands that
+    outlive a turn remain background tasks whose completion wakes the root.
     """
 
     REQUEST_TIMEOUT_S = 60
@@ -1842,6 +1887,12 @@ class CodexSession(Session):
     # `subagent-completed` item, which lands between a subagent's idle and its
     # `turn/completed`, to arrive first.
     WAKE_GATHER_S = 1.0
+    # Short settle window once the last held in-turn helper finishes before
+    # sending the continuation turn, so back-to-back helpers share one turn.
+    HOLD_GATHER_S = 0.25
+    # Cap how many times one user turn can be held open for subagents before
+    # promoting still-running helpers to background_tasks.
+    MAX_HOLD_CYCLES = 2
     # Route supported approval and elicitation requests to the client, including legacy
     # protocol names. Refuse unknown requests so the provider does not wait indefinitely.
     APPROVALS = ("item/commandExecution/requestApproval",
@@ -1859,18 +1910,39 @@ class CodexSession(Session):
         self._waiters: dict[int, asyncio.Future] = {}
         self._codex = codex.Translator(self.id)
         # What each subagent thread is called, from the root's own
-        # `subAgentActivity` item that started it (`/root/<task name>`): the
-        # description a background task carries.
+        # `subAgentActivity` item that started it (`/root/<task name>`).
         self._agent_paths: dict[str, str] = {}
         # Which thread spawned each subagent, from the thread that item came
-        # on: only the root's own children wake the root (see `_wake`).
+        # on: only the root's own children hold/wake the root.
         self._agent_parents: dict[str, str] = {}
-        # The last thing each subagent said, which is what its wake carries.
+        # The last thing each subagent said, which is what its Agent result
+        # and continuation/wake carry.
         self._agent_said: dict[str, str] = {}
         # The id of the call that spawned each subagent thread (the
         # `subAgentActivity` item it started under): every event of that
         # thread is nested under it (`subagent_parent`).
         self._agent_calls: dict[str, str] = {}
+        # Spawned Agent tool calls still awaiting their child thread's finish:
+        # child_thread_id -> (call_id, parent_tool_use_id).
+        self._open_agent_calls: dict[str, tuple[str, str | None]] = {}
+        # Direct-child subagents running as part of the current open root turn.
+        self._active_subagents: dict[str, dict] = {}
+        # Whether a Codex root RPC turn (`turn/started`..`turn/completed`) is
+        # currently running (distinct from `_turn_active`, which stays True
+        # while holding the turn open between premature end and continuation).
+        self._root_turn_active = False
+        # Non-commentary root agentMessage events buffered while in-turn
+        # subagents are still running, so a premature reply never lands early.
+        self._buffered_root_msgs: list[dict] = []
+        self._buffered_msg_ids: set[str] = set()
+        self._holding_for_subagents = False
+        self._hold_cycles = 0
+        self._hold_duration_ms = 0
+        self._held_draft_text: str | None = None
+        self._held_results: list[dict] = []
+        self._suppress_next_init = False
+        self._continuation_spoke = False
+        self._hold_continue_task: asyncio.Task | None = None
         # The root's MCP calls and commands in flight (item id -> the
         # background task it would be), so one still open when the root's
         # turn ends can be a background task.
@@ -1878,6 +1950,37 @@ class CodexSession(Session):
         # Wakes gathered in the `WAKE_GATHER_S` before one goes out.
         self._wakes: list[dict] = []
         self._wake_task: asyncio.Task | None = None
+
+    def _reset_hold_state(self) -> None:
+        if self._hold_continue_task is not None and not self._hold_continue_task.done():
+            self._hold_continue_task.cancel()
+        self._hold_continue_task = None
+        self._buffered_root_msgs.clear()
+        self._buffered_msg_ids.clear()
+        self._holding_for_subagents = False
+        self._hold_cycles = 0
+        self._hold_duration_ms = 0
+        self._held_draft_text = None
+        self._held_results.clear()
+        self._suppress_next_init = False
+        self._continuation_spoke = False
+
+    def _clear_background(self) -> None:
+        super()._clear_background()
+        if getattr(self, "_wake_task", None) is not None and not self._wake_task.done():
+            self._wake_task.cancel()
+        self._wake_task = None
+        if hasattr(self, "_wakes"):
+            self._wakes.clear()
+        if hasattr(self, "_active_subagents"):
+            self._active_subagents.clear()
+        if hasattr(self, "_open_agent_calls"):
+            self._open_agent_calls.clear()
+        if hasattr(self, "_root_calls"):
+            self._root_calls.clear()
+        self._root_turn_active = False
+        if hasattr(self, "_buffered_root_msgs"):
+            self._reset_hold_state()
 
     def argv(self, resume: bool) -> list[str]:
         return [codex.CODEX, *codex.APP_SERVER_ARGV]
@@ -1917,8 +2020,6 @@ class CodexSession(Session):
         self._stopping_event = None
         self._turn_active = False
         self._clear_background()
-        self._root_calls.clear()
-        self._wakes.clear()
         self.last_activity = time.time()
         self._process_cost = None
         self.images_tool = self.has_images_tool()
@@ -1958,12 +2059,12 @@ class CodexSession(Session):
                     "threadId": self.thread_id, "cwd": ws,
                     "model": self.model, "excludeTurns": True,
                     "baseInstructions": codex.instructions(self.workspace),
-                    "developerInstructions": codex.SUBAGENT_ASK})
+                    "developerInstructions": codex.CHAT_SUBAGENT_ASK})
             else:
-                # Use the shared explicit request for provider subagents.
+                # Use the conversation-lane explicit request for provider subagents.
                 opened = await self.request("thread/start", {
                     "cwd": ws, "model": self.model,
-                    "developerInstructions": codex.SUBAGENT_ASK})
+                    "developerInstructions": codex.CHAT_SUBAGENT_ASK})
                 self.thread_id = (opened.get("thread") or {}).get("id")
         except Exception:
             self._stop_requested = True
@@ -2007,6 +2108,41 @@ class CodexSession(Session):
             message["params"] = params
         await self.send_raw(message)
 
+    async def _flush_buffered_root_msgs(self) -> None:
+        if not self._buffered_root_msgs:
+            return
+        buffered, self._buffered_root_msgs = self._buffered_root_msgs, []
+        self._buffered_msg_ids.clear()
+        for event in buffered:
+            if (self._holding_for_subagents
+                    and event.get("type") == "assistant"
+                    and event.get("parent_tool_use_id") is None):
+                said = loam_transcript._text_of(
+                    (event.get("message") or {}).get("content"))
+                if said and said.strip():
+                    self._continuation_spoke = True
+            await Session._handle(self, event)
+
+    def _buffered_text(self) -> str:
+        parts = []
+        for event in self._buffered_root_msgs:
+            if (event.get("type") == "assistant"
+                    and event.get("parent_tool_use_id") is None):
+                said = loam_transcript._text_of(
+                    (event.get("message") or {}).get("content"))
+                if said and said.strip():
+                    parts.append(said.strip())
+        return "\n\n".join(parts)
+
+    async def _close_agent_call(self, thread: str, said: str | None) -> None:
+        call_info = self._open_agent_calls.pop(thread, None)
+        if call_info is None:
+            return
+        call_id, parent_call_id = call_info
+        content = (said or "").strip() or "done"
+        await Session._handle(self, self._codex.agent_result(
+            call_id, content, parent=parent_call_id))
+
     async def _handle(self, obj: dict) -> None:
         method = obj.get("method")
         if method is None:
@@ -2046,27 +2182,41 @@ class CodexSession(Session):
                 await Session._handle(self, codex.rate_limit_event(usage, self.id))
             return
         item = params.get("item") if isinstance(params.get("item"), dict) else {}
+        thread = params.get("threadId")
+        parent = (self.subagent_parent(thread)
+                  if self.thread_id and thread and thread != self.thread_id else None)
         if (item.get("type") == "subAgentActivity" and item.get("agentThreadId")
                 and item.get("agentPath")):
-            self._agent_paths[item["agentThreadId"]] = item["agentPath"]
-            if params.get("threadId"):
-                self._agent_parents.setdefault(item["agentThreadId"],
-                                               params["threadId"])
-            # Nest subagent events under the call that spawned them.
+            child = item["agentThreadId"]
+            self._agent_paths[child] = item["agentPath"]
+            if child in self._active_subagents:
+                self._active_subagents[child]["description"] = codex.helper_name(
+                    item["agentPath"])
+            if thread:
+                self._agent_parents.setdefault(child, thread)
+            # Nest subagent events under the Agent call that spawned them.
             if item.get("id") and item.get("kind") in (None, "started"):
-                self._agent_calls.setdefault(item["agentThreadId"], item["id"])
-        thread = params.get("threadId")
+                self._agent_calls.setdefault(child, item["id"])
+                self._open_agent_calls.setdefault(child, (item["id"], parent))
+        elif (item.get("type") == "collabAgentToolCall"
+              and item.get("tool") == "spawnAgent" and item.get("id")):
+            receivers = [r for r in item.get("receiverThreadIds") or []
+                         if isinstance(r, str) and r]
+            for child in receivers:
+                if thread:
+                    self._agent_parents.setdefault(child, thread)
+                self._agent_calls.setdefault(child, item["id"])
+                self._open_agent_calls.setdefault(child, (item["id"], parent))
         if self.thread_id and thread and thread != self.thread_id:
             if (method == "item/completed" and item.get("type") in codex.MESSAGE_ITEMS
                     and isinstance(item.get("text"), str) and item["text"].strip()):
                 self._agent_said[thread] = item["text"]
-            # A subagent's thread. Its turn is a background task of this
-            # session, and opening or closing it is not the root's turn
-            # opening or closing; its token usage is its own context, not the
-            # one the row's ring draws. Everything else -- its messages, its
-            # tool calls and their results -- is translated as the root's
-            # are, nested under the call that spawned it (`subagent_parent`),
-            # so none of it is the persona's own words.
+            # A subagent's thread. Opening or closing it is not the root's
+            # turn opening or closing; its token usage is its own context, not
+            # the one the row's ring draws. Everything else -- its messages,
+            # its tool calls and their results -- is translated as the root's
+            # are, nested under the Agent call that spawned it
+            # (`subagent_parent`), so none of it is the persona's own words.
             if method == "turn/started":
                 await self._subagent_turn(thread, True)
                 return
@@ -2083,14 +2233,23 @@ class CodexSession(Session):
                 return
             if method == "thread/tokenUsage/updated":
                 return
+        # Root turn lifecycle.
+        if method == "turn/started" and (not self.thread_id or thread == self.thread_id):
+            self._root_turn_active = True
+            self._turn_active = True
+            events = self._codex.feed(method, params, parent=None)
+            if self._suppress_next_init:
+                self._suppress_next_init = False
+                return
+            for event in events:
+                await Session._handle(self, event)
+            return
         # The root's MCP calls and commands. One still open when the root's
         # turn completes is a background task until its own `item/completed`,
         # which is then a wake: a9c8ec2c's `brief` ran 23 minutes past the
         # turn that made it, behind a row that said `done`, and probe
         # f35cc554's `sleep 30` 20 s past its turn the same way (a code cell
-        # yields after 30 s and leaves its command running). Only these two:
-        # a subagent's `subAgentActivity` and a `collabAgentToolCall`
-        # straddle the root's turn end by a few events as a matter of course.
+        # yields after 30 s and leaves its command running).
         late_call = None
         if (thread == self.thread_id and item.get("id")
                 and item.get("type") in ("mcpToolCall", "commandExecution")):
@@ -2107,18 +2266,110 @@ class CodexSession(Session):
                 if any(task.get("task_id") == item["id"]
                        for task in self.background_tasks):
                     late_call = item
-        if method == "turn/completed" and thread == self.thread_id:
-            if (self._root_calls
-                    and (params.get("turn") or {}).get("status") == "completed"):
+        if method == "turn/completed" and (not self.thread_id or thread == self.thread_id):
+            self._root_turn_active = False
+            turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
+            status = turn.get("status")
+            if (status == "completed" and self._active_subagents
+                    and self._hold_cycles < self.MAX_HOLD_CYCLES
+                    and self.state == "running" and not self._stop_requested):
+                draft = self._buffered_text()
+                if draft:
+                    self._held_draft_text = draft
+                self._buffered_root_msgs.clear()
+                self._buffered_msg_ids.clear()
+                dur = turn.get("durationMs")
+                if isinstance(dur, (int, float)) and not isinstance(dur, bool):
+                    self._hold_duration_ms += int(dur)
+                self._hold_cycles += 1
+                self._holding_for_subagents = True
+                self._turn_active = True
+                self._codex.turn_id = None
+                self.last_activity = time.time()
+                return
+            await self._flush_buffered_root_msgs()
+            if self._active_subagents:
+                if status == "completed":
+                    promoted = []
+                    for tid, task in list(self._active_subagents.items()):
+                        self.task_started_at(tid)
+                        promoted.append(task)
+                    self._active_subagents.clear()
+                    if promoted:
+                        self.background_tasks = self.background_tasks + promoted
+                        await self.emit(self.background_event())
+                else:
+                    self._active_subagents.clear()
+            if self._root_calls and status == "completed":
+                for item_id in self._root_calls:
+                    self.task_started_at(item_id)
                 self.background_tasks = self.background_tasks + [
                     {"task_id": item_id, **task}
                     for item_id, task in self._root_calls.items()]
                 await self.emit(self.background_event())
             self._root_calls.clear()
-        parent = (self.subagent_parent(thread)
-                  if self.thread_id and thread and thread != self.thread_id else None)
-        for event in self._codex.feed(method, params, parent=parent):
-            await Session._handle(self, event)
+            if (self._holding_for_subagents and not self._continuation_spoke
+                    and self._held_draft_text):
+                await Session._handle(self, {
+                    "type": "assistant", "session_id": self.id,
+                    "parent_tool_use_id": None,
+                    "message": {"id": f"held-{self._hold_cycles}",
+                                "role": "assistant", "model": self._codex.model,
+                                "content": [{"type": "text",
+                                             "text": self._held_draft_text}],
+                                "usage": self._codex.claude_usage()},
+                })
+            result_params = params
+            if self._hold_duration_ms > 0:
+                dur = turn.get("durationMs")
+                total_dur = self._hold_duration_ms + (
+                    int(dur) if isinstance(dur, (int, float)) and not isinstance(dur, bool) else 0)
+                result_params = {**params, "turn": {**turn, "durationMs": total_dur}}
+            self._reset_hold_state()
+            for event in self._codex.feed(method, result_params, parent=None):
+                await Session._handle(self, event)
+            return
+        is_root = not self.thread_id or not thread or thread == self.thread_id
+        # Determine whether a root agentMessage should be buffered while
+        # in-turn subagents are still running (so a premature answer is held
+        # back until all helpers finish).
+        buffer_this = False
+        if is_root:
+            if (method == "item/started" and item.get("type") in codex.MESSAGE_ITEMS):
+                if self._active_subagents and item.get("phase") != "commentary":
+                    if isinstance(item.get("id"), str) and item["id"]:
+                        self._buffered_msg_ids.add(item["id"])
+                    buffer_this = True
+            elif method == "item/agentMessage/delta":
+                item_id = params.get("itemId") or ""
+                if (item_id in self._buffered_msg_ids
+                        or (not item_id and self._active_subagents)):
+                    buffer_this = True
+            elif (method == "item/completed" and item.get("type") in codex.MESSAGE_ITEMS):
+                item_id = item.get("id") or ""
+                if item_id in self._buffered_msg_ids:
+                    self._buffered_msg_ids.discard(item_id)
+                    buffer_this = True
+                elif self._active_subagents and item.get("phase") != "commentary":
+                    buffer_this = True
+        events = self._codex.feed(method, params, parent=parent)
+        if is_root and self._buffered_root_msgs and not buffer_this and events:
+            # The root emitted a tool call after a buffered message, proving
+            # that message was mid-turn commentary rather than a premature
+            # final reply; flush it now in order before the tool call.
+            await self._flush_buffered_root_msgs()
+        if buffer_this:
+            self._buffered_root_msgs.extend(events)
+        else:
+            for event in events:
+                if (self._holding_for_subagents and is_root
+                        and event.get("type") == "assistant"
+                        and event.get("parent_tool_use_id") is None):
+                    said = loam_transcript._text_of(
+                        (event.get("message") or {}).get("content"))
+                    if said and said.strip():
+                        self._continuation_spoke = True
+                await Session._handle(self, event)
         if late_call is not None:
             content = codex.tool_result(late_call).get("content")
             if not isinstance(content, str):
@@ -2133,21 +2384,54 @@ class CodexSession(Session):
         return self._agent_calls.get(thread) or f"codex-subagent:{thread}"
 
     async def _subagent_turn(self, thread: str, running: bool) -> None:
-        """A subagent thread's turn opened or closed: the background list
-        gains or loses it, and a client is told as it is for a Claude task.
+        """A subagent thread's turn opened or closed.
 
-        The list is the whole truth, kept here because Codex states no list of
-        its own: a thread is in it from its ``turn/started`` to its
-        ``turn/completed``. Nothing goes through `_awaiting`: that holds the
-        gap before a Claude task's notification, and here the broker sends
-        the notification itself, in the same breath (`_wake`)."""
+        Direct children spawned while a root turn is open (or held open) stay
+        part of that turn rather than entering ``background_tasks``: their
+        tool steps stream nested under their ``Agent`` call, and if the root
+        tries to end before they return, the turn stays open until they finish.
+        Grandchildren stay nested under their parent. Only a subagent running
+        outside an open root turn (or promoted after ``MAX_HOLD_CYCLES``) uses
+        ``background_tasks`` and ``_wake``.
+        """
         if not running:
-            await self._task_ended(thread, self._agent_said.pop(thread, None))
+            said = self._agent_said.pop(thread, None)
+            await self._close_agent_call(thread, said)
+            task = self._active_subagents.pop(thread, None)
+            if task is not None:
+                self.last_activity = time.time()
+                if self._holding_for_subagents:
+                    self._held_results.append({**task, "said": said})
+                    if not self._active_subagents and self._hold_continue_task is None:
+                        self._hold_continue_task = asyncio.create_task(
+                            self._continue_after_subagents())
+                elif not self._active_subagents and self._buffered_root_msgs:
+                    await self._flush_buffered_root_msgs()
+                return
+            await self._task_ended(thread, said)
             return
+        parent_thread = self._agent_parents.get(thread, self.thread_id)
+        is_direct = parent_thread == self.thread_id
+        if is_direct and (self._root_turn_active or self._holding_for_subagents):
+            self._active_subagents[thread] = {
+                "task_id": thread, "task_type": "subagent",
+                "description": codex.helper_name(self._agent_paths.get(thread)),
+            }
+            if self._hold_continue_task is not None and not self._hold_continue_task.done():
+                self._hold_continue_task.cancel()
+                self._hold_continue_task = None
+            self.last_activity = time.time()
+            return
+        if (not is_direct and (self._root_turn_active
+                               or self._holding_for_subagents
+                               or parent_thread in self._active_subagents)):
+            self.last_activity = time.time()
+            return
+        self.task_started_at(thread)
         live = [task for task in self.background_tasks
                 if task.get("task_id") != thread]
         live.append({"task_id": thread, "task_type": "subagent",
-                     "description": self._agent_paths.get(thread)})
+                     "description": codex.helper_name(self._agent_paths.get(thread))})
         changed = len(live) != len(self.background_tasks)
         self.background_tasks = live
         self.last_activity = time.time()
@@ -2155,12 +2439,56 @@ class CodexSession(Session):
             await self.emit(self.background_event())
             self.save()
 
+    async def _continue_after_subagents(self) -> None:
+        try:
+            await asyncio.sleep(self.HOLD_GATHER_S)
+        except asyncio.CancelledError:
+            return
+        self._hold_continue_task = None
+        if (not self._holding_for_subagents or self._active_subagents
+                or self.state != "running" or self._stop_requested
+                or not self.thread_id):
+            return
+        results, self._held_results = self._held_results, []
+        prompt = subagent_continuation_envelope(results, self._held_draft_text)
+        params = {"threadId": self.thread_id,
+                  "input": [{"type": "text", "text": prompt}]}
+        if self.model:
+            params["model"] = self.model
+            self._codex.model = self.model
+        if self.effort:
+            params["effort"] = self.effort
+        self._suppress_next_init = True
+        self._continuation_spoke = False
+        self.last_activity = time.time()
+        try:
+            started = await self.request("turn/start", params)
+            turn_id = (started.get("turn") or {}).get("id")
+            if turn_id:
+                self._codex.turn_id = turn_id
+        except BrokerError as exc:
+            draft = self._held_draft_text
+            dur = self._hold_duration_ms
+            self._reset_hold_state()
+            if draft:
+                await Session._handle(self, {
+                    "type": "assistant", "session_id": self.id,
+                    "parent_tool_use_id": None,
+                    "message": {"id": "held-fallback",
+                                "role": "assistant", "model": self._codex.model,
+                                "content": [{"type": "text", "text": draft}],
+                                "usage": self._codex.claude_usage()},
+                })
+            await Session._handle(self, self._codex.result({
+                "status": "failed", "durationMs": dur or None,
+                "error": {"message": exc.message}}))
+
     async def _task_ended(self, task_id: str, said: str | None) -> None:
-        """A background task left the list: a subagent's turn, or a root MCP
-        call or command that outlived its turn. Said to a client, and the root woken for
-        it if it is the root's to hear. A subagent's end is signalled two or
-        three times (idle, ``turn/completed``, ``thread/closed``); only the
-        first finds it in the list."""
+        """A background task left the list: an out-of-turn subagent, or a root
+        MCP call or command that outlived its turn. Said to a client, and the
+        root woken for it if it is the root's to hear. A subagent's end is
+        signalled two or three times (idle, ``turn/completed``,
+        ``thread/closed``); only the first finds it in the list."""
         task = next((task for task in self.background_tasks
                      if task.get("task_id") == task_id), None)
         self.last_activity = time.time()
@@ -2204,7 +2532,10 @@ class CodexSession(Session):
             self._wake_task = asyncio.create_task(self._send_wake())
 
     async def _send_wake(self) -> None:
-        await asyncio.sleep(self.WAKE_GATHER_S)
+        try:
+            await asyncio.sleep(self.WAKE_GATHER_S)
+        except asyncio.CancelledError:
+            return
         wakes, self._wakes = self._wakes, []
         self._wake_task = None
         if not wakes or self.state != "running" or self._stop_requested:
@@ -2397,7 +2728,10 @@ class CodexSession(Session):
         if self.effort:
             params["effort"] = self.effort
         self.last_activity = time.time()
+        self._reset_hold_state()
+        self._active_subagents.clear()
         self._turn_active = True
+        self._root_turn_active = True
         if self.title is None:
             self.title = first_words(
                 text or (f"Attached {attachments[0]['name']}"
@@ -2409,6 +2743,7 @@ class CodexSession(Session):
             if turn_id:
                 self._codex.turn_id = turn_id
         except BrokerError as exc:
+            self._root_turn_active = False
             await Session._handle(self, self._codex.result(
                 {"status": "failed", "error": {"message": exc.message}}))
         return event["seq"]

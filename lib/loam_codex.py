@@ -344,6 +344,11 @@ SUBAGENT_ASK = ("Standing instruction from Loam, which runs this persona: you "
                 "first. This is the explicit request for sub-agents, "
                 "delegation and parallel agent work that the multi-agent mode "
                 "instruction refers to.")
+# Conversation lane addition: Codex's ultra effort proactively spawns helpers
+# and can otherwise answer before they finish. Wakes keep `SUBAGENT_ASK` as-is.
+CHAT_SUBAGENT_ASK = (SUBAGENT_ASK + " When you spawn sub-agents to help with "
+                     "your reply, wait for them with wait_agent before giving "
+                     "your final answer.")
 # The documented difference in built-in tools, which the parity test holds
 # the two providers to and nothing wider. Claude Code's `Agent` is not on
 # it: Codex has subagents of its own, under its own names.
@@ -924,9 +929,38 @@ def has_input(item: dict) -> bool:
     return True
 
 
+def helper_name(agent_path: str | None) -> str:
+    """Plain label for a Codex subagent path such as '/root/critics'."""
+    raw = str(agent_path or "").strip().rstrip("/")
+    if "/" in raw:
+        raw = raw.rsplit("/", 1)[-1]
+    raw = " ".join(raw.replace("_", " ").replace("-", " ").split())
+    if not raw or raw == "root":
+        return "helper"
+    return raw
+
+
 def tool_use(item: dict) -> dict:
     """A Codex tool item as a ``tool_use`` block."""
     kind = item.get("type")
+    if kind == "subAgentActivity":
+        inp: dict = {"description": helper_name(item.get("agentPath"))}
+        if item.get("model"):
+            inp["model"] = item["model"]
+        if item.get("reasoningEffort"):
+            inp["reasoningEffort"] = item["reasoningEffort"]
+        return {"type": "tool_use", "id": item.get("id"), "name": "Agent",
+                "input": inp}
+    if kind == "collabAgentToolCall":
+        prompt = item.get("prompt")
+        desc = " ".join(str(prompt).split())[:80] if isinstance(prompt, str) and prompt.strip() else "helper"
+        inp = {"description": desc}
+        if item.get("model"):
+            inp["model"] = item["model"]
+        if item.get("reasoningEffort"):
+            inp["reasoningEffort"] = item["reasoningEffort"]
+        return {"type": "tool_use", "id": item.get("id"), "name": "Agent",
+                "input": inp}
     if kind == "webSearch":
         return {"type": "tool_use", "id": item.get("id"), "name": "webSearch",
                 "input": _web_input(item)}
@@ -1034,12 +1068,23 @@ class Translator:
         self.turn_id: str | None = None
         self._text: dict[str, str] = {}
         self._late: set = set()             # late items started, not yet drawn
+        self._started_agents: set = set()   # spawned Agent calls emitted, result deferred
 
     def _base(self, kind: str, **rest) -> dict:
         return {"type": kind, "session_id": self.session_id, **rest}
 
     def _stream(self, event: dict) -> dict:
         return self._base("stream_event", event=event, parent_tool_use_id=None)
+
+    def agent_result(self, call_id: str, content: str, *,
+                     is_error: bool = False,
+                     parent: str | None = None) -> dict:
+        """Close a spawned Codex subagent's Agent tool call once its thread finishes."""
+        self._started_agents.discard(call_id)
+        return self._base("user", parent_tool_use_id=parent,
+                          message={"role": "user", "content": [{
+                              "type": "tool_result", "tool_use_id": call_id,
+                              "content": content, "is_error": is_error}]})
 
     def feed(self, method: str, params: dict, parent: str | None = None
              ) -> list[dict]:
@@ -1094,6 +1139,25 @@ class Translator:
             if kind in SILENT_ITEMS or not kind:
                 return []
             item_id = item.get("id")
+            if kind == "subAgentActivity":
+                # Only the spawn marker becomes an Agent tool call; internal
+                # interacted/completed/interrupted bookkeeping stays silent,
+                # and the matching tool_result lands when the child finishes.
+                if item.get("kind") not in (None, "started"):
+                    return []
+                if item_id in self._started_agents:
+                    return []
+                if item_id:
+                    self._started_agents.add(item_id)
+                return [self._call(item)]
+            if kind == "collabAgentToolCall":
+                if item.get("tool") != "spawnAgent":
+                    return []
+                if item_id in self._started_agents:
+                    return []
+                if item_id:
+                    self._started_agents.add(item_id)
+                return [self._call(item)]
             out = []
             if method == "item/started":
                 if kind in LATE_ITEMS and not has_input(item):

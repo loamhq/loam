@@ -3347,3 +3347,55 @@ listener for immediate notification in an open page.
   sized to `max(1, min(8, floor(cpus / 2)))` (and `max(1, min(2, floor(cpus / 4)))`
   when `LOAM_CHROME` or `LOAM_PLAYWRIGHT` is set, instead of Node's default
   `availableParallelism() - 1`).
+
+## 2026-11-26 — Codex in-turn helpers, live step activity, and RemoteSession state
+
+- **Why Codex `effort: ultra` stalled chats and posted premature replies.**
+  On `codex-cli 0.170.0` (`gpt-6.2-sol` / `gpt-6.2-astra`), `models_cache.json`
+  defines `ultra` as proactive multi-agent delegation with
+  `multi_agent_reasoning_effort: "xhigh"` (so helpers report `reasoningEffort:
+  "xhigh"`). When Codex spawned helpers (`subAgentActivity` kind `started`),
+  three things compounded:
+  1. `loam_session_socket.py:stream()` only attached `"behind"` on `seq is None`
+     or `result` and never sent live `status`/`busy`/`task_times`, so
+     `RemoteSession` over the split `loam-session-host` socket kept stale
+     `status="idle"`/`"done"` and `working_behind=False` mid-turn.
+  2. `CodexSession` put every subagent into `background_tasks` immediately,
+     triggering `ThreadEngine.park(True)` mid-turn; with stale `RemoteSession`
+     state, `member["working"]` flipped `False` at once and `parked_done()`
+     aborted `run_turn()` at `PARKED_CHECK_S` (5 s), leaving a false
+     `"ended without a reply"` mark and silencing live streaming until `_tail()`
+     posted the reply later.
+  3. Codex could finish its root turn without calling `wait_agent`, causing
+     late helper completions to fire empty `_wake` turns (`text: ""`, 4 output
+     tokens), while `app/public/threads.js` suppressed `stepFold` before prose
+     (`generating && !replyHasContent(m)`).
+- **Fix across broker, socket, engine, and UI.**
+  - `lib/loam_codex.py`: translates `subAgentActivity` (`started`) and
+    `collabAgentToolCall` (`spawnAgent`) into Claude-shaped `Agent` `tool_use`
+    blocks with plain `helper_name()` labels (silent on internal `interacted`/
+    `completed`/`interrupted` bookkeeping, deferred `tool_result` via
+    `Translator.agent_result`), and adds one wait-for-helpers sentence to
+    conversation-lane `CHAT_SUBAGENT_ASK` (keeping `SUBAGENT_ASK` untouched for
+    `lib/loam_codex_wake.py`).
+  - `lib/loam_provider_session.py` (`CodexSession`): tracks direct-child
+    in-turn helpers in `_active_subagents` (not `background_tasks`), buffers
+    non-commentary root `agentMessage` events while helpers run, holds a
+    premature root `turn/completed` open until all active helpers finish, then
+    sends one `<task-notification>` continuation `turn/start` carrying all
+    helper findings (suppressing duplicate `system/init`, falling back to held
+    draft if continuation is empty/failed, and capping at `MAX_HOLD_CYCLES = 2`
+    before promoting remaining helpers to `background_tasks`). Root `mcp_call`
+    and `local_bash` background tasks are unchanged.
+  - `lib/loam_session_socket.py` + `lib/loam_session_client.py`: mirror live
+    `status`, `behind`, `busy`, and `task_times` on live state-changing frames
+    (ignoring pre-`caught_up` historical replay mutations).
+  - `lib/loam_thread_engine.py`: unwraps `/bin/bash -lc` and lists changed
+    files for `apply_patch` in `step_label()`, guards `parked_done()`,
+    `decorate()`, and `hand_over()` with `turn_open`, and stores live `step`
+    and `did` on `self.turns[key]` for `thread.snapshot` hydration.
+  - `app/public/threads.js` + `app/public/thread-record.js`: renders live
+    `stepFold` before prose once steps exist (without a duplicate waiting dot),
+    hydrates live steps on `thread.snapshot`, and clears empty drafts/step
+    state when a quiet `_tail` notification turn ends (`working: false` outside
+    `activeTurns`).

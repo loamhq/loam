@@ -117,7 +117,15 @@ export function applyThreadEvent(open, e) {
       const reply = parked
         && open.messages.findLast((m) => !m.streaming && m.author === turn.persona && m.kind !== 'system')
       if (reply && !open.messages.some((m) => m.streaming && m.author === turn.persona)) open.liveReplies.set(turn.persona, reply.id)
-      else if (!open.liveReplies.has(turn.persona) && member?.working !== false && !parked) draftFor(open, turn.persona, turn)
+      else if (!open.liveReplies.has(turn.persona) && member?.working !== false && !parked) {
+        const draft = draftFor(open, turn.persona, turn)
+        if (turn.step) open.steps.set(turn.persona, { type: 'turn.step', persona: turn.persona, label: turn.step, steps: turn.steps ?? turn.did?.length ?? 1 })
+        if (!open.progress.has(turn.persona) && Array.isArray(turn.did) && turn.did.length && !draft.segments?.length && !draft.text) {
+          const parts = [{ did: turn.did.map((s) => ({ label: s.label })) }]
+          open.progress.set(turn.persona, parts)
+          draft.segments = parts
+        }
+      }
     }
     if (Array.isArray(e.pending)) {
       const pending = new Set(e.pending.map((p) => p.request_id))
@@ -128,9 +136,20 @@ export function applyThreadEvent(open, e) {
   if (e.type === 'thread.changed' && e.summary?.id === open.thread.id) open.thread = e.summary
   if (['thread.snapshot', 'members'].includes(e.type)) {
     // Notification turns may start from a member reading without turn.started.
-    // Only working:true can reserve their pre-prose reply position.
-    for (const member of open.thread.members) if (member.working
-      && !open.messages.some((m) => m.streaming && m.author === member.persona)) draftFor(open, member.persona)
+    // Only working:true can reserve their pre-prose reply position; when a
+    // quiet notification turn finishes (working:false outside activeTurns),
+    // clear any empty draft and transient step state it left behind.
+    for (const member of open.thread.members) {
+      if (member.working && !open.messages.some((m) => m.streaming && m.author === member.persona)) {
+        draftFor(open, member.persona)
+      } else if (member.working === false && !open.activeTurns.has(member.persona)) {
+        open.typing.delete(member.persona)
+        open.steps.delete(member.persona)
+        open.progress.delete(member.persona)
+        open.waiting.delete(member.persona)
+        open.messages = open.messages.filter((m) => !(m.id === `draft:${member.persona}` && !m.text))
+      }
+    }
   }
   if (e.type === 'turn.started') {
     if (open.marks?.length) open.marks = open.marks.filter((m) => m.persona !== e.persona)

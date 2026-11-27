@@ -402,41 +402,31 @@ async def offline_broker_cases(root: Path) -> None:
     check("a Codex turn's context is its last request's, from the result",
           session.turns[-1]["context"], {"used": 22394, "window": 258400})
 
-    # Track a spawned agent as background work.
+    # Direct-child helpers stay part of the open root turn, translate as
+    # Claude-shaped Agent calls with plain helper names, and hold the reply
+    # open until all helpers return rather than landing early or posting
+    # background_tasks mid-turn.
+    check("helper_name strips /root/ and formats underscores",
+          (codex.helper_name("/root/critics"),
+           codex.helper_name("/root/check_reviews"),
+           codex.helper_name("/root"),
+           codex.helper_name(None)),
+          ("critics", "check reviews", "helper", "helper"))
+    check("CHAT_SUBAGENT_ASK adds one wait sentence while SUBAGENT_ASK is untouched",
+          ("wait_agent" in codex.CHAT_SUBAGENT_ASK,
+           codex.CHAT_SUBAGENT_ASK.startswith(codex.SUBAGENT_ASK),
+           "wait_agent" not in codex.SUBAGENT_ASK),
+          (True, True, True))
+
     session.thread_id = "th"
+    session.WAKE_GATHER_S = 0
+    session.HOLD_GATHER_S = 0
     queue: asyncio.Queue = asyncio.Queue()
     session.watch(queue)
 
     async def feed(method, params):
         await session._handle({"jsonrpc": "2.0", "method": method,
                                "params": params})
-    await feed("turn/started", {"threadId": "th", "turn": {"id": "u2"}})
-    await feed("item/completed", {"threadId": "th", "turnId": "u2", "item": {
-        "type": "subAgentActivity", "id": "call_1", "kind": "started",
-        "agentThreadId": "sub", "agentPath": "/root/worker"}})
-    await feed("turn/started", {"threadId": "sub", "turn": {"id": "s1"}})
-    check("a subagent's turn opening is a background task, the root's turn stays",
-          (session.status(), session.meta()["background_tasks"],
-           session._codex.turn_id), ("working", 1, "u2"))
-    await feed("thread/tokenUsage/updated", {"threadId": "th", **usage(30000)})
-    await feed("thread/tokenUsage/updated", {"threadId": "sub", **usage(90000)})
-    await feed("item/started", {"threadId": "sub", "turnId": "s1", "item": {
-        "type": "mcpToolCall", "id": "x1", "server": "engineer",
-        "tool": "brief", "arguments": {}}})
-    await feed("turn/completed", {"threadId": "th", "turn": {
-        "id": "u2", "status": "completed", "items": []}})
-    check("the root's turn ending with the subagent on a call is waiting, 1",
-          (session.status(), session.meta()["background_tasks"],
-           session.turns[-1]["context"]["used"]), ("waiting", 1, 30000))
-    turns = len(session.turns)
-    await feed("item/completed", {"threadId": "sub", "turnId": "s1", "item": {
-        "type": "mcpToolCall", "id": "x1", "server": "engineer",
-        "tool": "brief", "status": "completed", "result": {"content": []}}})
-    check("...its tool call closes and the session still waits",
-          session.status(), "waiting")
-
-    # A child finishing after the parent turn can wake it.
-    session.WAKE_GATHER_S = 0
 
     async def settle():
         for _ in range(10):
@@ -461,6 +451,69 @@ async def offline_broker_cases(root: Path) -> None:
             await session._handle({"jsonrpc": "2.0", "id": wake[0]["id"],
                                    "result": {"turn": {"id": turn_id}}})
         await settle()
+
+    turns = len(session.turns)
+    all_events: asyncio.Queue = asyncio.Queue()
+    session.watch(all_events)
+    await feed("turn/started", {"threadId": "th", "turn": {"id": "u2"}})
+    await feed("item/started", {"threadId": "th", "turnId": "u2", "item": {
+        "type": "subAgentActivity", "id": "call_1", "kind": "started",
+        "agentThreadId": "sub", "agentPath": "/root/worker",
+        "model": "gpt-6.2-sol", "reasoningEffort": "xhigh"}})
+    await feed("item/completed", {"threadId": "th", "turnId": "u2", "item": {
+        "type": "subAgentActivity", "id": "call_1", "kind": "started",
+        "agentThreadId": "sub", "agentPath": "/root/worker"}})
+    await feed("item/completed", {"threadId": "th", "turnId": "u2", "item": {
+        "type": "subAgentActivity", "id": "call_1_ping", "kind": "interacted",
+        "agentThreadId": "sub", "agentPath": "/root/worker"}})
+    await feed("turn/started", {"threadId": "sub", "turn": {"id": "s1"}})
+    spawn_events = []
+    while not all_events.empty():
+        spawn_events.append(all_events.get_nowait())
+    tool_uses = [b for e in spawn_events if e.get("type") == "assistant"
+                 for b in (e.get("message") or {}).get("content") or []
+                 if b.get("type") == "tool_use"]
+    tool_results = [b for e in spawn_events if e.get("type") == "user"
+                    for b in (e.get("message") or {}).get("content") or []
+                    if b.get("type") == "tool_result"]
+    check("subAgentActivity started becomes one Agent tool_use with plain name and deferred result",
+          (len(tool_uses), tool_uses[0]["name"], tool_uses[0]["input"]["description"],
+           len(tool_results), "subAgentActivity" in json.dumps(spawn_events),
+           "/root/worker" in json.dumps(spawn_events)),
+          (1, "Agent", "worker", 0, False, False))
+    check("an in-turn subagent stays part of the open turn (not background_tasks)",
+          (session.status(), session.meta()["background_tasks"],
+           session._codex.turn_id), ("working", 0, "u2"))
+    await feed("thread/tokenUsage/updated", {"threadId": "th", **usage(30000)})
+    await feed("thread/tokenUsage/updated", {"threadId": "sub", **usage(90000)})
+    await feed("item/started", {"threadId": "sub", "turnId": "s1", "item": {
+        "type": "mcpToolCall", "id": "x1", "server": "engineer",
+        "tool": "brief", "arguments": {}}})
+    # Root writes a premature answer while the helper is still running: buffered
+    # and discarded when turn/completed fires while sub is still active.
+    await feed("item/started", {"threadId": "th", "turnId": "u2", "item": {
+        "type": "agentMessage", "id": "m-early", "phase": "final_answer"}})
+    await feed("item/agentMessage/delta", {"threadId": "th", "turnId": "u2",
+                                           "itemId": "m-early", "delta": "Premature answer."})
+    await feed("item/completed", {"threadId": "th", "turnId": "u2", "item": {
+        "type": "agentMessage", "id": "m-early", "phase": "final_answer",
+        "text": "Premature answer."}})
+    await feed("turn/completed", {"threadId": "th", "turn": {
+        "id": "u2", "status": "completed", "durationMs": 5000, "items": []}})
+    held_events = []
+    while not all_events.empty():
+        held_events.append(all_events.get_nowait())
+    check("premature root turn/completed holds turn open and emits neither draft nor result",
+          (session.status(), session.meta()["background_tasks"],
+           len(session.turns), session._codex.turn_id,
+           any(e.get("type") == "result" for e in held_events),
+           "Premature answer." in json.dumps(held_events)),
+          ("working", 0, turns, None, False, False))
+    await feed("item/completed", {"threadId": "sub", "turnId": "s1", "item": {
+        "type": "mcpToolCall", "id": "x1", "server": "engineer",
+        "tool": "brief", "status": "completed", "result": {"content": []}}})
+    check("...its tool call closes and the root still holds open",
+          session.status(), "working")
 
     before = len(sent)
     said: asyncio.Queue = asyncio.Queue()
@@ -489,54 +542,177 @@ async def offline_broker_cases(root: Path) -> None:
             if "parent_tool_use_id" in e},
            loam_thread_engine.Reply.of(orphan).segments),
           ({"codex-subagent:orphan"}, []))
-    session.unwatch(said)
+    while not all_events.empty():
+        all_events.get_nowait()
     await feed("thread/status/changed", {"threadId": "sub",
                                          "status": {"type": "idle"}})
-    check("WAKE the subagent ending after the root's turn: working, 0, no turn yet",
-          (session.status(), session.meta()["background_tasks"],
-           len(session.turns)), ("working", 0, turns))
+    agent_close = []
+    while not all_events.empty():
+        agent_close.append(all_events.get_nowait())
+    close_results = [b for e in agent_close if e.get("type") == "user"
+                     and e.get("parent_tool_use_id") is None
+                     for b in (e.get("message") or {}).get("content") or []
+                     if b.get("type") == "tool_result"]
+    check("HOLD finishing the helper emits the deferred Agent tool_result",
+          (len(close_results), close_results[0]["tool_use_id"],
+           "The receipt says it landed." in close_results[0]["content"],
+           session.status(), session.meta()["background_tasks"], len(session.turns)),
+          (1, "call_1", True, "working", 0, turns))
+    session.unwatch(said)
+    session.unwatch(all_events)
     await settle()
     await feed("turn/completed", {"threadId": "sub", "turn": {
         "id": "s1", "status": "completed", "items": []}})
     wake = turn_starts(before)
     text = (wake[0]["params"]["input"][0]["text"] if wake else "")
-    check("WAKE ...one root turn/start, carrying what the subagent last said",
+    check("HOLD ...one continuation turn/start, carrying what the helper said",
           (len(wake), wake[0]["params"]["threadId"] if wake else None,
            text.startswith("<task-notification>"),
-           "The receipt says it landed." in text, "/root/worker" in text),
-          (1, "th", True, True, True))
-    check("WAKE ...which the transcript writer does not file as the owner's words",
+           "The receipt says it landed." in text,
+           "worker" in text, "held back" in text),
+          (1, "th", True, True, True, True))
+    check("HOLD ...which the transcript writer does not file as the owner's words",
           broker_mod.loam_transcript.person_text(text), "")
-    await answer(wake, "u-wake")
-    await feed("turn/started", {"threadId": "th", "turn": {"id": "u-wake"}})
-    await feed("item/completed", {"threadId": "th", "turnId": "u-wake", "item": {
-        "type": "agentMessage", "id": "m-wake", "text": "The worker says it landed."}})
+    await answer(wake, "u-cont")
+    await feed("turn/started", {"threadId": "th", "turn": {"id": "u-cont"}})
+    await feed("thread/tokenUsage/updated", {"threadId": "th", **usage(30000)})
+    await feed("item/completed", {"threadId": "th", "turnId": "u-cont", "item": {
+        "type": "agentMessage", "id": "m-cont", "text": "The worker says it landed."}})
     await feed("turn/completed", {"threadId": "th", "turn": {
-        "id": "u-wake", "status": "completed", "items": []}})
-    check("WAKE ...and the woken turn ends done, one turn on the record",
-          (session.status(), len(session.turns), session.last_message),
-          ("done", turns + 1, "The worker says it landed."))
-    check("WAKE the page is told what a Claude task notification tells it",
+        "id": "u-cont", "status": "completed", "durationMs": 2500, "items": []}})
+    check("HOLD ...continuation ends done, one turn on record, cumulative duration",
+          (session.status(), len(session.turns), session.last_message,
+           session.turns[-1]["context"]["used"], session.turns[-1]["duration_ms"]),
+          ("done", turns + 1, "The worker says it landed.", 30000, 7500))
+    check("HOLD stream saw one init, one result, and zero background_tasks",
           drawn_since(),
-          [("system", "init"), ("broker.background_tasks", 1),
-           ("result", "success"),
-           ("broker.background_tasks", 0), ("system", "task_notification"),
-           ("system", "init"), ("result", "success")])
+          [("system", "init"), ("result", "success")])
 
-    # A child can finish while the parent is still working.
+    # Two helpers: turn stays held until BOTH finish, then sends ONE
+    # continuation carrying BOTH findings; if continuation says nothing, the
+    # held draft is emitted as fallback so a reply is never dropped.
     before = len(sent)
+    two_q: asyncio.Queue = asyncio.Queue()
+    session.watch(two_q)
+    await feed("turn/started", {"threadId": "th", "turn": {"id": "u2h"}})
+    await feed("item/started", {"threadId": "th", "turnId": "u2h", "item": {
+        "type": "subAgentActivity", "id": "c_critics", "kind": "started",
+        "agentThreadId": "t_critics", "agentPath": "/root/critics"}})
+    await feed("turn/started", {"threadId": "t_critics", "turn": {"id": "sc1"}})
+    await feed("item/started", {"threadId": "th", "turnId": "u2h", "item": {
+        "type": "subAgentActivity", "id": "c_readers", "kind": "started",
+        "agentThreadId": "t_readers", "agentPath": "/root/readers"}})
+    await feed("turn/started", {"threadId": "t_readers", "turn": {"id": "sr1"}})
+    await feed("item/completed", {"threadId": "th", "turnId": "u2h", "item": {
+        "type": "agentMessage", "id": "m-2h-draft", "phase": "final_answer",
+        "text": "Fallback draft text."}})
+    await feed("turn/completed", {"threadId": "th", "turn": {
+        "id": "u2h", "status": "completed", "durationMs": 1000, "items": []}})
+    await feed("item/completed", {"threadId": "t_critics", "turnId": "sc1", "item": {
+        "type": "agentMessage", "id": "mc1", "text": "Critics praised the worldbuilding."}})
+    await feed("turn/completed", {"threadId": "t_critics", "turn": {
+        "id": "sc1", "status": "completed", "items": []}})
+    await settle()
+    check("TWO-HELPER after 1st finishes: still held, zero continuation sent yet",
+          (session.status(), len(turn_starts(before))), ("working", 0))
+    await feed("item/completed", {"threadId": "t_readers", "turnId": "sr1", "item": {
+        "type": "agentMessage", "id": "mr1", "text": "Readers loved the pacing."}})
+    await feed("turn/completed", {"threadId": "t_readers", "turn": {
+        "id": "sr1", "status": "completed", "items": []}})
+    await settle()
+    cont = turn_starts(before)
+    cont_text = cont[0]["params"]["input"][0]["text"] if cont else ""
+    check("TWO-HELPER after 2nd finishes: one continuation with BOTH helpers",
+          (len(cont), "critics" in cont_text, "readers" in cont_text,
+           "Critics praised the worldbuilding." in cont_text,
+           "Readers loved the pacing." in cont_text,
+           broker_mod.loam_transcript.person_text(cont_text)),
+          (1, True, True, True, True, ""))
+    await answer(cont, "u2h-cont")
+    await feed("turn/started", {"threadId": "th", "turn": {"id": "u2h-cont"}})
+    await feed("item/completed", {"threadId": "th", "turnId": "u2h-cont", "item": {
+        "type": "agentMessage", "id": "m-empty", "text": ""}})
+    await feed("turn/completed", {"threadId": "th", "turn": {
+        "id": "u2h-cont", "status": "completed", "durationMs": 500, "items": []}})
+    two_events = []
+    while not two_q.empty():
+        two_events.append(two_q.get_nowait())
+    session.unwatch(two_q)
+    check("TWO-HELPER empty continuation falls back to held draft before result",
+          (session.status(), session.last_message,
+           any(e.get("type") == "broker.background_tasks" for e in two_events),
+           sum(1 for e in two_events if e.get("type") == "result")),
+          ("done", "Fallback draft text.", False, 1))
+    drawn_since()
+
+    # A buffered root message flushes immediately when helpers finish before
+    # the root turn completes (or when the root emits a tool call).
+    before = len(sent)
+    flush_q: asyncio.Queue = asyncio.Queue()
+    session.watch(flush_q)
     await feed("turn/started", {"threadId": "th", "turn": {"id": "u3"}})
-    await feed("turn/started", {"threadId": "sub", "turn": {"id": "s2"}})
-    await feed("turn/completed", {"threadId": "sub", "turn": {
-        "id": "s2", "status": "completed", "items": []}})
+    await feed("item/started", {"threadId": "th", "turnId": "u3", "item": {
+        "type": "subAgentActivity", "id": "c3", "kind": "started",
+        "agentThreadId": "sub3", "agentPath": "/root/compare"}})
+    await feed("turn/started", {"threadId": "sub3", "turn": {"id": "s3"}})
+    await feed("item/started", {"threadId": "th", "turnId": "u3", "item": {
+        "type": "agentMessage", "id": "m3-mid"}})
+    await feed("item/completed", {"threadId": "th", "turnId": "u3", "item": {
+        "type": "agentMessage", "id": "m3-mid", "text": "Checking notes too."}})
+    await feed("item/started", {"threadId": "th", "turnId": "u3", "item": {
+        "type": "commandExecution", "id": "cmd3", "command": "ls"}})
+    await feed("item/completed", {"threadId": "th", "turnId": "u3", "item": {
+        "type": "commandExecution", "id": "cmd3", "status": "completed",
+        "aggregatedOutput": "ok", "exitCode": 0}})
+    await feed("turn/completed", {"threadId": "sub3", "turn": {
+        "id": "s3", "status": "completed", "items": []}})
     await settle()
     check("a subagent ending inside the root's turn leaves the root working",
           (session.status(), session.meta()["background_tasks"]), ("working", 0))
     await feed("turn/completed", {"threadId": "th", "turn": {
         "id": "u3", "status": "completed", "items": []}})
     await settle()
-    check("...until the root's own turn ends, and no turn is started for it",
-          (session.status(), len(turn_starts(before))), ("done", 0))
+    flush_events = []
+    while not flush_q.empty():
+        flush_events.append(flush_q.get_nowait())
+    session.unwatch(flush_q)
+    check("...buffered text flushed before tool call and no continuation turn starts",
+          (session.status(), len(turn_starts(before)),
+           "Checking notes too." in json.dumps(flush_events)),
+          ("done", 0, True))
+    drawn_since()
+
+    # After MAX_HOLD_CYCLES, still-running helpers are promoted to
+    # background_tasks with clean helper names so the turn cannot loop forever.
+    before = len(sent)
+    prev_cap = session.MAX_HOLD_CYCLES
+    session.MAX_HOLD_CYCLES = 0
+    await feed("turn/started", {"threadId": "th", "turn": {"id": "ucap"}})
+    await feed("item/started", {"threadId": "th", "turnId": "ucap", "item": {
+        "type": "subAgentActivity", "id": "ccap", "kind": "started",
+        "agentThreadId": "subcap", "agentPath": "/root/long_runner"}})
+    await feed("turn/started", {"threadId": "subcap", "turn": {"id": "scap"}})
+    await feed("turn/completed", {"threadId": "th", "turn": {
+        "id": "ucap", "status": "completed", "items": []}})
+    check("MAX_HOLD_CYCLES promotes still-running helper to background_tasks with clean name",
+          (session.status(), session.meta()["background_tasks"],
+           session.background_tasks[0]["description"],
+           session.task_started_at("subcap") is not None),
+          ("waiting", 1, "long runner", True))
+    await feed("item/completed", {"threadId": "subcap", "turnId": "scap", "item": {
+        "type": "agentMessage", "id": "mcap", "text": "Finished late."}})
+    await feed("turn/completed", {"threadId": "subcap", "turn": {
+        "id": "scap", "status": "completed", "items": []}})
+    await settle()
+    wake_cap = turn_starts(before)
+    await answer(wake_cap, "ucap-wake")
+    await feed("turn/started", {"threadId": "th", "turn": {"id": "ucap-wake"}})
+    await feed("turn/completed", {"threadId": "th", "turn": {
+        "id": "ucap-wake", "status": "completed", "items": []}})
+    check("...promoted helper completion wakes root and returns to done",
+          (len(wake_cap), session.status(), session.meta()["background_tasks"]),
+          (1, "done", 0))
+    session.MAX_HOLD_CYCLES = prev_cap
     drawn_since()
 
     # An MCP call can outlive its turn.
