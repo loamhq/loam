@@ -54,6 +54,12 @@ agent a turn. Starting from an agent gives the thread that agent. The plain
 with **Undo** beside the message. An unaddressed message stays as a note.
 Pick an agent beneath it to have that agent answer the saved message and
 future messages. Pin a thread from its row (hold on a phone) or its details.
+A new thread takes its opening title from the owner's first message. When the
+owner sends a second message that triggers a reply — and the title is still
+automatic — Loam asks the replying agent (the default answerer when several
+members reply, otherwise the first tagged) on that one turn for a 3–5 word
+plain title, strips the title tag from the reply, and renames the thread once.
+A title the owner set or edited is never overwritten.
 
 When a thread message waits for a connection, it stays in that browser
 with **Not sent yet** below it. The browser tries again after a failed send.
@@ -120,7 +126,7 @@ opening or remove the quote to start a plain thread. A sent quote goes back
 to the original message, and a small link beneath that message opens the
 branch. The answering agent gets the original words, author, time and IDs
 with the source thread's name and file path, so it can read further back
-when it needs to. The owner's opening supplies the title.
+when it needs to. The owner's opening supplies the initial title until auto-naming or a manual rename updates it.
 
 On a fresh install, the welcome link is where the owner makes a sign-in.
 The page shows when the sign-in is saved and sends the owner to sign-in

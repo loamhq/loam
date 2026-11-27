@@ -298,23 +298,146 @@ def streamed_opening(draft: str) -> tuple[str | None, str | None]:
     return (rest, target) if target else (draft, None)
 
 
-def unmark_steps(entry_steps: list, reply_to: str | None) -> list:
+# Auto-naming (2026-11-27): on the owner's second message, when the thread still
+# wears its automatic title, one replying agent is asked to start its reply with
+# `<thread-title>3-5 word title</thread-title>`. The runtime strips the tag from
+# streaming deltas, the stored reply, and displayed steps, and renames the thread
+# once (never overwriting a manual title).
+AUTO_TITLE_SOURCES = ("placeholder", "first_message")
+AUTO_TITLE_MAX_CHARS = 80
+TITLE_TAG_OPEN = "<thread-title>"
+TITLE_TAG_CLOSE = "</thread-title>"
+TITLE_TAG_RE = re.compile(
+    r"<thread-title>\s*([^<]{0,160}?)\s*</thread-title>",
+    re.IGNORECASE,
+)
+AUTO_TITLE_INSTRUCTION = (
+    "[Loam: this thread still has its automatic title. Start your reply with "
+    "<thread-title>3-5 word title</thread-title> on its own first line "
+    "(plain words, no quotes or trailing period), then a blank line, then "
+    "your reply. Loam will rename the thread and hide that line from your reply.]"
+)
+
+
+def clean_auto_title(raw: str) -> str | None:
+    """Normalize an agent-supplied thread title into plain words, or None if unusable."""
+    text = " ".join((raw or "").split()).strip()
+    if not text:
+        return None
+    for left, right in (("**", "**"), ("__", "__"), ("`", "`"),
+                        ('"', '"'), ("'", "'"), ("“", "”"), ("‘", "’")):
+        if (len(text) > len(left) + len(right)
+                and text.startswith(left) and text.endswith(right)):
+            text = text[len(left):-len(right)].strip()
+    text = text.rstrip(".,;:").strip()
+    if not text or len(text) > 100:
+        return None
+    if len(text) > AUTO_TITLE_MAX_CHARS:
+        text = (text[:AUTO_TITLE_MAX_CHARS].rsplit(" ", 1)[0]
+                or text[:AUTO_TITLE_MAX_CHARS]).rstrip()
+    return clean_title(text)
+
+
+def take_thread_title(text: str) -> tuple[str, str | None]:
+    """Extract and strip a ``<thread-title>...</thread-title>`` tag outside code
+    blocks and inline code spans. Returns ``(cleaned_text, raw_title_or_None)``."""
+    if not text or "<" not in text:
+        return text, None
+    masked = _strip_markdown_code(text)
+    match = TITLE_TAG_RE.search(masked)
+    if not match:
+        return text, None
+    start, end = match.span()
+    raw = text[match.start(1):match.end(1)]
+    before = text[:start]
+    after = text[end:]
+    if not before.strip():
+        cleaned = after.lstrip(" \t\r\n")
+    elif not after.strip():
+        cleaned = before.rstrip(" \t\r\n")
+    else:
+        left = before.rstrip(" \t")
+        right = after.lstrip(" \t")
+        if left.endswith("\n") and right.startswith("\n"):
+            cleaned = left.rstrip("\n") + "\n\n" + right.lstrip("\n")
+        elif left.endswith("\n") or right.startswith("\n"):
+            cleaned = left + right
+        else:
+            cleaned = left + " " + right
+    return cleaned, raw
+
+
+def _trailing_title_hold(text: str) -> int:
+    """Index where a trailing partial ``<thread-title>`` opening or unclosed
+    ``<thread-title>...`` tag (bounded to 180 chars) begins, else ``len(text)``."""
+    if not text or "<" not in text:
+        return len(text)
+    masked = _strip_markdown_code(text)
+    open_at = masked.lower().rfind(TITLE_TAG_OPEN)
+    if open_at >= 0:
+        after = masked[open_at + len(TITLE_TAG_OPEN):]
+        if TITLE_TAG_CLOSE not in after.lower() and len(after) <= 180:
+            return open_at
+    lt = masked.rfind("<")
+    if lt >= 0:
+        tail = masked[lt:].lower()
+        if len(tail) < len(TITLE_TAG_OPEN) and TITLE_TAG_OPEN.startswith(tail):
+            return lt
+    return len(text)
+
+
+def streamed_without_title(draft: str) -> tuple[str, bool]:
+    """Strip a complete ``<thread-title>...</thread-title>`` and withhold any
+    trailing partial or unclosed tag while streaming. Returns ``(visible, holding)``."""
+    cleaned, _ = take_thread_title(draft or "")
+    cut = _trailing_title_hold(cleaned)
+    if cut < len(cleaned):
+        visible = cleaned[:cut]
+        if not visible.strip():
+            return "", True
+        return visible, True
+    return cleaned, False
+
+
+def unmark_steps(entry_steps: list, reply_to: str | None, *,
+                 strip_title: bool = False) -> list:
     """Remove a leading reply marker such as ↩ m12 from the displayed steps only when
-    reply_to names the same message. Keep the stored record intact.
+    reply_to names the same message, and strip a ``<thread-title>...</thread-title>``
+    tag when ``strip_title`` is true. Keep the stored record intact.
     """
-    if not reply_to or not isinstance(entry_steps, list):
+    if not isinstance(entry_steps, list) or (not reply_to and not strip_title):
         return entry_steps
-    for index, step in enumerate(entry_steps):
+    out = entry_steps
+    if strip_title:
+        stripped = []
+        changed = False
+        taken = False
+        for step in out:
+            if (not taken and isinstance(step, dict) and step.get("parent") is None
+                    and step.get("type") == "text" and isinstance(step.get("text"), str)):
+                cleaned, raw = take_thread_title(step["text"])
+                if raw is not None:
+                    taken = True
+                    changed = True
+                    if cleaned.strip():
+                        stripped.append({**step, "text": cleaned})
+                    continue
+            stripped.append(step)
+        if changed:
+            out = stripped
+    if not reply_to:
+        return out
+    for index, step in enumerate(out):
         if not isinstance(step, dict) or step.get("parent") is not None \
                 or step.get("type") != "text" or not str(step.get("text") or "").strip():
             continue
         rest, target = take_reply_mark(step["text"])
         if target != reply_to:
-            return entry_steps
-        out = list(entry_steps)
-        out[index] = {**step, "text": rest}
-        return out
-    return entry_steps
+            return out
+        res = list(out)
+        res[index] = {**step, "text": rest}
+        return res
+    return out
 
 
 def find(msgs: list[dict], msg_id: str | None) -> dict | None:
@@ -915,6 +1038,7 @@ def create(persona: str | None = None, title: str | None = None, *,
         threads_state = load_state("threads.json")
         row = threads_state.setdefault(thread_id, {})
         row["placeholder_title"] = placeholder
+        row["title_source"] = "placeholder" if placeholder else "manual"
         if draft and draft.strip():
             row["draft"] = draft
         if draft_reply:
@@ -938,6 +1062,7 @@ def write_imported(meta: dict, msgs: list[dict]) -> Path:
         data = load_state("threads.json")
         row = data.setdefault(meta["id"], {})
         row["placeholder_title"] = False
+        row["title_source"] = "manual"
         row["imported"] = len(msgs)
         if msgs:
             row["seen"] = msgs[-1]["id"]
@@ -1232,11 +1357,67 @@ def migrate_reply_images() -> dict | None:
 _UNSET = object()
 
 
+def title_source(thread_id: str, state: dict | None = None) -> str:
+    """How this thread got its current title: ``placeholder``, ``first_message``,
+    ``agent`` or ``manual``. Existing records written before this field keep
+    their title unless ``placeholder_title`` is still true."""
+    if thread_id == GENERAL_ID:
+        return "manual"
+    row = (load_state("threads.json") if state is None else state).get(thread_id, {})
+    src = row.get("title_source")
+    if src in ("placeholder", "first_message", "agent", "manual"):
+        return src
+    return "placeholder" if row.get("placeholder_title") else "manual"
+
+
+def can_auto_title(thread_id: str, meta: dict | None = None,
+                   state: dict | None = None) -> bool:
+    """True while the thread still wears its automatic title (placeholder or
+    truncated first message) and is eligible for one-time agent naming."""
+    if thread_id == GENERAL_ID:
+        return False
+    if meta is None:
+        try:
+            meta = read(thread_id)[0]
+        except ThreadError:
+            return False
+    if meta.get("hello") or meta.get("imported_from"):
+        return False
+    return title_source(thread_id, state) in AUTO_TITLE_SOURCES
+
+
+def _apply_title_locked(thread_id: str, meta: dict, path: Path,
+                        title: str, source: str) -> bool:
+    """Apply ``title`` and record its ``title_source`` while holding ``locked(VAULT)``.
+    Returns True if the title text changed."""
+    new = clean_title(title)
+    changed = new != meta["title"]
+    if changed:
+        meta["title"] = new
+        target = _unique_path(new, own=path)
+        _rewrite(path, meta)
+        if target != path:
+            path.rename(target)
+            _CACHE.pop(str(path), None)
+        idx = index()
+        idx[thread_id] = target.name
+        save_state("index.json", idx)
+    ts = load_state("threads.json")
+    row = ts.setdefault(thread_id, {})
+    row["placeholder_title"] = (source == "placeholder")
+    row["title_source"] = source
+    save_state("threads.json", ts)
+    if changed:
+        thread_files.renamed(meta)
+    return changed
+
+
 def update(thread_id: str, *, title: str | None = None, default=_UNSET,
            add: list[str] | None = None, remove: list[str] | None = None,
            engines: dict | None = None, models: dict | None = None,
            icon=_UNSET, pinned: bool | None = None,
-           archived: bool | None = None) -> dict:
+           archived: bool | None = None,
+           title_source: str = "manual") -> dict:
     """Change the frontmatter. Clearing the default leaves untagged messages unanswered. A
     null member model restores its own default. General keeps its name and stays pinned
     and unarchived.
@@ -1303,23 +1484,28 @@ def update(thread_id: str, *, title: str | None = None, default=_UNSET,
         if archived is not None:
             meta["archived"] = bool(archived)
         if title is not None:
-            new = clean_title(title)
-            if new != meta["title"]:
-                meta["title"] = new
-                target = _unique_path(new, own=path)
-                _rewrite(path, meta)
-                if target != path:
-                    path.rename(target)
-                idx = index()
-                idx[thread_id] = target.name
-                save_state("index.json", idx)
-                ts = load_state("threads.json")
-                ts.setdefault(thread_id, {})["placeholder_title"] = False
-                save_state("threads.json", ts)
-                thread_files.renamed(meta)
+            if _apply_title_locked(thread_id, meta, path, title, title_source):
                 return meta
         _rewrite(path, meta)
     return meta
+
+
+def apply_auto_title(thread_id: str, title: str) -> dict | None:
+    """Apply an agent-written title once, only while the thread still holds its
+    automatic title. Returns updated meta when the title changed, else None."""
+    cleaned = clean_auto_title(title)
+    if not cleaned or thread_id == GENERAL_ID:
+        return None
+    with locked(VAULT):
+        try:
+            meta, _, path = read(thread_id)
+        except ThreadError:
+            return None
+        ts = load_state("threads.json")
+        if not can_auto_title(thread_id, meta, ts):
+            return None
+        changed = _apply_title_locked(thread_id, meta, path, cleaned, "agent")
+        return meta if changed else None
 
 
 def delete(thread_id: str, *, only_empty: bool = False) -> dict:
@@ -1357,7 +1543,7 @@ def title_from_first(thread_id: str, text: str) -> None:
         if len(line) > 60:
             line = (line[:60].rsplit(" ", 1)[0] or line[:60]) + "…"
         if line:
-            update(thread_id, title=line)
+            update(thread_id, title=line, title_source="first_message")
 
 
 # Legacy branches carried a window ending at the chosen message: back to the last real pause (a
@@ -1837,7 +2023,8 @@ def turn_prompt(meta: dict, persona: str, msgs: list[dict], fresh: bool,
                 now: datetime | None = None,
                 record: list[dict] | None = None,
                 summary: str | None = None,
-                unshown: int = 0, summary_through: str | None = None) -> str:
+                unshown: int = 0, summary_through: str | None = None,
+                auto_title: bool = False) -> str:
     """One turn's input. ``msgs`` is the window the engine chose (the recent
     exchange on a fresh session; on a resumed one, what in it is new to this
     persona); ``record`` the whole thread, where a ``reply_to`` is looked up;
@@ -1909,12 +2096,15 @@ def turn_prompt(meta: dict, persona: str, msgs: list[dict], fresh: bool,
             "one anywhere else in your reply. Name an earlier message by who "
             "said it and what it said (\"your point about subtlety\"), not by "
             "its id.")
+    if auto_title:
+        tail += "\n\n" + AUTO_TITLE_INSTRUCTION
     return head + transcript(msgs, record, record_file) + pointer + tail
 
 
 def steer_prompt(meta: dict, persona: str, msgs: list[dict],
                  now: datetime | None = None,
-                 record: list[dict] | None = None) -> str:
+                 record: list[dict] | None = None,
+                 auto_title: bool = False) -> str:
     """Deliver only the new messages and identify their thread to a member already
     mid-turn. Its eventual response still belongs to the same turn.
     """
@@ -1927,4 +2117,7 @@ def steer_prompt(meta: dict, persona: str, msgs: list[dict],
             f"before your next step: change course if it asks you to, and "
             f"answer it in the reply this turn is writing.]\n"
             f"[{clock_line(now)}]\n\n")
-    return head + transcript(msgs, record, record_file)
+    body = head + transcript(msgs, record, record_file)
+    if auto_title:
+        body += "\n\n" + AUTO_TITLE_INSTRUCTION
+    return body

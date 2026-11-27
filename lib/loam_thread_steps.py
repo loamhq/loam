@@ -34,7 +34,7 @@ SKIPPED = ("stream_event", "broker.local_command")
 COUNTS: dict = {"since": None, "replies": 0, "late_recovered": 0,
                 "steered": 0, "steer_refused": 0, "already_heard": 0,
                 "late_prompt": 0, "fanout": 0, "parallel": 0,
-                "delivered_while_waiting": 0, "reply_to": 0,
+                "delivered_while_waiting": 0, "reply_to": 0, "auto_titled": 0,
                 "carried": 0, "rotated": 0, "steps_written": 0, "steps_failed": 0,
                 "last_failure": None}
 
@@ -244,7 +244,8 @@ def read(thread_id: str, message: str | None = None) -> dict[str, dict]:
             mid = rec.get("message")
             if isinstance(rec.get("steps"), list):
                 rec["steps"] = threads.unmark_steps(nest_carried(rec["steps"]),
-                                                    rec.get("reply_to"))
+                                                    rec.get("reply_to"),
+                                                    strip_title=bool(rec.get("auto_title")))
             if mid and (message is None or mid == message):
                 out[mid] = rec
             elif not mid and rec.get("unspoken") and message is None:

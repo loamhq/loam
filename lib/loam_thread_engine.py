@@ -193,7 +193,8 @@ class Turn:
                  reason: str, model: str | None = None,
                  attachments: list[dict] | None = None,
                  note: str | None = None,
-                 briefed_at: float | None = None) -> None:
+                 briefed_at: float | None = None,
+                 auto_title: bool = False) -> None:
         self.thread_id = thread_id
         # Its entry in the member's input list on disk (2026-11-19, batch B
         # step 2, lib/loam_thread_inputs.py), and when it was queued.
@@ -209,6 +210,9 @@ class Turn:
         # may be steered only into a turn that was already under way then,
         # the turn that briefed it (``ThreadEngine._claim``).
         self.briefed_at = briefed_at
+        # Ask this one turn (owner's 2nd message, automatic title still active)
+        # to emit a 3-5 word `<thread-title>...</thread-title>` (2026-11-27).
+        self.auto_title = bool(auto_title)
         # Inputs steered into this turn while it ran (their input ids),
         # settled with its own when it ends; and how it ended, for that.
         self.carried: list[str] = []
@@ -249,6 +253,8 @@ class Turn:
                 out[name] = getattr(self, name)
         if self.attachments:
             out["attachments"] = self.attachments
+        if self.auto_title:
+            out["auto_title"] = True
         return out
 
     @classmethod
@@ -256,7 +262,8 @@ class Turn:
         turn = cls(thread_id, persona, int(item.get("chain") or 0),
                    str(item.get("reason") or "mention"), model=item.get("model"),
                    attachments=item.get("attachments") or None,
-                   note=item.get("note"), briefed_at=item.get("briefed_at"))
+                   note=item.get("note"), briefed_at=item.get("briefed_at"),
+                   auto_title=bool(item.get("auto_title")))
         turn.input_id, turn.queued_at, turn.held = item["id"], item.get("at"), True
         turn.dispatch = item.get("dispatch")
         return turn
@@ -818,10 +825,16 @@ class ThreadEngine:
         if fanout:
             pool = dict.fromkeys([*named, *meta["members"], meta.get("default")])
             recipients = [p for p in pool if p and not threads.is_owner(p)]
+        owner_before = sum(1 for m in msgs if threads.is_owner(m.get("author")))
+        auto_title_for = None
+        if owner_before == 1 and recipients and threads.can_auto_title(thread_id, meta):
+            default = meta.get("default")
+            auto_title_for = default if default in recipients else recipients[0]
         request = {"thread": thread_id, "text": text, "model": model, "reply_to": reply_to,
                    "attachments": attachments, "submission_id": submission_id, "named": named,
                    "recipients": recipients, "fanout": fanout,
-                   "first": not any(threads.is_owner(m.get("author")) for m in msgs)}
+                   "first": owner_before == 0,
+                   **({"auto_title_for": auto_title_for} if auto_title_for else {})}
         if not meta.get("default") and named and not any(m.get("first_tag") for m in msgs):
             request["first_tag"] = named[0]
         if not recipients and not fanout:
@@ -946,9 +959,11 @@ class ThreadEngine:
             steps.log(f"{thread_id}: @all from {lc.OWNER_NAME}, {len(answer)} turn(s) "
                       f"({', '.join(answer) or 'nobody'})")
         deliveries = []
+        auto_title_for = request.get("auto_title_for")
         for persona in answer:
             turn = Turn(thread_id, persona, 0, msg["id"], model=request["model"],
-                        attachments=attachments)
+                        attachments=attachments,
+                        auto_title=(persona == auto_title_for))
             if key:
                 delivery = self.message_input(turn, msg["id"])
                 if delivery:
@@ -957,8 +972,12 @@ class ThreadEngine:
                 self.schedule(turn)
         if request["first"]:
             before = meta["title"]
-            if request.get("opening_title") and before == "New thread":
-                threads.update(thread_id, title=request["opening_title"])
+            if (request.get("opening_title") and before == "New thread"
+                    and threads.can_auto_title(thread_id, meta)):
+                src = ("placeholder" if request["opening_title"] == "New thread"
+                       else "first_message")
+                threads.update(thread_id, title=request["opening_title"],
+                               title_source=src)
             else:
                 threads.title_from_first(thread_id, text)
             after = threads.read(thread_id)[0]
@@ -1119,19 +1138,28 @@ class ThreadEngine:
                 return False
             cut = threads._num(live.read_through)
             news, parts, results = [], [], []
+            steered_auto_title = False
             for jobs, group in groupby(taken, key=is_result):
                 if jobs:
                     for job in group:
                         parts.append(result_steer_text(job))
                         results.append(job)
                     continue
+                group_list = list(group)
                 # Include intervening context only through the last message
                 # this group claimed. Later inputs may require another model.
-                end = max(threads._num(t.reason) for t in group)
+                end = max(threads._num(t.reason) for t in group_list)
                 batch = [m for m in msgs if cut < threads._num(m.get("id")) <= end
                          and m.get("author") != persona]
                 if batch:
-                    parts.append(threads.steer_prompt(meta, persona, batch, record=msgs))
+                    ask_title = (not live.auto_title and not steered_auto_title
+                                 and any(t.auto_title for t in group_list)
+                                 and threads.can_auto_title(thread_id, meta))
+                    parts.append(threads.steer_prompt(meta, persona, batch,
+                                                      record=msgs,
+                                                      auto_title=ask_title))
+                    if ask_title:
+                        steered_auto_title = True
                     news.extend(batch)
                 cut = max(cut, end)
             ids = {t.reason for t in taken}
@@ -1152,7 +1180,8 @@ class ThreadEngine:
                 if live.dispatch:
                     descriptor = {"id": inputs.new_id(), "inputs": [t.input_id for t in taken],
                                   "messages": [m["id"] for m in news],
-                                  "text": text, "attachments": attachments}
+                                  "text": text, "attachments": attachments,
+                                  **({"auto_title": True} if steered_auto_title else {})}
                     live.dispatch["steers"].append(descriptor)
                     inputs.bind(*key, live.input_id, live.dispatch)
                     seq = await session.dispatch(descriptor["id"], text, attachments,
@@ -1183,6 +1212,8 @@ class ThreadEngine:
             if heard:
                 live.read_through = heard[-1]
                 turn.setdefault("steered", []).extend(heard)
+            if steered_auto_title:
+                live.auto_title = True
             # On disk the steered inputs are the turn in flight's now, settled
             # with its own when it ends.
             carried = [t.input_id for t in taken if t.input_id]
@@ -1417,7 +1448,8 @@ class ThreadEngine:
             else:
                 t = Turn(turn.thread_id, turn.persona, turn.chain, turn.reason,
                          model=turn.model, attachments=list(turn.attachments),
-                         note=turn.note, briefed_at=turn.briefed_at)
+                         note=turn.note, briefed_at=turn.briefed_at,
+                         auto_title=turn.auto_title)
                 t.held = turn.held
                 t.reclaims = turn.reclaims + 1
                 t.reclaim_started_mono = started_mono
@@ -1717,9 +1749,12 @@ class ThreadEngine:
         else:
             news = window
             summary, summary_through, _ = prior_summary(turn.key)
+        ask_title = bool(turn.auto_title and threads.can_auto_title(turn.thread_id, meta))
+        turn.auto_title = ask_title
         prompt = threads.turn_prompt(meta, turn.persona, news, fresh=kept is None,
                                      record=msgs, summary=summary, unshown=unshown,
-                                     summary_through=summary_through)
+                                     summary_through=summary_through,
+                                     auto_title=ask_title)
         if turn.note:
             prompt += "\n\n" + turn.note
         held = held_line(turn)
@@ -1750,6 +1785,8 @@ class ThreadEngine:
                 accepted = seq is not None
             if accepted:
                 turn.carried.extend(steer["inputs"])
+                if steer.get("auto_title"):
+                    turn.auto_title = True
             else:
                 refused.extend(Turn.of_entry(*turn.key, entries[i])
                                for i in steer["inputs"] if i in entries)
@@ -2694,6 +2731,8 @@ class ThreadEngine:
         before = reply.before()
         if before and any("text" in seg for seg in before):
             extra["segments"] = before
+        did = list(reply.did)
+        text, extra, did, raw_title = self.reply_auto_title(turn, text, extra, did)
         text, extra = self.reply_mark(turn, text, extra)
         text, extra, unkept = reply_images_checked(text, extra)
         # The messages steered into this turn since its last reply
@@ -2709,12 +2748,13 @@ class ThreadEngine:
         if seq is not None:
             extra["journal_reply"] = f"{session.id}/{seq}"
         msg, created = threads.append_once(turn.thread_id, turn.persona, text,
-                                           did=reply.did, **extra)
+                                           did=did, **extra)
         if created:
             steps.COUNTS["replies"] += 1
         if created or not steps.read(turn.thread_id, msg["id"]):
             steps.write(turn.thread_id, steps.entry(
-                msg, turn.thread_id, session.id, reply.events, ended=why))
+                msg, turn.thread_id, session.id, reply.events, ended=why,
+                **({"auto_title": True} if raw_title is not None else {})))
         # `through` stays what the turn read: its own reply is not news to it
         # (the next turn skips its own messages), and another member's message
         # that landed while it ran is (2026-11-10). `seq` moves on.
@@ -2724,6 +2764,9 @@ class ThreadEngine:
                                  engine, read, seq=seq if seq is not None else getattr(session, "seq", None),
                                  context=session_context(session), summary_due=self.summary_due(turn, session))
         self.publish(turn.thread_id, {"type": "message.done", "message": msg})
+        if raw_title is not None and turn.auto_title:
+            self._finish_auto_title(turn.thread_id, turn.persona, raw_title)
+            turn.auto_title = False
         if created:
             seen_refs = {u["ref"] for u in unkept}
             for att in msg.get("attachments") or []:
@@ -2747,24 +2790,103 @@ class ThreadEngine:
             self.agent_mentions(turn, threads.read(turn.thread_id)[0], text, message_id=msg["id"])
         return msg
 
+    def _finish_auto_title(self, thread_id: str, persona: str, raw_title: str) -> None:
+        try:
+            before = threads.read(thread_id)[0]["title"]
+        except threads.ThreadError:
+            return
+        updated = threads.apply_auto_title(thread_id, raw_title)
+        if updated is not None:
+            steps.COUNTS["auto_titled"] = steps.COUNTS.get("auto_titled", 0) + 1
+            steps.log(f"{thread_id} {persona}: auto-named thread {before!r} -> "
+                      f"{updated['title']!r}")
+            self.publish(thread_id, {"type": "thread.changed",
+                                     "thread": thread_id,
+                                     "summary": self.summary(thread_id)})
+
+    def reply_auto_title(self, turn: Turn, text: str, extra: dict,
+                         did: list[dict]) -> tuple[str, dict, list[dict], str | None]:
+        """On a naming turn, extract and strip ``<thread-title>...</thread-title>``
+        from the reply text, earlier segments and ``Said:`` steps."""
+        if not turn.auto_title:
+            return text, extra, did, None
+        found: str | None = None
+        segments = [dict(seg) for seg in extra.get("segments") or []]
+        if segments:
+            new_segments = []
+            for seg in segments:
+                if isinstance(seg.get("text"), str):
+                    cleaned, raw = threads.take_thread_title(seg["text"])
+                    if raw is not None and found is None:
+                        found = raw
+                    if cleaned.strip():
+                        new_segments.append({**seg, "text": cleaned})
+                else:
+                    new_segments.append(seg)
+            if new_segments and any("text" in seg for seg in new_segments):
+                extra = {**extra, "segments": new_segments}
+            else:
+                extra = {k: v for k, v in extra.items() if k != "segments"}
+        cleaned_text, raw = threads.take_thread_title(text)
+        if raw is not None and found is None:
+            found = raw
+        text = cleaned_text
+        if not text.strip() and extra.get("segments"):
+            segs = list(extra["segments"])
+            last_text = max((i for i, s in enumerate(segs)
+                             if isinstance(s.get("text"), str) and s["text"].strip()),
+                            default=-1)
+            if last_text >= 0:
+                text = segs[last_text]["text"]
+                segs = segs[:last_text] + segs[last_text + 1:]
+                if segs and any("text" in s for s in segs):
+                    extra = {**extra, "segments": segs}
+                else:
+                    extra = {k: v for k, v in extra.items() if k != "segments"}
+        if did and found is not None:
+            cleaned_did = []
+            for item in did:
+                label = item.get("label") if isinstance(item, dict) else None
+                if isinstance(label, str) and label.startswith("Said: "):
+                    body, _ = threads.take_thread_title(label[6:])
+                    if body.strip():
+                        cleaned_did.append({**item, "label": f"Said: {body.strip()}"})
+                    continue
+                cleaned_did.append(item)
+            did = cleaned_did
+        return text, extra, did, found
+
     def shown_draft(self, turn: Turn, reply: "Reply") -> dict | None:
-        """Withhold an incomplete leading reply marker. Stream a valid target as reply_to and only the newly visible text as the delta."""
+        """Withhold an incomplete leading title tag or reply marker. Stream a valid target as reply_to and only the newly visible text as the delta."""
+        draft = reply.draft
+        if turn.auto_title:
+            draft, holding = threads.streamed_without_title(draft)
+            if (holding and not draft) or (not draft and not reply.shown):
+                return None
         if reply.mark is None:
             # The opening may be words already said: a reply whose first
             # words were the marker alone, then steps.
-            said = next((seg["text"] for seg in reply.ordered if "text" in seg), None)
+            said = None
+            for seg in reply.ordered:
+                if "text" not in seg:
+                    continue
+                piece = threads.take_thread_title(seg["text"])[0] if turn.auto_title else seg["text"]
+                if piece.strip():
+                    said = piece
+                    break
             rest, target = (threads.take_reply_mark(said) if said is not None
-                            else threads.streamed_opening(reply.draft))
+                            else threads.streamed_opening(draft))
             if rest is None:
                 return None
             if target and threads.find(threads.read(turn.thread_id)[1], target) is None:
                 target = None
             reply.mark, reply.mark_run = target or "", bool(target)
-        draft = reply.draft
         if reply.mark_run:
             rest, target = threads.take_reply_mark(draft)
             if target == reply.mark:
                 draft = rest
+        if turn.auto_title and draft == reply.shown:
+            return None
         before, reply.shown = reply.shown, draft
         out = {"text": draft[len(before):] if draft.startswith(before) else draft,
                "draft": draft}
@@ -2822,19 +2944,38 @@ class ThreadEngine:
             steps.COUNTS["late_recovered"] += 1
             steps.log(f"{turn.thread_id} {turn.persona}: a reply nobody was watching "
                       f"(session {session.id[:8]}, after seq {since}) recovered")
-            said, marked = self.reply_mark(turn, late.spoken(), {})
+            said = late.spoken()
+            did = list(late.did)
+            raw_title = None
+            if threads.can_auto_title(turn.thread_id):
+                cleaned, raw = threads.take_thread_title(said)
+                if raw is not None:
+                    said, raw_title = cleaned, raw
+                    did = [
+                        {**item, "label": f"Said: {threads.take_thread_title(item['label'][6:])[0].strip()}"}
+                        if isinstance(item, dict) and isinstance(item.get("label"), str)
+                        and item["label"].startswith("Said: ")
+                        else item
+                        for item in did
+                    ]
+                    did = [item for item in did
+                           if not (isinstance(item, dict) and item.get("label") == "Said: ")]
+            said, marked = self.reply_mark(turn, said, {})
             said, marked = reply_images(said, marked)
             last = chunk[-1].get("seq")
             if last is not None:
                 marked["journal_reply"] = f"{session.id}/{last}"
             msg, created = threads.append_once(
-                turn.thread_id, turn.persona, said, did=late.did, engine=engine,
+                turn.thread_id, turn.persona, said, did=did, engine=engine,
                 late=True, **marked, **({"model": used} if (used := used_model(
                     late, session, model)) else {}))
             if created or not steps.read(turn.thread_id, msg["id"]):
-                steps.write(turn.thread_id, steps.entry(msg, turn.thread_id, session.id,
-                                                        chunk, ended="late"))
+                steps.write(turn.thread_id, steps.entry(
+                    msg, turn.thread_id, session.id, chunk, ended="late",
+                    **({"auto_title": True} if raw_title is not None else {})))
             self.publish(turn.thread_id, {"type": "message.done", "message": msg})
+            if raw_title is not None:
+                self._finish_auto_title(turn.thread_id, turn.persona, raw_title)
 
     def posted(self, thread_id: str, message_id: str, by: str) -> dict:
         """Broadcast an external post after it is durable. Schedule its mentions once under
