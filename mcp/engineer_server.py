@@ -62,12 +62,23 @@ async def _run_process(argv: list[str], input: bytes | None = None) -> tuple[int
 
 
 def _site_domain() -> str:
-    """The domain an agent's site is under, for the `site` tool's text."""
+    """The domain an agent's site is under, for the `site` tool's text.
+    Reads loam.toml directly rather than importing loam_deploy (which pulls in
+    yaml/broker modules and bloats this idle MCP server's PSS)."""
     try:
-        import loam_deploy  # noqa: PLC0415
-        return loam_deploy.domain()
+        edge = lc.get("edge") or {}
+        dom = edge.get("domain")
+        if not dom:
+            import tomllib  # noqa: PLC0415
+            cfg = lc.get("deploy.config")
+            cfg_path = Path(cfg).expanduser() if cfg else (lc.ROOT / "deploy" / "loam.toml")
+            if cfg_path.is_file():
+                dom = tomllib.loads(cfg_path.read_text(encoding="utf-8")).get("domain")
+        if isinstance(dom, str) and dom.strip():
+            return dom.strip()
     except Exception:  # noqa: BLE001 -- the text must not stop the server
-        return "<domain>"
+        pass
+    return "<domain>"
 
 mcp = MCPServer("loam-engineer")
 
