@@ -375,10 +375,11 @@ async def main():
               status == 200 and "provider" not in card("ada"), card("ada"))
 
         # provision keeps what was set
-        kept = profile.kept({**card("ada"), "display": "Clayton", "model": "opus"})
-        check("provision keeps display, face_slot, an older emoji and the defaults (kept)",
+        kept = profile.kept({**card("ada"), "display": "Clayton", "model": "opus",
+                             "verbosity": "high"})
+        check("provision keeps display, face_slot, an older emoji, verbosity and the defaults (kept)",
               kept == {"display": "Clayton", "emoji": "🧱", "model": "opus",
-                       "face_slot": card("ada")["face_slot"]}, kept)
+                       "verbosity": "high", "face_slot": card("ada")["face_slot"]}, kept)
 
         # -- a persona, through bin/settings ----------------------------------
         out = await cli(port, "set", "agent.model", "sonnet", "--target", "iris")

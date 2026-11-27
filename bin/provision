@@ -403,12 +403,19 @@ def codex_config(name: str, workspace: Path) -> str:
     claude = settings(workspace)
     deny = claude["permissions"]["deny"]
     servers = mcp_config(name, workspace)["mcpServers"]
+    import loam_profile  # noqa: PLC0415
+    try:
+        card = json.loads((workspace / "agent.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        card = {}
+    verbosity = loam_profile.codex_verbosity(card)
     out = [
         "# Rendered by bin/provision --codex from the sources of .mcp.json and",
         "# .claude/settings.json. The runtime's, how the persona is assembled;",
         "# a hand-edit is drift and bin/check-drift says so.",
         "",
         f"model_instructions_file = {_toml(CODEX_HOME / 'instructions' / f'{name}.md')}",
+        *([f"model_verbosity = {_toml(verbosity)}"] if verbosity else []),
         'approval_policy = "never"',
         'sandbox_mode = "danger-full-access"',
         'web_search = "live"',
