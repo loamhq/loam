@@ -766,8 +766,8 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
 .md thead th[data-wrap] { white-space: normal; }
 .md th code { font-size: .92em; }
 .md td[data-col="compact"], .md td[data-nowrap] { white-space: nowrap; }
-.md td[data-col="medium"] { min-width: 6.5rem; }
-.md td[data-col="prose"] { min-width: 8.5rem; }
+.md td[data-col="medium"] { min-width: 5rem; }
+.md td[data-col="prose"] { min-width: 6.5rem; }
 .md td a, .md td code, .md th a, .md th code { overflow-wrap: anywhere; }
 .md tbody tr + tr td { border-top: 1px solid var(--paper-rule); }
 @media (min-width: 720px) {

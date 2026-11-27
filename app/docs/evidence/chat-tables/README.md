@@ -18,9 +18,10 @@ Latte (`public/markdown.js`, `public/style.css`, `public/files.js`,
     `data-col="compact"` (`<= 14` chars or right-aligned values `<= 22` chars) stays
     `white-space: nowrap` so values like `4 min 10 s` or `$142.80` never break
     mid-value; `data-col="medium"` (`15–28` chars) and `data-col="prose"` (`> 28`
-    chars) wrap naturally with minimum widths (`6.5rem` / `8.5rem` on phone,
+    chars) wrap naturally with minimum widths (`5rem` / `6.5rem` on phone,
     `7.5rem` / `10.5rem` at `>= 720 px`) so prose columns never collapse to one
-    word per line. Short cells (`<= 14` chars) inside mixed columns also get
+    word per line while 3-column mixed prose/medium tables still fit `390 px`
+    at both default scale and `--ui-scale: 0.9`. Short cells (`<= 14` chars) inside mixed columns also get
     `data-nowrap`, and headers longer than `18` chars get `data-wrap`.
   - `.md table` sets `overflow-wrap: break-word` so ordinary words stay intact,
     while links and inline code inside cells keep `overflow-wrap: anywhere` so
@@ -57,8 +58,8 @@ Latte (`public/markdown.js`, `public/style.css`, `public/files.js`,
 
 | Viewport | Mode | Prose + Numeric (before) | Prose + Numeric (after) | Mid-scroll / Hover Copy | 2-col + Owner (before) | 2-col + Owner (after) | URL + Code (before) | URL + Code (after) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 390×844 | Light | [before](before-390-light-prose-numeric.png) | [after](after-390-light-prose-numeric.png) | [mid-scroll](after-390-light-numeric-mid.png) | [before](before-390-light-twocol-owner.png) | [after](after-390-light-twocol-owner.png) | [before](before-390-light-url-code.png) | [after](after-390-light-url-code.png) |
-| 390×844 | Dark | [before](before-390-dark-prose-numeric.png) | [after](after-390-dark-prose-numeric.png) | [mid-scroll](after-390-dark-numeric-mid.png) | [before](before-390-dark-twocol-owner.png) | [after](after-390-dark-twocol-owner.png) | [before](before-390-dark-url-code.png) | [after](after-390-dark-url-code.png) |
+| 390×844 | Light | [before](before-390-light-prose-numeric.png) | [after](after-390-light-prose-numeric.png) | [mid-scroll](after-390-light-numeric-mid.png) · [scale 0.9](after-390-light-scale90-mixed3col.png) | [before](before-390-light-twocol-owner.png) | [after](after-390-light-twocol-owner.png) | [before](before-390-light-url-code.png) | [after](after-390-light-url-code.png) |
+| 390×844 | Dark | [before](before-390-dark-prose-numeric.png) | [after](after-390-dark-prose-numeric.png) | [mid-scroll](after-390-dark-numeric-mid.png) · [scale 0.9](after-390-dark-scale90-mixed3col.png) | [before](before-390-dark-twocol-owner.png) | [after](after-390-dark-twocol-owner.png) | [before](before-390-dark-url-code.png) | [after](after-390-dark-url-code.png) |
 | 1440×900 | Light | [before](before-1440-light-prose-numeric.png) | [after](after-1440-light-prose-numeric.png) | [hover copy](after-1440-light-desktop-hover-copy.png) | [before](before-1440-light-twocol-owner.png) | [after](after-1440-light-twocol-owner.png) | [before](before-1440-light-url-code.png) | [after](after-1440-light-url-code.png) |
 | 1440×900 | Dark | [before](before-1440-dark-prose-numeric.png) | [after](after-1440-dark-prose-numeric.png) | [hover copy](after-1440-dark-desktop-hover-copy.png) | [before](before-1440-dark-twocol-owner.png) | [after](after-1440-dark-twocol-owner.png) | [before](before-1440-dark-url-code.png) | [after](after-1440-dark-url-code.png) |
 

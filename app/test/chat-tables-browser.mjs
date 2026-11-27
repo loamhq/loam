@@ -64,6 +64,13 @@ const urlCodeTableMd = [
   '| Preview OOM | `APP_PREVIEW_OOM_SCORE_ADJ` set to `300` in service environment | Active |',
 ].join('\n')
 
+const mixedThreeColTableMd = [
+  '| Operation | Time | What happened |',
+  '| --- | --- | --- |',
+  '| Rebuild worker container and warm cache | about 1.5 min each | Loam kept running while the new build finished cleanly. |',
+  '| Verify health probes | 18 s | Readiness turned green on the first check. |',
+].join('\n')
+
 const previewNoteMd = [
   '# Release plan',
   '',
@@ -80,6 +87,7 @@ const messages = [
   { id: 'm4', author: 'sprout', kind: 'message', at, engine: 'claude-code', did: [], text: `Active defaults for this workspace:\n\n${twoColTableMd}` },
   { id: 'm5', author: 'you', kind: 'message', at, text: ownerTableMd },
   { id: 'm6', author: 'sprout', kind: 'message', at, engine: 'claude-code', did: [], text: `Endpoints and flags verified after cutover:\n\n${urlCodeTableMd}` },
+  { id: 'm7', author: 'sprout', kind: 'message', at, engine: 'claude-code', did: [], text: `Longer step names and estimates:\n\n${mixedThreeColTableMd}` },
 ]
 
 const metrics = []
@@ -146,8 +154,8 @@ try {
     const tag = `${baseline ? 'before' : 'after'}-${width}-${mode}`
     try {
       await page.goto(`${app.url}/threads/${threadId}`)
-      await page.locator('[data-message-id="m6"]').waitFor()
-      for (const mid of ['m2', 'm3', 'm4', 'm5', 'm6']) {
+      await page.locator('[data-message-id="m7"]').waitFor()
+      for (const mid of ['m2', 'm3', 'm4', 'm5', 'm6', 'm7']) {
         await scrollToMessage(mid)
         await page.locator(`[data-message-id="${mid}"] table`).waitFor()
       }
@@ -211,7 +219,7 @@ try {
             firstRowCells,
           }
         }
-        return ['m2', 'm3', 'm4', 'm5', 'm6'].map(readTable)
+        return ['m2', 'm3', 'm4', 'm5', 'm6', 'm7'].map(readTable)
       })
 
       metrics.push({ tag, width, mode, tables: measured })
@@ -234,7 +242,36 @@ try {
         assert.equal(byId.m2.edges, 'none', `${tag} m2 edges`)
         assert.equal(byId.m2.firstRowCells[1].text, '4 min 10 s')
         assert.equal(byId.m2.firstRowCells[1].lines, 1, `${tag} m2 "4 min 10 s" broke across lines`)
-        assert.ok(byId.m2.firstRowCells[2].width >= 130, `${tag} m2 prose column collapsed: ${byId.m2.firstRowCells[2].width}px`)
+        assert.ok(byId.m2.firstRowCells[2].width >= 100, `${tag} m2 prose column collapsed: ${byId.m2.firstRowCells[2].width}px`)
+
+        // 1b. 3-column table with two prose columns + one medium column fits at 390 and 1440 without scroll.
+        assert.ok(byId.m7.scrollW <= byId.m7.clientW + 1, `${tag} m7 (2 prose + 1 medium) should fit column: ${byId.m7.scrollW} <= ${byId.m7.clientW}`)
+        assert.equal(byId.m7.edges, 'none', `${tag} m7 edges`)
+        assert.ok(byId.m7.firstRowCells.every((c) => c.width >= 76), `${tag} m7 column collapsed: ${JSON.stringify(byId.m7.firstRowCells)}`)
+
+        // 1c. Verify the 3-column mixed prose/medium table at --ui-scale: 0.9 on phone.
+        if (!wide) {
+          await scrollToMessage('m7', 58)
+          const scaled = await page.evaluate(async () => {
+            document.documentElement.style.setProperty('--ui-scale', '0.9')
+            await new Promise(requestAnimationFrame)
+            await new Promise(requestAnimationFrame)
+            const wrap = document.querySelector('[data-message-id="m7"] .tablewrap')
+            return {
+              scale: getComputedStyle(document.documentElement).getPropertyValue('--ui-scale').trim(),
+              clientW: wrap.clientWidth,
+              scrollW: wrap.scrollWidth,
+              edges: wrap.getAttribute('data-edges'),
+              cols: [...wrap.querySelectorAll('tbody tr:first-child td')].map((td) => Math.round(td.getBoundingClientRect().width)),
+            }
+          })
+          assert.equal(scaled.scale, '0.9', `${tag} --ui-scale applied`)
+          assert.ok(scaled.scrollW <= scaled.clientW + 1, `${tag} m7 at --ui-scale: 0.9 should fit: ${scaled.scrollW} <= ${scaled.clientW}`)
+          assert.equal(scaled.edges, 'none', `${tag} m7 at --ui-scale: 0.9 edges`)
+          if (out) await page.screenshot({ path: path.join(out, `${tag}-scale90-mixed3col.png`) })
+          await page.evaluate(() => { document.documentElement.style.removeProperty('--ui-scale') })
+          await settle()
+        }
 
         // 2. 6-column numeric table scrolls at 390 with edge fades, fits at 1440.
         if (!wide) {
