@@ -172,6 +172,56 @@ def config_cases() -> None:
           {"CronCreate", "CronDelete", "ScheduleWakeup", "RemoteTrigger"}
           <= set(provision.settings(ws)["permissions"]["deny"]))
 
+    # Optional per-agent Codex `verbosity` -> `model_verbosity` (2026-11-26):
+    # present when set to low/medium/high, absent when unset or invalid,
+    # ignored by non-Codex providers, and preserved by `loam_profile.kept`.
+    import loam_profile  # noqa: PLC0415
+    import tempfile  # noqa: PLC0415
+    with tempfile.TemporaryDirectory() as tmp:
+        fx = Path(tmp) / "fixture"
+        fx.mkdir()
+        base_card = {
+            "name": "fixture",
+            "display": "Fixture",
+            "workspace": str(fx),
+            "vault": str(lc.VAULT),
+            "provider": "codex",
+            "effort": "high",
+        }
+        (fx / "agent.json").write_text(loam_profile.render_agent(base_card), encoding="utf-8")
+        without_text = provision.codex_config("fixture", fx)
+        without_toml = tomllib.loads(without_text)
+        claude_without = provision.settings(fx)
+        agy_without = provision.antigravity_mcp("fixture", fx)
+        check("codex_config without verbosity omits model_verbosity",
+              "model_verbosity" not in without_text and "model_verbosity" not in without_toml)
+
+        for level in ("low", "medium", "high"):
+            card = {**base_card, "verbosity": level}
+            (fx / "agent.json").write_text(loam_profile.render_agent(card), encoding="utf-8")
+            with_text = provision.codex_config("fixture", fx)
+            with_toml = tomllib.loads(with_text)
+            check(f"codex_config with verbosity={level!r} renders model_verbosity = {level!r}",
+                  f'model_verbosity = "{level}"' in with_text
+                  and with_toml.get("model_verbosity") == level)
+
+        check("non-Codex provider configs ignore verbosity",
+              provision.settings(fx) == claude_without
+              and provision.antigravity_mcp("fixture", fx) == agy_without)
+
+        (fx / "agent.json").write_text(
+            json.dumps({**base_card, "verbosity": "verbose"}), encoding="utf-8")
+        bad_text = provision.codex_config("fixture", fx)
+        check("codex_config ignores an invalid verbosity value",
+              "model_verbosity" not in bad_text and "model_verbosity" not in tomllib.loads(bad_text))
+
+        kept = loam_profile.kept({**base_card, "verbosity": "high"})
+        rendered_card = json.loads(loam_profile.render_agent({**base_card, "verbosity": "high"}))
+        keys = list(rendered_card)
+        check("agent.json keeps verbosity over provision and places it beside effort",
+              kept.get("verbosity") == "high"
+              and keys.index("verbosity") == keys.index("effort") + 1, str(keys))
+
 
 def main() -> int:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]

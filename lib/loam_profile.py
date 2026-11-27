@@ -23,12 +23,15 @@ PROVIDER_NAMES = {"claude-code": "Claude Code", "codex": "Codex",
 # is its reflection record's alone (lib/loam_schedule.wake_time).
 BASE_KEYS = ("name", "display", "emoji", "workspace", "vault")
 DEFAULT_KEYS = ("provider", "model", "effort")
+CODEX_VERBOSITY_LEVELS = ("low", "medium", "high")
 SETTABLE = ("display", *DEFAULT_KEYS)
-# Kept over a provision besides the settable ones: an uploaded face, its
-# permanent theme face slot, and the archive mark (lib/loam_agents.py), and
+# Kept over a provision besides the settable ones: Codex's optional
+# `verbosity` override (rendered into `.codex/config.toml` as
+# `model_verbosity`, ignored by other providers), an uploaded face, its
+# permanent theme face slot, the archive mark (lib/loam_agents.py), and
 # the retired emoji an older file still holds (2026-11-16), so its bytes do
 # not change.
-KEPT = (*SETTABLE, "face", "face_slot", "archived", "self_name", "emoji")
+KEPT = (*SETTABLE, "verbosity", "face", "face_slot", "archived", "self_name", "emoji")
 DISPLAY_MAX = 40
 # Words a display name may not be: the owner's, and `@all` / `@everyone`.
 RESERVED_NAMES = tuple(dict.fromkeys((lc.OWNER_ID, *lc.LEGACY_OWNER_IDS, "all", "everyone", "system")))
@@ -97,6 +100,16 @@ def claude_model(config: dict | None) -> str:
     if (config.get("provider") or "claude-code") != "claude-code":
         return WAKE_MODEL_DEFAULT
     return providers.agent_choice(config, "claude-code")["model"] or WAKE_MODEL_DEFAULT
+
+
+def codex_verbosity(config: dict | None) -> str | None:
+    """Optional Codex ``model_verbosity`` override (``low``, ``medium`` or
+    ``high``) from ``agent.json``'s ``verbosity`` key, or ``None`` when absent
+    or not a valid Codex level. Rendered only into ``.codex/config.toml``;
+    ignored by non-Codex providers."""
+    config = config if isinstance(config, dict) else {}
+    value = config.get("verbosity")
+    return value if isinstance(value, str) and value in CODEX_VERBOSITY_LEVELS else None
 
 
 def sync_settings_model(workspace: Path, config: dict) -> bool:
@@ -228,11 +241,12 @@ def render_agent(config: dict) -> str:
     and bin/check-drift render through this too, so a page's write and a
     provision agree byte for byte."""
     ordered = {k: config[k] for k in BASE_KEYS if k in config}
-    for k in DEFAULT_KEYS:
+    optional_defaults = (*DEFAULT_KEYS, "verbosity")
+    for k in optional_defaults:
         if config.get(k) is not None:
             ordered[k] = config[k]
     for k, v in config.items():
-        if k not in ordered and k not in DEFAULT_KEYS:
+        if k not in ordered and k not in optional_defaults:
             ordered[k] = v
     return json.dumps(ordered, indent=2, ensure_ascii=False) + "\n"
 
