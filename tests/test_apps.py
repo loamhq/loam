@@ -124,6 +124,8 @@ try:
     site("light", f'owner = "otto"\ncreated = "2026-11-10T11:46:24Z"\nroot = "{www}"\n')
     site("rows", f'owner = "ada"\nroot = "{www}"\nexpires = 2026-11-25\n')
     site("api", 'owner = "ada"\nport = 9001\npublic = "Sam, 2026-11-12: yes, open it"\n')
+    site("ingest", 'owner = "ada"\nport = 9580\npublic = "Sam, 2026-11-24: yes, open ingest"\nhidden = true\n')
+    site("quiet-static", f'owner = "otto"\nroot = "{www}"\nhidden = true\n')
     # The plugin host's two layers, in the throwaway root: one app plugin
     # and one extension built in Yours, nothing shipped.
     import os  # noqa: PLC0415
@@ -158,6 +160,10 @@ try:
           "files" not in rows and "vault" not in rows)
     check("an app_shell record (Loam's page, live and staging) is not listed",
           "shell" not in rows and "shell-next" not in rows)
+    check("hidden sites (port or static) are omitted from Apps",
+          "ingest" not in rows and "quiet-static" not in rows)
+    check("hidden sites are omitted from previewable() while visible sites remain",
+          {a.name for a in dep.previewable()} == {"api", "demo", "homepage", "light", "rows"})
     check("every site's and project's source is yours",
           {r["source"] for r in out["apps"]} == {"yours"})
     keys = {"name", "url", "also_at", "source", "kind", "owner", "project", "access",

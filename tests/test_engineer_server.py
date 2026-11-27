@@ -57,6 +57,7 @@ def bootstrap(launcher: Path) -> str:
         m = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(m)
         m.LAUNCHER = {str(launcher)!r}
+        m.SITE = {str(launcher.parent / "settings-echo")!r}
         m.SETTINGS = {str(launcher.parent / "settings-echo")!r}
         m.THREAD = {str(launcher.parent / "settings-echo")!r}
         m.MARKET = {str(launcher.parent / "settings-echo")!r}
@@ -274,6 +275,30 @@ def main() -> int:
             check("`thread` branch hands bin/thread its arguments",
                   got.get("argv"), ["branch", "t-1", "m4", "--persona", "ada",
                                     "--text", "Opening:", "--by", "iris"])
+            site_tool = next((t for t in tools if t["name"] == "site"), None)
+            check("`site` schema includes `hidden`",
+                  "hidden" in (site_tool or {}).get("inputSchema", {}).get("properties", {}), True)
+            rid = server.send("tools/call", {"name": "site", "arguments": {
+                "action": "up", "name": "ingest", "by": "ada", "port": 9580, "hidden": True}})
+            got = tool_result(server.replies({rid}, 30).get(rid) or {})
+            if isinstance(got.get("result"), str):
+                got = json.loads(got["result"])
+            check("`site` up with hidden=True passes --hidden",
+                  got.get("argv"), ["up", "ingest", "--by", "ada", "--port", "9580", "--hidden"])
+            rid = server.send("tools/call", {"name": "site", "arguments": {
+                "action": "up", "name": "ingest", "by": "ada", "hidden": False}})
+            got = tool_result(server.replies({rid}, 30).get(rid) or {})
+            if isinstance(got.get("result"), str):
+                got = json.loads(got["result"])
+            check("`site` up with hidden=False passes --no-hidden",
+                  got.get("argv"), ["up", "ingest", "--by", "ada", "--no-hidden"])
+            rid = server.send("tools/call", {"name": "site", "arguments": {
+                "action": "up", "name": "ingest", "by": "ada"}})
+            got = tool_result(server.replies({rid}, 30).get(rid) or {})
+            if isinstance(got.get("result"), str):
+                got = json.loads(got["result"])
+            check("`site` up without hidden passes neither flag",
+                  got.get("argv"), ["up", "ingest", "--by", "ada"])
             status = next((t for t in tools if t["name"] == "status"), None)
             check("`status` takes no arguments",
                   sorted((status or {}).get("inputSchema", {}).get("properties", {})), [])

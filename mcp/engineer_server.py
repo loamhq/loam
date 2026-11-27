@@ -339,7 +339,8 @@ async def _hand_off(argv: list[str], value_stdin: bytes | None = None) -> str:
         f"`{lc.WORKSPACES.name}/<you>/sites/<name>/`, created with a placeholder "
         "index.html; write your files there), or, with `port`, a proxy to "
         "your own container published on 127.0.0.1:<port>. `expires` "
-        "(YYYY-MM-DD, the last day) or `duration` (`2d`, `36h`) makes it clean itself up. Live in "
+        "(YYYY-MM-DD, the last day) or `duration` (`2d`, `36h`) makes it clean itself up. "
+        "`hidden` true hides it from Loam's Apps list and Apps previews (for background or API-only endpoints) while keeping the subdomain live; false shows it again; omit to keep its current setting. Live in "
         "under a minute; the shared browser reaches it, nobody else without "
         "the login. Calling `up` again on your site updates it.\n"
         "- action `down` with `name`: the name goes; your files stay.\n"
@@ -347,11 +348,12 @@ async def _hand_off(argv: list[str], value_stdin: bytes | None = None) -> str:
         "the date, quoted): takes the login off. Only on their direct yes, each "
         "time; the vault is behind the same login. Action `private` puts it "
         "back.\n"
-        "- action `list`: every site, its owner, access and expiry."
+        "- action `list`: every site, its owner, access, expiry and whether it is hidden."
     ),
 )
 async def site(action: str = "list", name: str = "", by: str = "", root: str = "",
-               port: int = 0, expires: str = "", duration: str = "", yes: str = "") -> str:
+               port: int = 0, expires: str = "", duration: str = "", yes: str = "",
+               hidden: bool | None = None) -> str:
     argv = [SITE, action]
     if action != "list":
         argv.append(name)
@@ -365,6 +367,10 @@ async def site(action: str = "list", name: str = "", by: str = "", root: str = "
             argv += ["--expires", expires]
         if duration:
             argv += ["--for", duration]
+        if hidden is True:
+            argv.append("--hidden")
+        elif hidden is False:
+            argv.append("--no-hidden")
     elif action == "publish":
         argv += ["--yes", yes]
     return await _hand_off(argv)

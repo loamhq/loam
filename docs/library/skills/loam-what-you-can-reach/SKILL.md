@@ -53,6 +53,9 @@ mockup, slides, a prototype and its backend) on `<name>.<domain>` in under
 a minute: `up` with a `name` and `by`, then write files into the folder it
 names, or give the `port` of a container on 127.0.0.1. It is behind the
 owner's login. A `duration` makes it remove itself; `down` removes it now.
+Pass `hidden: true` (or `bin/site up --hidden`) for a background or API-only
+endpoint so it stays live on its subdomain without showing up in Apps or
+taking Apps previews (`hidden: false` / `--no-hidden` shows it again).
 Making it public (`publish`) waits for the owner's direct yes, each time.
 A server you start on a port of your own is not reachable from outside:
 the server's firewall lets in only SSH, 80 and 443, so a site is the way

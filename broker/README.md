@@ -3708,8 +3708,9 @@ row's `service`). An app plugin that is off is still listed, with `on:
 false`; turning it on is `PATCH /v1/plugins/<id>`.
 
 Left out on purpose: the runtime's own static hosts (`files`, `vault`), which
-nobody built, and every record with `app_shell = true`, which is the page
-itself (`loam-ui`) and its staging copy (`loam-ui-next`).
+nobody built, every record with `app_shell = true`, which is the page
+itself (`loam-ui`) and its staging copy (`loam-ui-next`), and any site record
+with `hidden = true` (background or API-only endpoints).
 
 Example, 2026-11-12:
 

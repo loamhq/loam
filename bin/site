@@ -7,7 +7,7 @@ their own, without asking anyone; anything on the open web without the login
 waits for their direct yes each time. This is the command for the first half
 and the one deliberate act for the second.
 
-    site up <name> --by <agent> [--root DIR | --port N] [--expires DATE | --for 2d]
+    site up <name> --by <agent> [--root DIR | --port N] [--expires DATE | --for 2d] [--hidden | --no-hidden]
     site down <name>
     site publish <name> --yes "<the owner's words, with the date>"
     site private <name>
@@ -174,6 +174,8 @@ def cmd_up(args) -> int:
     made = None
     if args.port:
         rec["port"] = args.port
+    elif not args.root and before and before.get("port") is not None:
+        rec["port"] = before["port"]
     else:
         root = Path(args.root) if args.root else (
             Path(before["root"]) if before and before.get("root")
@@ -189,6 +191,8 @@ def cmd_up(args) -> int:
     rec["expires"] = expires if (args.expires or args.for_) else (before or {}).get("expires")
     # `public` survives a re-up only as it was: `up` never adds it.
     rec["public"] = (before or {}).get("public")
+    hidden = args.hidden if args.hidden is not None else bool((before or {}).get("hidden", False))
+    rec["hidden"] = True if hidden else None
     ok, out = change(name, rec, before)
     if not ok:
         return say({"ok": False, "error": out})
@@ -196,6 +200,7 @@ def cmd_up(args) -> int:
                 "private: behind the login; the personas' browser passes",
                 "root": rec.get("root"), "port": rec.get("port"),
                 "created_root": made, "expires": rec["expires"],
+                "hidden": hidden,
                 "record": str(record_file(name))})
 
 
@@ -244,7 +249,7 @@ def cmd_list(_args) -> int:
         "url": url(s.name), "owner": s.site_owner,
         "access": "public" if s.site_public else "private",
         "root": str(s.static_root) if s.static_root else None, "port": s.port,
-        "expires": s.site_expires} for s in found]})
+        "expires": s.site_expires, "hidden": s.site_hidden} for s in found]})
 
 
 def cmd_prune(_args) -> int:
@@ -272,6 +277,8 @@ def main() -> int:
     up.add_argument("--port", type=int)
     up.add_argument("--expires", help="YYYY-MM-DD, the last day it answers (UTC)")
     up.add_argument("--for", dest="for_", help="2d, 36h: expires that far from now")
+    up.add_argument("--hidden", action=argparse.BooleanOptionalAction, default=None,
+                    help="hide from Loam's Apps list and Apps previews (for background/API endpoints)")
     for verb in ("down", "private"):
         sub.add_parser(verb).add_argument("name")
     pub = sub.add_parser("publish")

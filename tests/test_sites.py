@@ -8,9 +8,14 @@ Run: python3 tests/test_sites.py
 from __future__ import annotations
 
 import datetime as dt
+import importlib.machinery
+import importlib.util
+import io
+import json
 import shutil
 import sys
 import tempfile
+from contextlib import redirect_stdout
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
@@ -145,6 +150,114 @@ try:
           body.index("@expired") < body.index("@sight") < body.index("import gate"))
     check("the render does not depend on the day (check-drift stays green)",
           dep.caddyfile(dt.date(2026, 11, 20)) == text)
+    clear()
+
+    # -- hidden sites (background / API-only endpoints) -------------------
+    site("visible", f'owner = "ada"\nroot = "{www}"\n')
+    site("ingest", 'owner = "ada"\nport = 9580\npublic = "Sam, 2026-11-24: yes, open ingest"\nhidden = true\n')
+    site("internal-api", 'owner = "ada"\nport = 9581\nhidden = true\n')
+    site("quiet", f'owner = "ada"\nroot = "{www}"\nhidden = false\n')
+    parsed = {s.name: s for s in dep.sites()}
+    check("omitted hidden defaults to False", parsed["visible"].site_hidden is False)
+    check("hidden = true parses as True", parsed["ingest"].site_hidden is True)
+    check("hidden = false parses as False", parsed["quiet"].site_hidden is False)
+    text = dep.caddyfile(today)
+    blocks = dict(dep.live_host_blocks(text))
+    check("a hidden public site keeps its ungated HTTPS host block",
+          blocks.get("ingest.example.test") is False and "reverse_proxy 127.0.0.1:9580" in text)
+    check("a hidden private site keeps its gated HTTPS host block",
+          blocks.get("internal-api.example.test") is True and "reverse_proxy 127.0.0.1:9581" in text)
+    preview_block = text.split(f"http://:{dep.PREVIEW_PORT} {{", 1)[1]
+    check("visible sites appear in the :8935 preview block",
+          "@app_visible host visible.preview.internal" in preview_block
+          and "@app_quiet host quiet.preview.internal" in preview_block)
+    check("hidden sites are omitted from the :8935 preview block",
+          "@app_ingest" not in preview_block and "ingest.preview.internal" not in preview_block
+          and "@app_internal-api" not in preview_block and "internal-api.preview.internal" not in preview_block)
+    check("previewable() excludes hidden sites",
+          [a.name for a in dep.previewable()] == ["quiet", "visible"])
+    site("badhidden", f'owner = "ada"\nroot = "{www}"\nhidden = "yes"\n')
+    refuses("non-boolean hidden string is refused", dep.sites, "hidden is true or false")
+    site("badhidden", f'owner = "ada"\nroot = "{www}"\nhidden = 1\n')
+    refuses("non-boolean hidden integer is refused", dep.sites, "hidden is true or false")
+    clear()
+
+    # -- bin/site CLI (--hidden / --no-hidden and preservation) -----------
+    site_script = Path(__file__).resolve().parent.parent / "bin" / "site"
+    loader = importlib.machinery.SourceFileLoader("loam_site_cli", str(site_script))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    site_mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(site_mod)
+    saved_ai_labs = dep.AI_LABS
+    dep.AI_LABS = root / "ai-labs"
+    site_mod.regenerate = lambda: (True, "ok")
+
+    def run_site(*argv: str) -> tuple[int, dict]:
+        buf = io.StringIO()
+        saved_argv = sys.argv
+        sys.argv = ["site", *argv]
+        try:
+            with redirect_stdout(buf):
+                rc = site_mod.main()
+        finally:
+            sys.argv = saved_argv
+        return rc, json.loads(buf.getvalue())
+
+    try:
+        rc, out = run_site("up", "metrics", "--by", "ada", "--port", "9580", "--expires", "2026-12-31")
+        check("site up creates port site with hidden=False by default",
+              rc == 0 and out["ok"] and out["port"] == 9580 and out["hidden"] is False, str(out))
+        rc, out = run_site("publish", "metrics", "--yes", "Sam, 2026-11-24: yes, open metrics")
+        check("site publish marks site public", rc == 0 and out["ok"])
+
+        # Flip hidden=True without passing --port or --expires: must preserve port, public, expires
+        rc, out = run_site("up", "metrics", "--by", "ada", "--hidden")
+        rec = site_mod.read("metrics")
+        check("site up --hidden preserves port, public, expires without creating static root",
+              rc == 0 and out["ok"] and out["hidden"] is True and out["port"] == 9580
+              and out["root"] is None and out["access"] == "public"
+              and rec["port"] == 9580 and "root" not in rec
+              and rec["public"] == "Sam, 2026-11-24: yes, open metrics"
+              and rec["expires"] == dt.date(2026, 12, 31) and rec["hidden"] is True
+              and not (dep.AI_LABS / "ada" / "sites" / "metrics").exists(),
+              str(rec))
+
+        # Re-up without --hidden/--no-hidden preserves hidden=True
+        rc, out = run_site("up", "metrics", "--by", "ada")
+        check("site up without hidden flag preserves existing hidden=True",
+              rc == 0 and out["hidden"] is True and site_mod.read("metrics").get("hidden") is True)
+
+        # site private and site publish preserve hidden=True
+        rc, out = run_site("private", "metrics")
+        check("site private preserves hidden=True",
+              rc == 0 and site_mod.read("metrics").get("hidden") is True
+              and "public" not in site_mod.read("metrics"))
+        rc, out = run_site("publish", "metrics", "--yes", "Sam, 2026-11-24: yes, open metrics")
+        check("site publish preserves hidden=True",
+              rc == 0 and site_mod.read("metrics").get("hidden") is True
+              and site_mod.read("metrics").get("public") == "Sam, 2026-11-24: yes, open metrics")
+
+        # site list reports hidden flag and public access
+        rc, out = run_site("up", "demo", "--by", "ada", "--root", str(www))
+        check("site up creates visible static site", rc == 0 and out["hidden"] is False)
+        rc, out = run_site("list")
+        by_url = {row["url"]: row for row in out["sites"]}
+        check("site list reports hidden and access for each site",
+              rc == 0 and by_url["https://metrics.example.test/"]["hidden"] is True
+              and by_url["https://metrics.example.test/"]["access"] == "public"
+              and by_url["https://demo.example.test/"]["hidden"] is False,
+              str(by_url))
+
+        # Flip hidden back off with --no-hidden: preserves port, public, expires and omits hidden key
+        rc, out = run_site("up", "metrics", "--by", "ada", "--no-hidden")
+        rec = site_mod.read("metrics")
+        check("site up --no-hidden unhides while preserving port, public, expires",
+              rc == 0 and out["hidden"] is False and "hidden" not in rec
+              and rec["port"] == 9580 and rec["public"] == "Sam, 2026-11-24: yes, open metrics"
+              and rec["expires"] == dt.date(2026, 12, 31),
+              str(rec))
+    finally:
+        dep.AI_LABS = saved_ai_labs
     clear()
 
     check("no sites directory means no sites",

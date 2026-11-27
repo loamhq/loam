@@ -541,6 +541,7 @@ class App:
     site_owner: str | None = None
     site_expires: dt.date | None = None
     site_public: str | None = None
+    site_hidden: bool = False
     # App-shell hosts receive the shell's relay routes and origin settings.
     app_shell: bool = False
     # The edge app or a record with apex enabled serves the install domain itself.
@@ -1117,9 +1118,10 @@ def sites(apps: list[App] | None = None) -> list[App]:
         root = "/srv/example"
 
     A proxied site specifies a loopback port instead of a root. An optional expires
-    date is in UTC. Public access requires a record carrying the owner's quoted
-    approval. Refuse the whole render if a site conflicts with a reserved name,
-    another site or a deployment.
+    date is in UTC. An optional ``hidden = true`` omits the site from Loam's Apps
+    list and Apps preview listener while keeping its HTTPS host block. Public access
+    requires a record carrying the owner's quoted approval. Refuse the whole render
+    if a site conflicts with a reserved name, another site or a deployment.
     """
     apps = records() if apps is None else apps
     out: list[App] = []
@@ -1172,13 +1174,16 @@ def sites(apps: list[App] | None = None) -> list[App]:
         if public is not None and (not isinstance(public, str) or not public.strip()):
             raise DeployError(f"{path}: public, when present, is {lc.OWNER_NAME}'s yes quoted; "
                               f"an empty one is not a yes")
+        hidden = rec.get("hidden", False)
+        if not isinstance(hidden, bool):
+            raise DeployError(f"{path}: hidden is true or false")
         taken[name] = f"the site {path.name}"
         out.append(App(name=name, exposure="private", host=name, policy="one_factor",
                        port=port, static_root=root, share_expires=None,
                        compose=None, checkout=None,
                        hide=SITE_HIDE if root is not None else (),
                        record=rec, site_owner=owner, site_expires=expires,
-                       site_public=public))
+                       site_public=public, site_hidden=hidden))
     return out
 
 
@@ -1598,15 +1603,16 @@ def caddy_content_block(app: App) -> str:
 
 def previewable(apps: list[App] | None = None,
                 agent_sites: list[App] | None = None) -> list[App]:
-    """What the Apps list shows that has a host of its own: every agent's
-    site, and every record with a container that is not Loam's page
+    """What the Apps list shows that has a host of its own: every visible
+    agent site, and every record with a container that is not Loam's page
     (lib/loam_apps.listing, the same two filters). Sorted by host label, so
     the render is deterministic. A plugin's row is served on the page's own
     host and is not here."""
     apps = records() if apps is None else apps
     agent_sites = sites(apps) if agent_sites is None else agent_sites
-    rows = list(agent_sites) + [a for a in apps if a.compose is not None
-                                and not a.app_shell and not a.apex]
+    rows = [s for s in agent_sites if not s.site_hidden] + [
+        a for a in apps if a.compose is not None and not a.app_shell and not a.apex
+    ]
     return sorted(rows, key=lambda a: a.host)
 
 

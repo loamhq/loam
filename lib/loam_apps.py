@@ -10,6 +10,8 @@ the list is exactly what Caddy serves:
 
 - **site**: an agent's own subdomain, ``state/sites/<name>.toml``, written by
   ``bin/site`` (lib/loam_deploy.sites). Owned by the agent that stood it up.
+  Sites with ``hidden = true`` stay served by Caddy on their subdomain, but are
+  omitted here (for background or API-only endpoints).
 - **project**: a deployment record with a container, ``deploy/<app>/``, which
   follows the app-deployment conventions. Owned by the owner, marked by its
   project. A record that is a static host of the runtime's own (``files``,
@@ -147,7 +149,7 @@ def listing() -> dict:
     apps = dep.records()
     public = dep.public_names()
     framed_by = dep.frame_ancestors(apps)
-    rows = [site_row(s, framed_by) for s in dep.sites(apps)]
+    rows = [site_row(s, framed_by) for s in dep.sites(apps) if not s.site_hidden]
     rows += [project_row(a, a.name in public) for a in apps
              if a.compose is not None and not a.app_shell]
     try:

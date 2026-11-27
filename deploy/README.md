@@ -479,8 +479,14 @@ the same command; with a shell they can run the command itself.
   `loam-site-expiry.timer` (hourly, `bin/site prune`) removes the record and
   regenerates. The render does not depend on the day, so an expired site is
   never drift.
+- **Hiding from Apps.** `--hidden` writes `hidden = true` to the site record
+  (`--no-hidden` removes it; calling `up` again preserves `port`/`root`,
+  `expires`, `public` and `hidden` unless explicitly changed). A hidden site
+  keeps its normal HTTPS host block, routing, TLS and gate/public behavior,
+  but is omitted from Loam's Apps list and from Caddy's internal `:8935`
+  preview block (for background or API-only endpoints).
 - `site down <name>` removes the name and leaves the files; `site private`
-  undoes a publish; `site list` shows them all.
+  undoes a publish; `site list` shows them all (including `hidden`).
 
 ## The share door
 

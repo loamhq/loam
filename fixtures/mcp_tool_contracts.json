@@ -398,7 +398,7 @@
       },
       {
         "name": "site",
-        "description_sha256": "d94101e5e006a5abcbc744108cd019dd00ba646189e32cb97a850120c0eedb12",
+        "description_sha256": "32355201aeab9b2d95eae8c96515efffcd546710dc2790d4badb4f00cb5589cb",
         "inputSchema": {
           "properties": {
             "action": {
@@ -440,6 +440,18 @@
               "default": "",
               "title": "Yes",
               "type": "string"
+            },
+            "hidden": {
+              "default": null,
+              "title": "Hidden",
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "type": "object",
