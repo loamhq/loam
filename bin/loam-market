@@ -60,6 +60,9 @@ def extras(e: dict) -> list[str]:
     cover = e.get("cover_url") or e.get("cover")
     if cover and cover.startswith("https://"):
         out.append(f"cover: {cover}")
+    diffs = e.get("differences") or ((e.get("review") or {}).get("note") or {}).get("differences") or []
+    for diff in diffs:
+        out.append(f"Loam's note difference: {diff}")
     return out
 
 

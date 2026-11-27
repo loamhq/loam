@@ -67,7 +67,7 @@ try {
         assert.equal(await sheet.getAttribute('data-menu-layout'), width === 390 ? 'sheet' : 'anchored')
         if (width === 390) assert.ok(Math.abs((await sheet.boundingBox()).y + (await sheet.boundingBox()).height - 844) < 1)
         assert.equal(await sheet.locator('.market-loam-note-summary').textContent(), note.summary)
-        assert.deepEqual(await sheet.locator('li').allTextContents(), ['changed', 'touches', 'may_change', 'worth_knowing'].flatMap(k => note[k] ?? []))
+        assert.deepEqual(await sheet.locator('li').allTextContents(), ['changed', 'differences', 'touches', 'may_change', 'worth_knowing'].flatMap(k => note[k] ?? []))
         await shot('sheet')
         await sheet.locator('li').last().scrollIntoViewIfNeeded()
         assert.equal(await scroll(), position)

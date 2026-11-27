@@ -106,7 +106,13 @@ is the mock `market-store.html` the designer drew from the real covers.*
   update details wrap at their normal reading size. An installed extension
   shows a check and Installed in the same space as Install. An active
   theme shows In use there, and an installed theme that can be selected
-  keeps its Use action. The sheet holds the full review.
+  keeps its Use action. The sheet holds the full review. Where Loam's review
+  noted differences from the plugin's own description (`note.differences`,
+  2026-11-27), the note button previews the first difference (when there is
+  no update change), the review sheet shows a **Differences from its
+  description** section, and the install and update sheets show
+  **Differences Loam noted** directly above "Before you say yes" (never
+  collapsed). A listing with no differences looks unchanged.
   The creator row leads straight into the maker’s showcase, screenshots
   or README. Tapping **Loam’s note** opens a centered dialog on desktop or
   a bottom sheet on a phone. The title and Close stay in place while the
