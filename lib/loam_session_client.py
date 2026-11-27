@@ -276,6 +276,15 @@ class RemoteRegistry:
     async def private_summary(self, sid, prompt):
         return await self.client.call("private_summary", session_id=sid, prompt=prompt)
 
+    async def stop_agent_idle(self, agent: str) -> dict:
+        result = await self.client.call("stop_agent_idle", agent=agent)
+        for sid in result.get("stopped") or []:
+            self.sessions.pop(sid, None)
+        for sid, s in list(self.sessions.items()):
+            if getattr(s, "agent", None) == agent:
+                self.sessions.pop(sid, None)
+        return result
+
     async def start_session(self, agent, session_id=None, resume=False, provider=None,
                             model=None, effort=None, start_key=None):
         sid = session_id or str(uuid.uuid5(uuid.NAMESPACE_URL, start_key) if start_key else uuid.uuid4())

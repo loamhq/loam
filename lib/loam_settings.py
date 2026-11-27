@@ -346,9 +346,9 @@ ENTRIES: list[Entry] = [
             pick=(lambda a, m, field=field, part=part: a[part[0]][part[1]]
                   if len(part) == 2 else a[part[0]][part[1]][part[2]]))
       for field, label, values, opts, part in (
-          ("display", "An agent's display name (its id never changes)",
-           "1 to 40 characters, not another agent's id or name; null for the "
-           "id's own", None, ("identity", "display")),
+          ("display", "An agent's name (renaming moves its id, workspace folder, units and runtime state)",
+           "1 to 40 characters producing a valid folder slug, not another agent's id, name or past alias; null for the id's own",
+           None, ("identity", "display")),
           ("provider", "An agent's default provider (new threads, wakes, crons)",
            "claude-code, codex or antigravity, or null to select a connected "
            "provider automatically. A provider change clears its model and thinking level",
@@ -1112,12 +1112,18 @@ def change(key: str, value: Any, by: str, target: str = "", member: str = "",
         if reason:
             payload["reason"] = reason
     answer = call(method, path, payload, timeout=e.timeout)
-    out = {"ok": True, "setting": key, "target": target or None, "by": who}
+    read_target = target
+    renamed_from = answer.get("renamed_from") if isinstance(answer, dict) else None
+    if renamed_from and isinstance(answer.get("agent"), dict) and answer["agent"].get("id"):
+        read_target = str(answer["agent"]["id"])
+    out = {"ok": True, "setting": key, "target": read_target or None, "by": who}
+    if renamed_from:
+        out["renamed_from"] = renamed_from
     if member:
         out["member"] = member
     if e.read:
         try:
-            out["value"] = get(key, target, member)["value"]
+            out["value"] = get(key, read_target, member)["value"]
         except SettingsError as exc:
             out["value_unread"] = exc.message
     out["answer"] = _brief(answer)
@@ -1130,7 +1136,8 @@ KEEP = ("last", "event", "schedule", "declaration", "added",
         "replaces", "replaced", "source", "shadows", "warnings", "plugin",
         "was", "appearance_reset", "kind", "places",
         # A draft is what the person's yes is asked for (2026-11-14).
-        "problems", "revisions", "agent", "face", "archived", "drafts")
+        "problems", "revisions", "agent", "face", "archived", "drafts",
+        "renamed_from")
 
 
 def _brief(answer: dict) -> dict:

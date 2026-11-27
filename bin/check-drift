@@ -218,6 +218,33 @@ def check_crons(findings: list, names: list[str]) -> list[str]:
                 findings.append((f"schedule orphan {unit.name}", str(unit),
                                  "no record wants this unit"))
 
+    import loam_agents  # noqa: PLC0415
+    aliases = loam_agents.alias_map(AI_LABS)
+    live_set = set(names)
+    known = sorted(live_set | set(aliases))
+    for old_id, current_id in sorted(aliases.items()):
+        if old_id in live_set:
+            continue
+        for suffix in (".service", ".timer"):
+            unit = loam_cron.UNIT_DIR / f"{loam_cron.WAKE_PREFIX}{old_id}{suffix}"
+            if unit.exists():
+                findings.append((
+                    f"renamed agent stray {unit.name}", str(unit),
+                    f"{old_id} was renamed to {current_id}; disable and remove "
+                    f"this old wake unit"))
+        for unit in sorted(loam_cron.UNIT_DIR.glob(f"{loam_cron.UNIT_PREFIX}{old_id}-*")):
+            if unit.suffix not in (".service", ".timer"):
+                continue
+            try:
+                if loam_cron.split_unit(unit.name, known)[0] != old_id:
+                    continue
+            except loam_cron.CronError:
+                continue
+            findings.append((
+                f"renamed agent stray {unit.name}", str(unit),
+                f"{old_id} was renamed to {current_id}; disable and remove "
+                f"this old cron unit"))
+
     enabled = user_systemctl("is-enabled", "loam-schedules.timer")
     if enabled != "enabled":
         findings.append((

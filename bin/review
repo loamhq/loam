@@ -395,10 +395,12 @@ def reviewed(record: dict) -> bool:
 
 
 def last_reviews(records: list[dict]) -> dict[str, str]:
+    import loam_agents  # noqa: PLC0415
     last: dict[str, str] = {}
     for record in records:
         if reviewed(record):
-            last[record["persona"]] = record["started"]
+            who = loam_agents.resolve_id(record["persona"], AI_LABS)
+            last[who] = record["started"]
     return last
 
 

@@ -106,7 +106,7 @@ own `thread.*` rows cover the same things.
 | `keys.shared` | Put a plugin back on the provider's shared key | DELETE /api/keys/{provider}/plugins/{plugin} | persona, conversation only | — |
 | `keys.project.set` | Check and save a named project token | PUT /api/keys/{provider}/projects/{project} | persona, conversation only | — |
 | `keys.project.forget` | Forget a named project token | DELETE /api/keys/{provider}/projects/{project} | persona, conversation only | — |
-| `agent.display` | An agent's display name; its id never changes (2026-11-13) | PATCH /api/agents/{agent} | persona, conversation only | no |
+| `agent.display` | Rename an agent everywhere — display name, id, workspace folder, units, and registries; agent must be idle (2026-11-27) | PATCH /api/agents/{agent} | persona, conversation only | no |
 | `agent.provider` | An agent's default provider: new threads, members brought in; wakes and crons only on Claude Code | PATCH /api/agents/{agent} | persona, conversation only | no (was `persona.provider`, the owner's hands) |
 | `agent.model` | An agent's default model, on its provider | PATCH /api/agents/{agent} | persona, conversation only | no |
 | `agent.effort` | An agent's default thinking level, on its provider | PATCH /api/agents/{agent} | persona, conversation only | no |

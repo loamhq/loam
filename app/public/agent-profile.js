@@ -53,6 +53,10 @@ export function createProfiles({ api, redraw, changedAgent = () => {} }) {
     const current = ++ticket
     st.lastRead = Date.now(); st.refreshing = false; st.tab = profileTabs.includes(tab) ? tab : 'Threads'; st.page = 1; st.soul = ''; st.soulError = ''; st.menu = false; st.faceMenu = false; st.confirmArchive = false; st.focusField = null; st.manageSchedules = false; st.target = { kind, id }; st.data = null; st.edit = null; st.error = ''; st.activity = false; st.busy = false; st.loading = true; redraw()
     try { const data = await api('GET', path(st.target)); if (current === ticket) {
+      if (kind === 'agent' && data.agent?.id && data.agent.id !== id && data.identity?.former_ids?.includes(id)) {
+        st.target = { kind, id: data.agent.id }
+        changedAgent(data.agent, { previousId: id })
+      }
       st.data = kind === 'engineer' ? { ...data, applies: data.applies || st.engineers?.applies } : data
       if (kind === 'agent' && data.files?.soul?.root && data.files.soul.exists !== false) {
         const ref = data.files.soul
@@ -69,12 +73,21 @@ export function createProfiles({ api, redraw, changedAgent = () => {} }) {
     st.busy = true; st.error = ''; redraw()
     try {
       const result = await api('PATCH', customPath || path(target), body)
-      if (target.kind === 'agent' && !customPath) changedAgent(result.agent)
+      const nextId = target.kind === 'agent' && !customPath ? (result.agent?.id || target.id) : target.id
+      const previousId = target.kind === 'agent' && !customPath
+        ? (result.renamed_from || (nextId !== target.id ? target.id : null))
+        : null
+      if (current === ticket && target.kind === 'agent' && !customPath && nextId !== target.id) {
+        st.target = { ...target, id: nextId }
+      }
+      if (target.kind === 'agent' && !customPath) {
+        changedAgent(result.agent, previousId ? { previousId } : undefined)
+      }
       if (current !== ticket) return true
       if (customPath) {
         if (customPath.startsWith('/plugins/')) st.data.plugins = st.data.plugins.map(p => p.id === result.plugin ? { ...p, values: result.values } : p)
         else {
-          const updated = await api('GET', path(target))
+          const updated = await api('GET', path(st.target))
           if (current !== ticket) return true
           st.data = updated
         }
@@ -102,7 +115,12 @@ export function createProfiles({ api, redraw, changedAgent = () => {} }) {
     try {
       const data = await api('GET', path(target))
       if (current === ticket && version === mutation && !st.busy && !st.edit) {
-        if (target.kind === 'agent' && JSON.stringify(data.agent) !== JSON.stringify(st.data.agent)) changedAgent(data.agent)
+        const redirected = target.kind === 'agent' && data.agent?.id && data.agent.id !== target.id
+          && data.identity?.former_ids?.includes(target.id)
+        if (redirected) st.target = { ...target, id: data.agent.id }
+        if (target.kind === 'agent' && (redirected || JSON.stringify(data.agent) !== JSON.stringify(st.data.agent))) {
+          changedAgent(data.agent, redirected ? { previousId: target.id } : undefined)
+        }
         st.data = data
       }
     } catch (e) { if (current === ticket && version === mutation) st.error = e.message }

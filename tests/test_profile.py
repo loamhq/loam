@@ -279,22 +279,34 @@ async def main():
         # -- identity ---------------------------------------------------------
         status, body = await http(port, "PATCH", "/v1/agents/ada",
                                   {"display": "  Clayton  "})
-        check("PATCH display: 200, the profile back",
-              status == 200 and body["identity"]["display"] == "Clayton",
+        check("PATCH display while mid-turn is refused with 409",
+              status == 409 and "t-abc" in body.get("error", "")
+              and (LABS / "ada" / "agent.json").is_file(), body)
+        server.threads.turns.pop(("t-abc", "ada"), None)
+        status, body = await http(port, "PATCH", "/v1/agents/ada",
+                                  {"display": "  Clayton  "})
+        check("PATCH display: 200, full rename to clayton",
+              status == 200 and body["identity"]["id"] == "clayton"
+              and body["identity"]["display"] == "Clayton"
+              and body.get("renamed_from") == "ada",
               body.get("identity", body))
-        text = (LABS / "ada" / "agent.json").read_text()
-        check("agent.json in its one order, the id unchanged, an older emoji kept",
-              text == profile.render_agent(card("ada")) and card("ada")["name"] == "ada"
-              and list(card("ada"))[:3] == ["name", "display", "emoji"]
-              and card("ada")["emoji"] == "🧱", text)
-        check("an @ matches the new name and the id",
-              threads.mentions("@Clayton hi") == ["ada"]
-              and threads.mentions("@ada hi") == ["ada"])
+        text = (LABS / "clayton" / "agent.json").read_text()
+        check("agent.json in its one order, folder moved, former_ids & older emoji kept",
+              not (LABS / "ada").exists()
+              and text == profile.render_agent(card("clayton"))
+              and card("clayton")["name"] == "clayton"
+              and card("clayton").get("former_ids") == ["ada"]
+              and list(card("clayton"))[:3] == ["name", "display", "emoji"]
+              and card("clayton")["emoji"] == "🧱", text)
+        check("an @ matches the new name and the former id",
+              threads.mentions("@Clayton hi") == ["clayton"]
+              and threads.mentions("@ada hi") == ["clayton"])
         status, body = await http(port, "GET", "/v1/agents")
-        check("the cards say the new name",
-              any(a.get("id") == "ada" and a.get("name") == "Clayton"
+        check("the cards say the new id and name",
+              any(a.get("id") == "clayton" and a.get("name") == "Clayton"
                   and a.get("face") is None and isinstance(a.get("face_slot"), int)
-                  for a in body["agents"]), body)
+                  for a in body["agents"])
+              and not any(a.get("id") == "ada" for a in body["agents"]), body)
         before = text
         for patch, code, label in (
                 ({"display": "Iris"}, 409, "another agent's name"),
@@ -304,14 +316,22 @@ async def main():
                 ({"emoji": "🦊"}, 400, "the emoji face, retired 2026-11-16"),
                 ({"colour": "red"}, 400, "a field there is none of"),
                 ({}, 400, "nothing named")):
-            status, body = await http(port, "PATCH", "/v1/agents/ada", patch)
+            status, body = await http(port, "PATCH", "/v1/agents/clayton", patch)
             check(f"refused: {label} ({code}), nothing written",
-                  status == code and (LABS / "ada" / "agent.json").read_text() == before,
+                  status == code and (LABS / "clayton" / "agent.json").read_text() == before,
                   body)
-        status, body = await http(port, "PATCH", "/v1/agents/ada",
+        status, body = await http(port, "PATCH", "/v1/agents/clayton",
                                   {"display": None})
-        check("null puts the id's name back",
-              status == 200 and card("ada")["display"] == "Ada", body.get("identity", body))
+        check("null keeps current id's capitalized display",
+              status == 200 and card("clayton")["display"] == "Clayton",
+              body.get("identity", body))
+        status, body = await http(port, "PATCH", "/v1/agents/clayton",
+                                  {"display": "Ada"})
+        check("renaming back to own former id succeeds",
+              status == 200 and body["identity"]["id"] == "ada"
+              and card("ada")["display"] == "Ada"
+              and "clayton" in card("ada").get("former_ids", []),
+              body.get("identity", body))
 
         # -- defaults ---------------------------------------------------------
         status, body = await http(port, "PATCH", "/v1/agents/ada",
@@ -377,9 +397,10 @@ async def main():
         # provision keeps what was set
         kept = profile.kept({**card("ada"), "display": "Clayton", "model": "opus",
                              "verbosity": "high"})
-        check("provision keeps display, face_slot, an older emoji, verbosity and the defaults (kept)",
+        check("provision keeps display, face_slot, former_ids, an older emoji, verbosity and the defaults (kept)",
               kept == {"display": "Clayton", "emoji": "🧱", "model": "opus",
-                       "verbosity": "high", "face_slot": card("ada")["face_slot"]}, kept)
+                       "verbosity": "high", "face_slot": card("ada")["face_slot"],
+                       "former_ids": card("ada")["former_ids"]}, kept)
 
         # -- a persona, through bin/settings ----------------------------------
         out = await cli(port, "set", "agent.model", "sonnet", "--target", "iris")
@@ -403,32 +424,39 @@ async def main():
         config_before = (iris_ws / "config.md").read_text(encoding="utf-8")
         out = await cli(port, "set", "agent.display", "Violet", "--target", "iris")
         check("bin/settings set agent.display: read back",
-              out.get("ok") and out.get("value") == "Violet", out)
-        claude_after = (iris_ws / "CLAUDE.md").read_text(encoding="utf-8")
-        codex_after = codex_path.read_text(encoding="utf-8")
-        agy_after = agy_path.read_text(encoding="utf-8")
-        check("renaming re-renders CLAUDE.md, Codex and Antigravity instructions at once",
-              claude_after.startswith("You are Violet.\n")
+              out.get("ok") and out.get("value") == "Violet"
+              and out.get("target") == "violet"
+              and out.get("renamed_from") == "iris", out)
+        violet_ws = LABS / "violet"
+        violet_codex = loam_codex.CODEX_HOME / "instructions" / "violet.md"
+        violet_agy = violet_ws / loam_antigravity.RULES_FILE
+        claude_after = (violet_ws / "CLAUDE.md").read_text(encoding="utf-8")
+        codex_after = violet_codex.read_text(encoding="utf-8")
+        agy_after = violet_agy.read_text(encoding="utf-8")
+        check("renaming moves folder & re-renders CLAUDE.md, Codex and Antigravity instructions at once",
+              not iris_ws.exists() and not codex_path.exists()
+              and claude_after.startswith("You are Violet.\n")
               and "You are Iris." not in claude_after
               and "You are Violet." in codex_after and "You are Iris." not in codex_after
               and "You are Violet." in agy_after and "You are Iris." not in agy_after,
               (claude_after[:40], codex_after[:120], agy_after[:120]))
         check("renaming does not touch hand-written soul.md or config.md",
-              (iris_ws / "soul.md").read_text(encoding="utf-8") == soul_before
-              and (iris_ws / "config.md").read_text(encoding="utf-8") == config_before)
+              (violet_ws / "soul.md").read_text(encoding="utf-8") == soul_before
+              and (violet_ws / "config.md").read_text(encoding="utf-8") == config_before)
         status, body = await http(port, "GET", "/v1/files/list?root=spaces")
-        space = next((row for row in body.get("entries", []) if row["path"] == "iris"), {})
-        check("Files lists the new name at the original workspace address",
+        space = next((row for row in body.get("entries", []) if row["path"] == "violet"), {})
+        check("Files lists the new name at the moved workspace address",
               status == 200 and space.get("name") == "Violet"
-              and space.get("link") == "/files/spaces/iris", body)
-        status, body = await http(port, "GET", "/v1/files/list?root=spaces&path=iris")
-        check("the workspace opened by its original ID has the new name",
+              and space.get("link") == "/files/spaces/violet"
+              and not any(row["path"] == "iris" for row in body.get("entries", [])), body)
+        status, body = await http(port, "GET", "/v1/files/list?root=spaces&path=violet")
+        check("the workspace opened by its new ID has the new name",
               status == 200 and body["folder"]["name"] == "Violet", body)
-        status, body = await http(port, "GET", "/v1/files/read?root=spaces&path=iris/soul.md")
+        status, body = await http(port, "GET", "/v1/files/read?root=spaces&path=violet/soul.md")
         check("a file locates the renamed workspace and returns its original text",
               status == 200 and body["workspace_name"] == "Violet"
               and body["name"] == "soul.md" and body["text"] == "iris soul.md\n", body)
-        status, body = await http(port, "GET", "/v1/files/list?root=spaces&path=iris/skills")
+        status, body = await http(port, "GET", "/v1/files/list?root=spaces&path=violet/skills")
         check("a nested folder gives the current workspace name for its location",
               status == 200 and body["folder"]["workspace_name"] == "Violet"
               and body["folder"]["name"] == "skills", body)
@@ -702,7 +730,7 @@ async def main():
         check("GET every agent's values",
               status == 200 and body["agents"] == {"ada": {"voice": "Puck",
                                                             "style": "warm"}}, body)
-        status, body = await http(port, "PATCH", "/v1/plugins/loose/agents/iris",
+        status, body = await http(port, "PATCH", "/v1/plugins/loose/agents/violet",
                                   {"values": {"anything": "goes", "count": 3}})
         check("a plugin that declares nothing keeps any slug",
               status == 200 and body["values"] == {"anything": "goes", "count": 3}, body)
@@ -715,7 +743,7 @@ async def main():
               [p["values"] for p in body["plugins"] if p["id"] == "voices"]
               == [{"voice": "Kore", "style": "warm"}], body["plugins"])
         out = await cli(port, "set", "plugin.agent", '{"voice": "Puck"}',
-                        "--target", "voices/iris")
+                        "--target", "voices/violet")
         check("bin/settings set plugin.agent: read back",
               out.get("ok") and out.get("value", {}).get("voice") == "Puck", out)
 

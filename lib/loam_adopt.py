@@ -59,9 +59,14 @@ _TAIL_LIMIT = 4 * 1024 * 1024
 _HEAD_LINES = 32
 
 
+def project_slug(workspace: Path) -> str:
+    """The CLI's project folder name for a working directory."""
+    return _SLUG.sub("-", str(workspace))
+
+
 def project_dir(workspace: Path) -> Path:
     """The CLI's session folder for a working directory."""
-    return PROJECTS / _SLUG.sub("-", str(workspace))
+    return PROJECTS / project_slug(workspace)
 
 
 def epoch_of(iso: str | None) -> float | None:

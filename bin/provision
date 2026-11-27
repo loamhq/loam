@@ -13,6 +13,7 @@ Usage: provision <agent> [<wake HH:MM>] [--dry-run]
        provision --reviewer [--dry-run]
        provision --codex [<agent>...] [--dry-run]
        provision --antigravity [<agent>...] [--dry-run]
+       provision --migrate-renamed-agents [--dry-run]
        provision --project <name> --repo new|<url> [--project-file <path>]
            [--vault-folder <Folder> [--vault-write]]
        provision --project <name> --rerender
@@ -2143,6 +2144,23 @@ def main() -> None:
         provision_project(name, repo_arg, Path(pf) if pf else None, dry,
                           vault_folder=opt("--vault-folder"), vault_write="--vault-write" in argv)
         return
+    if "--migrate-renamed-agents" in sys.argv:
+        if args:
+            die("usage: provision --migrate-renamed-agents [--dry-run]")
+        import loam_rename  # noqa: PLC0415
+        res = loam_rename.migrate_renamed_agents(dry_run=dry, ai_labs=AI_LABS)
+        for item in res["migrated"]:
+            verb = "[dry-run] would migrate" if dry else "migrated"
+            via = f" via {item['via']}" if item.get("via") else ""
+            print(f"  {verb} {item['agent']} -> {item['target']} ({item['display']}){via}")
+        for item in res["skipped"]:
+            print(f"  skipped {item['agent']} -> {item['target']} ({item['display']}): "
+                  f"{item['reason']}", file=sys.stderr)
+        if not res["migrated"] and not res["skipped"]:
+            print(f"provision: all {res['checked']} agent(s) already match their display name")
+        elif res["skipped"] and not dry:
+            sys.exit(1)
+        return
     if "--migrate-persona-maps" in sys.argv:
         if args or dry:
             die("usage: provision --migrate-persona-maps")
@@ -2301,10 +2319,16 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # Hold the relevant live lock while changing a project checkout or its installed
-    # runtime files.
-    import loam_lock  # noqa: E402
-    _named = [a for a in sys.argv[1:] if not a.startswith("--")]
-    _lock = _named[0] if "--project" in sys.argv and _named else "Loam"
-    with loam_lock.live(_lock, "provision " + " ".join(sys.argv[1:])):
+    # --migrate-renamed-agents coordinates via the live broker (which may run
+    # gen-deploy under its own live lock) or takes per-agent locks directly, so
+    # it must not hold the outer Loam live lock across an HTTP call to the broker.
+    if "--migrate-renamed-agents" in sys.argv:
         main()
+    else:
+        # Hold the relevant live lock while changing a project checkout or its installed
+        # runtime files.
+        import loam_lock  # noqa: E402
+        _named = [a for a in sys.argv[1:] if not a.startswith("--")]
+        _lock = _named[0] if "--project" in sys.argv and _named else "Loam"
+        with loam_lock.live(_lock, "provision " + " ".join(sys.argv[1:])):
+            main()

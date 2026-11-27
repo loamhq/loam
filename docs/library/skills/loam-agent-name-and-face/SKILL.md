@@ -10,9 +10,19 @@ them, in a conversation, with `mcp__engineer__settings` (`by` your name),
 which calls the same route, so the page shows the change at once. Run
 `describe` first: it lists both settings with their exact values.
 
-- **Name**: `set` `agent.display` on the agent: 1 to 40 characters, not
-  another agent's id or name. `null` puts back the name its id gives it.
-  The id and workspace folder stay as they are.
+- **Name**: `set` `agent.display` on the agent: 1 to 40 characters, producing
+  a valid folder slug (`a-z`, `0-9`, `-`, 2–24 characters), not reserved and
+  not another agent's id, name, or past alias. `null` resets the display casing
+  for the agent's current id. Changing the name renames the agent everywhere:
+  its id, workspace folder (`ai-labs/<new>`), wake and cron units, commons
+  inbox, rendered provider/runtime files, and registries all move to the new
+  name, while keeping git history, settings, plugin preferences, and resumable
+  conversations intact. Vault thread records (`15_CONVERSATIONS/*.md`) stay
+  untouched as history and resolve the old id to the renamed agent via
+  `former_ids`. The agent must be idle to move its folder (a mid-turn rename,
+  including an agent renaming itself during its own turn, is refused — ask the
+  owner to rename it from its profile page, or have another agent rename it
+  once it is idle).
 - **Face**: every agent has the face the theme draws for it. To give it a
   picture instead, `set` `agent.face` to the path of a PNG, JPEG, WebP or
   GIF of 2 MB at most, in a workspace or the vault; `null` goes back to the

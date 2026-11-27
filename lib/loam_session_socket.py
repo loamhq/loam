@@ -190,6 +190,12 @@ class SessionSocket:
             if op == "adopt":
                 await write_frame(writer, {"ok": self.host.adopt_app_sessions()})
                 return
+            if op == "stop_agent_idle":
+                agent = req.get("agent")
+                if not isinstance(agent, str) or not agent:
+                    raise BrokerError(400, "invalid agent")
+                await write_frame(writer, {"ok": await self.host.stop_agent_idle(agent)})
+                return
             if op == "registry":
                 await write_frame(writer, {"ok": {
                     "sessions": [snapshot(s) for s in self.host.sessions.values()

@@ -2,6 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { once } from 'node:events'
 import { createProfiles, mountProfile, profileStatus } from '../public/agent-profile.js'
+import { createAgents } from '../public/sessions.js'
+import { buildAppThread } from '../public/apps.js'
 import { createApp } from '../src/server.js'
 import { readConfig } from '../src/config.js'
 import { fakeBroker, appAgainst, closing, TOKEN } from './harness.js'
@@ -231,4 +233,57 @@ test('agent profile Files tab shows Understanding when present and omits absent 
     titlesFor({ understanding: ref('iris/understanding.md', true), config: ref('iris/config.md', true) }),
     ['Open workspace', 'Soul', 'Understanding', 'Config', 'Every run', 'Memory folder', 'Skills'],
   )
+})
+
+test('renaming an agent updates profile target id and reports previousId to changedAgent', async () => {
+  const seen = []
+  const c = createProfiles({
+    redraw() {},
+    changedAgent(agent, info) { seen.push({ agent, info }) },
+    api: async (method, path) => {
+      if (method === 'GET' && path === '/agents/ines') {
+        return { agent: { id: 'ines', name: 'Ines' }, identity: { id: 'ines', display: 'Ines' } }
+      }
+      if (method === 'PATCH' && path === '/agents/ines') {
+        return {
+          agent: { id: 'astrid', name: 'Astrid' },
+          identity: { id: 'astrid', display: 'Astrid', former_ids: ['ines'] },
+          renamed_from: 'ines',
+        }
+      }
+      if (method === 'GET' && path === '/agents/old-alias') {
+        return {
+          agent: { id: 'astrid', name: 'Astrid' },
+          identity: { id: 'astrid', display: 'Astrid', former_ids: ['ines', 'old-alias'] },
+        }
+      }
+      throw new Error(`unexpected ${method} ${path}`)
+    },
+  })
+  await c.load('agent', 'ines')
+  assert.equal(c.st.target.id, 'ines')
+  assert.equal(await c.patch({ display: 'Astrid' }), true)
+  assert.equal(c.st.target.id, 'astrid')
+  assert.equal(c.st.data.identity.display, 'Astrid')
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0].agent.id, 'astrid')
+  assert.deepEqual(seen[0].info, { previousId: 'ines' })
+
+  await c.load('agent', 'old-alias')
+  assert.equal(c.st.target.id, 'astrid')
+  assert.equal(seen.length, 2)
+  assert.deepEqual(seen[1].info, { previousId: 'old-alias' })
+})
+
+test('starter flag carries through createAgents and guides buildAppThread after Iris is renamed', () => {
+  const agents = createAgents([
+    { id: 'cleo', name: 'Cleo' },
+    { id: 'lyra', name: 'Lyra', starter: true },
+  ])
+  assert.equal(agents.byId.get('lyra').starter, true)
+  assert.equal(agents.byId.get('cleo').starter, undefined)
+  let picked = null
+  buildAppThread({ create: (id, opts) => { picked = { id, opts } } }, agents.list)
+  assert.equal(picked.id, 'lyra')
+  assert.equal(picked.opts.promptTitle, 'Build an app with Lyra')
 })

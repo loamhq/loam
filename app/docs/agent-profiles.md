@@ -33,9 +33,10 @@ reviewer will use until that provider reconnects.
 
 Tap the face for image upload or removal. Uploaded faces come
 from the host card, have digest-addressed URLs, and take priority over every
-theme's art. Removing the image restores the selected theme face. Tap the
-name to rename; conflicts leave the field and the host's sentence in place.
-The stable id never changes.
+theme's art. Removing the image restores the selected theme face. Tap the name to rename; conflicts or an in-flight turn leave the field and
+the host's sentence in place. A rename moves the agent's id and workspace
+folder to the new slug (`renamed_from` in the host answer) and updates the
+profile, roster, activity, schedules and thread views in place.
 
 See [U3](first-release-u3.md) for conversation-based creation, revision-confirmed
 drafts, archive/restore and the host handoff that remains outside this repo.

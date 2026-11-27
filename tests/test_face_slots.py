@@ -124,21 +124,25 @@ def test_fresh_creation_4_8_9_and_delete() -> None:
         check("ninth repeats mod 8 evenly and gets slot 8 for larger themes",
               ninth == 8 and (ninth % 8) == 0 and (ninth % 10) == 8, ninth)
 
-        # Renaming an agent changes nobody's slot.
+        # Renaming an agent moves its folder/id and changes nobody's slot.
         before_rename = {n: loam_agents.face_slot_of(n, root=labs) for n in all8 + ["ninth"]}
         loam_profile.update_agent(colliders[0], {"display": "Renamed"}, lambda *a: a[2])
-        after_rename = {n: loam_agents.face_slot_of(n, root=labs) for n in all8 + ["ninth"]}
+        all8_after = ["renamed", *all8[1:]]
+        expected_after = {("renamed" if n == colliders[0] else n): slot
+                          for n, slot in before_rename.items()}
+        after_rename = {n: loam_agents.face_slot_of(n, root=labs) for n in all8_after + ["ninth"]}
         check("renaming an agent changes nobody's face slot",
-              before_rename == after_rename, (before_rename, after_rename))
+              expected_after == after_rename and not (labs / colliders[0]).exists(),
+              (expected_after, after_rename))
 
         # Deleting one agent changes nobody else's slot.
         deleted = colliders[1]  # slot 1
         shutil.rmtree(labs / deleted)
         loam_agents._CARDS.clear()
-        survivors = [n for n in all8 + ["ninth"] if n != deleted]
+        survivors = [n for n in all8_after + ["ninth"] if n != deleted]
         after_delete = {n: loam_agents.face_slot_of(n, root=labs) for n in survivors}
         check("deleting one agent changes nobody else",
-              all(after_delete[n] == before_rename[n] for n in survivors), after_delete)
+              all(after_delete[n] == expected_after[n] for n in survivors), after_delete)
 
         # Adding a replacement after deleting slot 1 fills the free mod-8 face (1),
         # keeping all 8 faces represented even though slot 8 (mod 8 == 0) exists.
@@ -149,9 +153,9 @@ def test_fresh_creation_4_8_9_and_delete() -> None:
               tenth)
 
         # loam_profile.kept preserves face_slot across re-provisioning.
-        cfg = loam_agents.card(colliders[0], labs)
+        cfg = loam_agents.card("renamed", labs)
         check("loam_profile.kept preserves face_slot",
-              loam_profile.kept(cfg).get("face_slot") == before_rename[colliders[0]],
+              loam_profile.kept(cfg).get("face_slot") == expected_after["renamed"],
               loam_profile.kept(cfg))
 
 

@@ -37,6 +37,7 @@ export function createAgents(entries = []) {
         ...(typeof entry.description === 'string' && entry.description.trim() ? { description: entry.description.trim() } : {}),
         face: entry.face ?? null,
         ...(Number.isInteger(slot) && slot >= 0 ? { faceSlot: slot } : {}),
+        ...(entry.starter ? { starter: true } : {}),
         archived: entry.archived ?? null,
       }
     })

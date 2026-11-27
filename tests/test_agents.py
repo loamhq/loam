@@ -542,12 +542,15 @@ async def main():
         check("provision keeps the face (and would keep an archive mark)",
               "face" in kept and "archived" in profile.KEPT, kept)
         out = await cli(port, "set", "agent.display", "Irene", "--target", "iris")
-        check("an agent renames itself through the same route",
-              out.get("ok") and card("iris")["display"] == "Irene", out)
-        status, body = await http(port, "DELETE", "/v1/agents/iris/face", {})
+        check("an agent renames itself through the same route (moves folder and id)",
+              out.get("ok") and out.get("target") == "irene"
+              and out.get("renamed_from") == "iris"
+              and not (LABS / "iris").exists()
+              and card("irene")["display"] == "Irene", out)
+        status, body = await http(port, "DELETE", "/v1/agents/irene/face", {})
         check("DELETE goes back to the theme's face", status == 200 and body["face"] is None
-              and "face" not in card("iris")
-              and not (LABS / "iris" / "face.jpg").exists(), body)
+              and "face" not in card("irene")
+              and not (LABS / "irene" / "face.jpg").exists(), body)
 
         # -- the fleet's clauses: a made config passes check-drift's rule -------
         fleet_root = TMP / "fleet"
