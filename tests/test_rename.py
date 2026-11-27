@@ -579,9 +579,16 @@ async def main() -> None:
               "seed ines" in hist, hist)
 
         # Settings & face preserved in agent.json; rendered runtime files updated.
-        acard = json.loads((astrid_ws / "agent.json").read_text(encoding="utf-8"))
-        check("agent.json carries over face, face_slot, provider, model, effort, verbosity, former_ids",
-              acard["name"] == "astrid" and acard["display"] == "Astrid"
+        acard_raw = (astrid_ws / "agent.json").read_text(encoding="utf-8")
+        acard = json.loads(acard_raw)
+        expected_acard = profile.render_agent({
+            "name": "astrid", "display": "Astrid",
+            "workspace": str(astrid_ws), "vault": str(VAULT),
+            **profile.kept(acard),
+        })
+        check("agent.json carries over face, face_slot, provider, model, effort, verbosity, former_ids in check-drift order",
+              acard_raw == expected_acard
+              and acard["name"] == "astrid" and acard["display"] == "Astrid"
               and acard["workspace"] == str(astrid_ws)
               and acard["former_ids"] == ["ines"]
               and acard.get("face", {}).get("file") == "face.png"
@@ -589,7 +596,7 @@ async def main() -> None:
               and acard.get("provider") == "claude-code"
               and acard.get("model") == "opus"
               and acard.get("effort") == "high"
-              and acard.get("verbosity") == "low", acard)
+              and acard.get("verbosity") == "low", (acard_raw, expected_acard))
 
         mcp_text = (astrid_ws / ".mcp.json").read_text(encoding="utf-8")
         codex_toml = (astrid_ws / ".codex" / "config.toml").read_text(encoding="utf-8")

@@ -239,13 +239,16 @@ def reviewer_choice(model: str, pinned: bool = False,
 
 def render_agent(config: dict) -> str:
     """agent.json as text, in its one order: the provisioned keys, then the
-    defaults that are set, then anything else the file carries. bin/provision
-    and bin/check-drift render through this too, so a page's write and a
-    provision agree byte for byte."""
+    defaults that are set, then the kept profile keys in KEPT order, then
+    anything else the file carries. bin/provision and bin/check-drift render
+    through this too, so a page's write, rename and provision agree byte for byte."""
     ordered = {k: config[k] for k in BASE_KEYS if k in config}
     optional_defaults = (*DEFAULT_KEYS, "verbosity")
     for k in optional_defaults:
         if config.get(k) is not None:
+            ordered[k] = config[k]
+    for k in KEPT:
+        if k not in ordered and k not in optional_defaults and config.get(k) is not None:
             ordered[k] = config[k]
     for k, v in config.items():
         if k not in ordered and k not in optional_defaults:
