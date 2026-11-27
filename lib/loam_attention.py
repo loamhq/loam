@@ -53,7 +53,10 @@ def chosen() -> str | None:
     """The owner's choice as stored, or None for the default."""
     value = _host().get(SETTING)
     persona = value.get("persona") if isinstance(value, dict) else None
-    return persona if isinstance(persona, str) and persona else None
+    if not isinstance(persona, str) or not persona:
+        return None
+    import loam_agents  # noqa: PLC0415
+    return loam_agents.resolve_id(persona)
 
 
 def awake() -> list[str]:
@@ -62,11 +65,14 @@ def awake() -> list[str]:
 
 
 def default_persona(people: list[str] | None = None) -> str | None:
-    """The first agent: the install's lead agent (``lc.LEAD_AGENT``) when it
-    is awake, else the first awake agent by name. None when none is."""
+    """The first agent: the install's lead agent (``lc.LEAD_AGENT``, following
+    any rename) when it is awake, else the first awake agent by name. None when
+    none is."""
+    import loam_agents  # noqa: PLC0415
     people = awake() if people is None else people
-    if lc.LEAD_AGENT in people:
-        return lc.LEAD_AGENT
+    lead = loam_agents.resolve_id(lc.LEAD_AGENT)
+    if lead in people:
+        return lead
     return people[0] if people else None
 
 

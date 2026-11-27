@@ -500,7 +500,14 @@ def _resolve_author(rel: str, mtime_ns: int, ledger: dict[str, dict]) -> tuple[s
     credited to the owner."""
     rec = ledger.get(rel)
     if rec is not None and mtime_ns <= rec["mtime_ns"] + MTIME_TOLERANCE_NS:
-        return rec["kind"], rec["actor"]
+        kind, actor = rec["kind"], rec["actor"]
+        if kind == "agent" and actor:
+            try:
+                import loam_agents  # noqa: PLC0415
+                actor = loam_agents.resolve_id(actor, cfg.AI_LABS)
+            except Exception:  # noqa: BLE001
+                pass
+        return kind, actor
     return None, ""
 
 

@@ -4516,15 +4516,24 @@ Answers 200 with the whole profile, as GET.
 
 | Field | Takes | null |
 |---|---|---|
-| `display` | 1–40 characters (spaces collapsed, no control characters), not another agent's id or display name, not `owner`, `all`, `everyone`, `system` | the id's own (`Ada`) |
+| `display` | 1–40 characters (spaces collapsed, no control characters), slugging to a valid 2–24 char id, not reserved and not another agent's id, display name, or past alias (`former_ids`) | resets display casing for the current id (`Ada`) |
 | `provider` | `claude-code`, `codex`, `antigravity` | Claude Code |
 | `model` | a model the (new) provider takes: Claude Code's aliases or a `claude-…` id, a model Codex's `model/list` gives, one Antigravity lists | the provider's own |
 | `effort` | Claude Code: `low` `medium` `high` `xhigh` `max`; Codex: its listed levels; Antigravity: the same five, passed only beside a model id that does not end in its own level (`-low` ... `-xhigh`; the id wins, since 2026-11-15) | the provider's own |
 
 A provider that changes clears `model` and `effort` unless the same body
-names them. Errors, each writing nothing: 400 for a field there is none of,
-an empty body, or a value above not taken (the sentence says which); 409 for
-a display name that is another agent's; 404 for an agent nobody has.
+names them. When `display` changes the agent's slug id, Loam performs a full
+rename (`lib/loam_rename.py`): it unloads idle resident sessions, moves the
+workspace folder (via `git mv` when tracked), records the old id in
+`former_ids`, re-renders runtime/provider files, replaces wake and cron units,
+moves commons/provider session directories, and updates registries keyed on id
+without rewriting vault thread records (`15_CONVERSATIONS/*.md`). The 200
+response is the profile under the new id plus `"renamed_from": "<old>"`.
+Errors, each writing nothing: 400 for a field there is none of, an empty body,
+or a value above not taken (the sentence says which); 409 for a display name
+or slug that collides with another agent (or its past alias), an existing
+folder, or an agent that is busy (mid-turn, queued, or in a wake/cron); 404
+for an agent nobody has.
 
 Where they apply: a thread member starts on the agent's provider when it
 joins (new threads, a member brought in; members already in a thread keep
@@ -4864,9 +4873,15 @@ renders `agent.json` again.
 
 ### Rename
 
-Unchanged: `PATCH /v1/agents/<agent> {"display": "..."}` (above). The id
-never changes. An agent renames itself, or changes its face, with
-`agent.display` and `agent.face`.
+`PATCH /v1/agents/<agent> {"display": "..."}` (above). Renaming moves the
+agent's id, workspace folder (`ai-labs/<new>`), wake/cron units, commons
+inbox, provider session directory, rendered runtime files, and registries to
+the new slug while preserving `former_ids` in `agent.json` so untouched vault
+thread records and historical logs continue to resolve. The agent must be
+idle; renaming an agent mid-turn (including self-rename during a turn) is
+refused with 409. Existing agents renamed before folder-moves shipped can be
+brought into line idempotently with `bin/provision --migrate-renamed-agents`
+(also run automatically on update).
 
 ### `bin/settings` / `mcp__engineer__settings`
 

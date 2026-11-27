@@ -14,12 +14,23 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import loam_agents
 import loam_config as lc
 import loam_cron
 import loam_engineer as eng
 import loam_inbox
 import loam_schedule as ls
 from loam_memory import CRON_LANE_DIR, strip_frontmatter
+
+
+def _aliases() -> dict[str, str]:
+    return loam_agents.alias_map(loam_cron.AI_LABS)
+
+
+def _resolve(value, aliases: dict[str, str]):
+    if isinstance(value, str) and value:
+        return aliases.get(value.strip().lower(), value)
+    return value
 
 ROOT = Path(__file__).resolve().parent.parent
 LAUNCHER = ROOT / "bin" / "engineer-job"
@@ -264,6 +275,7 @@ def finished_jobs() -> list[dict]:
     """Every job with a verdict, as an Activity item. A result is read once
     per change of its file."""
     job = launcher()
+    aliases = _aliases()
     out = []
     for project in eng.projects().values():
         try:
@@ -300,7 +312,10 @@ def finished_jobs() -> list[dict]:
                     # Since 2026-11-12: what it ran on, who called and from
                     # where, and the chain it is part of (job_label).
                     **{k: label.get(k) for k in JOB_FIELDS}})
-            out.append(dict(cached[1]))
+            row = dict(cached[1])
+            for key in ("agent", "actor", "briefed_by"):
+                row[key] = _resolve(row.get(key), aliases)
+            out.append(row)
     return out
 
 
@@ -396,8 +411,9 @@ def _vault_path(path: str | None) -> str | None:
 
 
 def _job_row(label: dict, state: str, now: datetime, **extra) -> dict:
+    briefed_by = _resolve(label.get("briefed_by"), _aliases())
     row = {"job": label.get("job"), "project": label.get("project"),
-           "scope": label.get("scope"), "title": label.get("title"), "briefed_by": label.get("briefed_by"),
+           "scope": label.get("scope"), "title": label.get("title"), "briefed_by": briefed_by,
            "thread": label.get("thread"), "state": state, "phase": None,
            "since": None, "started": None, "finished": None,
            "elapsed_seconds": None, "outcome": None, "outcome_detail": None,
@@ -507,8 +523,18 @@ def items(store: dict | None = None) -> list[dict]:
     # A line for an agent not on the roster is a test's or a retired
     # agent's, and is not something that happened to the owner's personas.
     roster = set(loam_cron.roster())
-    out = [ITEM_OF[e["kind"]](e) for e in ls.events()
-           if e.get("kind") in ITEM_OF and e.get("agent") in roster]
+    aliases = _aliases()
+    out = []
+    for e in ls.events():
+        if e.get("kind") not in ITEM_OF:
+            continue
+        agent = _resolve(e.get("agent"), aliases)
+        if agent not in roster:
+            continue
+        ev = {**e, "agent": agent}
+        if "actor" in ev:
+            ev["actor"] = _resolve(ev.get("actor"), aliases)
+        out.append(ITEM_OF[e["kind"]](ev))
     import loam_plugins
     out += loam_plugins.load_list(strict=False).get("update_history", [])
     out += finished_jobs()
@@ -523,7 +549,8 @@ def items(store: dict | None = None) -> list[dict]:
 
 def activity(agent: str | None = None, kind: str | None = None,
              limit: int = 50, offset: int = 0) -> dict:
-    agents = {a for a in (agent or "").split(",") if a}
+    aliases = _aliases()
+    agents = {_resolve(a, aliases) for a in (agent or "").split(",") if a}
     kinds = {k for k in (kind or "").split(",") if k}
     unknown = kinds - set(KINDS)
     if unknown:
@@ -570,11 +597,13 @@ def schedules(agent: str | None = None) -> list[dict]:
     """Every persona's records (or one persona's), as rows. A one-off that
     has fired is gone from the list and kept in Activity."""
     roster = loam_cron.roster()
-    if agent is not None and agent not in roster:
-        raise NotFound(f"{agent!r} is not an agent on this box")
+    aliases = _aliases()
+    if agent is not None:
+        agent = _resolve(agent, aliases)
+        if agent not in roster:
+            raise NotFound(f"{agent!r} is not an agent on this box")
     # An archived agent's records stay on its profile and leave the list
     # (lib/loam_agents.py, 2026-11-14): nothing of them runs.
-    import loam_agents  # noqa: PLC0415
     names = [agent] if agent else loam_agents.live(roster, loam_cron.AI_LABS)
     store = seen_store()
     log = ls.events()
@@ -582,7 +611,7 @@ def schedules(agent: str | None = None) -> list[dict]:
     for who in names:
         folder = loam_cron.AI_LABS / who / CRON_LANE_DIR
         for path in sorted(folder.glob("*.md")) if folder.is_dir() else []:
-            row = _row(who, path.stem, ls.read_text(path), log, store)
+            row = _row(who, path.stem, ls.read_text(path), log, store, aliases=aliases)
             if row is not None:
                 rows.append(row)
     return _with_timers(rows)
@@ -604,8 +633,11 @@ def _with_timers(rows: list[dict]) -> list[dict]:
 
 
 def schedule(agent: str, name: str) -> dict:
+    aliases = _aliases()
+    agent = _resolve(agent, aliases)
     text = ls.read_text(ls.record_path(agent, name))
-    row = _row(agent, name, text, ls.events(), seen_store(), keep_done=True)
+    row = _row(agent, name, text, ls.events(), seen_store(), keep_done=True,
+               aliases=aliases)
     if row is None:
         raise NotFound(f"there is no schedule {agent}/{name}")
     return _with_timers([row])[0]
@@ -671,9 +703,12 @@ def _sentence(why: str) -> str:
 
 
 def _row(agent: str, name: str, text: str | None, log: list[dict],
-         store: dict, keep_done: bool = False) -> dict | None:
+         store: dict, keep_done: bool = False,
+         aliases: dict[str, str] | None = None) -> dict | None:
     if text is None:
         return None
+    if aliases is None:
+        aliases = _aliases()
     try:
         cron = loam_cron.parse_record(agent, name, text, check_systemd=False)
     except loam_cron.CronError as exc:
@@ -690,7 +725,10 @@ def _row(agent: str, name: str, text: str | None, log: list[dict],
     except loam_cron.CronError:
         previous = None
     kind = cron.kind if cron else (previous.kind if previous else "unknown")
-    mine = [e for e in log if (e.get("agent"), e.get("record")) == (agent, name)]
+    mine = [{**e, "agent": agent,
+             **({"actor": _resolve(e.get("actor"), aliases)} if "actor" in e else {})}
+            for e in log
+            if (_resolve(e.get("agent"), aliases), e.get("record")) == (agent, name)]
     changes = [e for e in mine if e.get("kind") == "change"]
     fires = [e for e in mine if e.get("kind") == "fire"]
     last_change = _change_item(changes[-1]) if changes else None
@@ -906,11 +944,12 @@ def undo(event_id: str, fields: dict | None = None) -> dict:
                   if e.get("id") == event_id and e.get("kind") == "change"), None)
     if event is None:
         raise NotFound(f"there is no schedule change {event_id!r} in the log")
-    agent, name = event["agent"], event["record"]
+    aliases = _aliases()
+    agent, name = _resolve(event["agent"], aliases), event["record"]
     current = ls.read_text(ls.record_path(agent, name))
     if ls.sha(current) != event.get("after_sha"):
         later = next((e for e in reversed(ls.events())
-                      if (e.get("agent"), e.get("record")) == (agent, name)
+                      if (_resolve(e.get("agent"), aliases), e.get("record")) == (agent, name)
                       and e.get("kind") == "change"), None)
         who = (f" ({later.get('op')} by {later.get('actor')} at {later.get('ts')})"
                if later else "")

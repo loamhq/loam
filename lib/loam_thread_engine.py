@@ -803,6 +803,48 @@ class ThreadEngine:
         for queue in list(self.list_listeners):
             queue.put_nowait({"type": "thread.removed", "thread": thread_id})
 
+    def on_agent_renamed(self, old: str, new: str) -> list[str]:
+        """Synchronize in-memory thread engine state after ``old`` was renamed to ``new``."""
+        if not old or not new or old == new:
+            return []
+        # Re-read marks and system_turns from disk (already migrated by loam_rename)
+        # so in-memory caches never write stale old keys back out.
+        self._marks = None
+        self._system_turns = None
+        for mapping in (self.queues, self.workers, self.turns, self.turn_sessions,
+                        self.turn_live, self.tails, self.turn_watch,
+                        self.task_origins, self.steer_locks):
+            for key in [k for k in list(mapping) if isinstance(k, tuple) and len(k) == 2 and k[1] == old]:
+                val = mapping.pop(key)
+                if mapping is self.tails and isinstance(val, dict):
+                    task = val.get("task")
+                    if task is not None and not task.done():
+                        task.cancel()
+                    continue
+                if mapping is self.workers and hasattr(val, "done") and val.done():
+                    continue
+                if mapping is self.queues and hasattr(val, "empty") and val.empty():
+                    continue
+                mapping.setdefault((key[0], new), val)
+        for key in [k for k in list(getattr(self.handoffs, "timers", {}))
+                    if isinstance(k, tuple) and len(k) == 2 and k[1] == old]:
+            handle = self.handoffs.timers.pop(key, None)
+            if handle is not None:
+                handle.cancel()
+        threads.clear_cache()
+        touched: list[str] = []
+        for tid in list(threads.index()):
+            try:
+                meta, _, _ = threads.read(tid)
+            except (threads.ThreadError, OSError):
+                continue
+            if new in (meta.get("members") or []) or meta.get("default") == new:
+                self.members_sent.pop(tid, None)
+                self.members_changed(tid)
+                self.publish_row(tid)
+                touched.append(tid)
+        return touched
+
     # -- messages --------------------------------------------------------------
 
     def post_person(self, thread_id: str, text: str,

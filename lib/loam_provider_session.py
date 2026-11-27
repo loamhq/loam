@@ -189,7 +189,7 @@ def first_to_go(argv: list[str]) -> list[str]:
 # Reasons a session is ended on purpose by Loam (not by the owner and not by a
 # crash/OOM). A thread turn whose session exits with one of these before any
 # reply or tool step recovers automatically on a fresh/resumed session.
-RECLAIM_REASONS = ("room", "idle", "pressure", "retire")
+RECLAIM_REASONS = ("room", "idle", "pressure", "retire", "rename")
 
 
 class BrokerError(Exception):

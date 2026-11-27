@@ -2966,12 +2966,31 @@ class Server:
         }
 
     def agent_busy(self, agent: str) -> str | None:
-        """What an agent is in the middle of, for an archive to wait on:
-        a thread turn (the engine's) or a wake or cron (its run marker)."""
+        """What an agent is in the middle of, for an archive or rename to guard on:
+        a thread turn, queued thread input, a busy live session, or a wake/cron."""
         threads_now = sorted({tid for (tid, p) in self.threads.turns if p == agent})
         if threads_now:
             return f"mid-turn in {', '.join(threads_now)}"
-        if (loam_schedule.WAKE_STATE / f"{agent}.running").exists():
+        try:
+            import loam_thread_inputs  # noqa: PLC0415
+            queued = sorted({tid for tid, p, items in loam_thread_inputs.pending()
+                             if p == agent and items})
+        except (OSError, ValueError):
+            queued = []
+        if queued:
+            return f"queued to answer in {', '.join(queued)}"
+        for sess in list((getattr(self.broker, "sessions", None) or {}).values()):
+            if getattr(sess, "agent", None) != agent:
+                continue
+            live = getattr(sess, "is_live", None)
+            if callable(live) and not live():
+                continue
+            busy_fn = getattr(sess, "busy", None)
+            why = busy_fn() if callable(busy_fn) else None
+            if why:
+                return f"busy in a live session ({why})"
+        import loam_rename  # noqa: PLC0415
+        if loam_rename.wake_running_busy(agent, loam_schedule.WAKE_STATE):
             return "in a wake or cron run"
         return None
 
@@ -3000,9 +3019,9 @@ class Server:
             if tail == ["new"] and method == "POST":
                 # Settings › Agents › New agent: a thread with the starter
                 # agent, not a form. The person writes first.
-                starter = loam_agents.STARTER
+                starter = loam_agents.starter_agent()
                 if starter not in cfg.roster():
-                    raise BrokerError(409, f"{starter}, who makes new agents, is not "
+                    raise BrokerError(409, f"{say(starter)}, who makes new agents, is not "
                                            f"awake on this box; ask any agent instead")
                 meta = threads_rec.create(starter, "New agent")
                 self.agents_line(meta["id"], (
@@ -3148,24 +3167,66 @@ class Server:
             if tail[0] == "agents":
                 agent = tail[1]
                 if method == "GET":
-                    body = await asyncio.to_thread(self.profile, agent)
+                    canonical = await asyncio.to_thread(loam_agents.resolve_id, agent, cfg.AI_LABS)
+                    body = await asyncio.to_thread(self.profile, canonical)
                 elif method == "PATCH":
+                    import loam_rename  # noqa: PLC0415
                     by = author(payload)
                     before = await asyncio.to_thread(loam_profile.read_agent, agent)
+                    old_display = loam_profile.display_name(agent, before)
+                    # If `display` changes the agent's id/folder, validate and
+                    # unload idle resident sessions before moving the workspace.
+                    will_move = False
+                    if isinstance(payload, dict) and "display" in payload:
+                        try:
+                            _, _, will_move = await asyncio.to_thread(
+                                loam_rename.validate_rename, agent, payload["display"])
+                        except loam_rename.RenameError as exc:
+                            raise BrokerError(exc.status, exc.message) from None
+                    if will_move:
+                        why = self.agent_busy(agent)
+                        if why:
+                            hint = (" Ask another agent once this turn finishes, or rename "
+                                    "from the profile page." if by == agent
+                                    else " Wait for it to finish and try again.")
+                            raise BrokerError(
+                                409, f"{old_display} is {why}, so its folder cannot be "
+                                     f"moved while it is running.{hint}")
+                        stopper = getattr(self.broker, "stop_agent_idle", None)
+                        if callable(stopper):
+                            await stopper(agent)
+                        why = self.agent_busy(agent)
+                        if why:
+                            raise BrokerError(
+                                409, f"{old_display} is {why}, so its folder cannot be "
+                                     f"moved while it is running. Wait for it to finish and try again.")
                     after = await asyncio.to_thread(
-                        loam_profile.update_agent, agent, payload, self.profile_check)
+                        loam_profile.update_agent, agent, payload, self.profile_check,
+                        by=by, busy=self.agent_busy)
+                    new_id = after.get("name") or agent
                     changed = [k for k in loam_profile.SETTABLE
                                if before.get(k) != after.get(k)]
-                    print(f"profile: {agent} {changed or 'unchanged'} by "
-                          f"{by or lc.OWNER_ID}", file=sys.stderr, flush=True)
-                    if by and changed:
-                        words = ", ".join(
-                            f"{k} to {after.get(k)}" if after.get(k) is not None
-                            else f"{k} back to its default" for k in changed)
-                        self.say_in_general(
-                            f"{threads_rec.display(by)} changed "
-                            f"{threads_rec.display(agent)}'s {words}")
-                    body = await asyncio.to_thread(self.profile, agent)
+                    if new_id != agent:
+                        self.threads.on_agent_renamed(agent, new_id)
+                    print(f"profile: {agent}"
+                          + (f" -> {new_id}" if new_id != agent else "")
+                          + f" {changed or 'unchanged'} by {by or lc.OWNER_ID}",
+                          file=sys.stderr, flush=True)
+                    if by and (changed or new_id != agent):
+                        if new_id != agent and set(changed) <= {"display"}:
+                            self.say_in_general(
+                                f"{threads_rec.display(by)} renamed {old_display} to "
+                                f"{threads_rec.display(new_id)}")
+                        else:
+                            words = ", ".join(
+                                f"{k} to {after.get(k)}" if after.get(k) is not None
+                                else f"{k} back to its default" for k in changed)
+                            self.say_in_general(
+                                f"{threads_rec.display(by)} changed "
+                                f"{threads_rec.display(new_id)}'s {words}")
+                    body = await asyncio.to_thread(self.profile, new_id)
+                    if new_id != agent:
+                        body["renamed_from"] = agent
                 else:
                     raise BrokerError(405, "use GET or PATCH for an agent's profile")
             elif tail[0] == "engineers":

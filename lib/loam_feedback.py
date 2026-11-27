@@ -75,12 +75,16 @@ def _agent_names() -> list[str]:
         import loam_agents  # noqa: PLC0415
         out = []
         for agent in loam_agents.every():
-            if agent in STARTER_AGENTS:
-                continue
-            out.append(agent)
-            name = loam_agents.card(agent).get("name")
-            if isinstance(name, str):
-                out.append(name)
+            card = loam_agents.card(agent)
+            if agent not in STARTER_AGENTS:
+                out.append(agent)
+            for field in ("name", "display"):
+                val = card.get(field)
+                if isinstance(val, str) and val.strip().lower() not in STARTER_AGENTS:
+                    out.append(val)
+            for old in loam_agents.former_ids_of(card):
+                if old not in STARTER_AGENTS:
+                    out.append(old)
         return out
     except Exception:  # noqa: BLE001 -- a report is still worth scrubbing without the roster
         return []

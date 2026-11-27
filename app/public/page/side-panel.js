@@ -14,7 +14,7 @@ import { agentLook } from '../sessions.js'
 import { h, icon, blob } from '../ui.js'
 import { copyText } from '../clipboard.js'
 import { panelDOM } from '../panels.js'
-import { renderPanel, itemDescriptor } from '../panel-items.js'
+import { renderPanel, itemDescriptor, itemHref } from '../panel-items.js'
 import { anchorOf } from '../markdown.js'
 
 export function mountSidePanel(base, activityOptions) {
@@ -211,6 +211,26 @@ export function mountSidePanel(base, activityOptions) {
       f.landed = heading?.getAttribute('data-anchor') ?? null
     }
   }
-  return { host, threads: own.threads, setView: own.threads.setView, item, open, clear, guard, transfer, view, afterRender,
+  function onAgentRenamed(prevId, nextId) {
+    if (!prevId || !nextId || prevId === nextId) return
+    if (state.profileAgent === prevId) {
+      state.profileAgent = nextId
+      if (state.mainItem?.kind === 'profile' && state.mainItem.id === prevId) {
+        state.mainItem = { ...state.mainItem, id: nextId }
+        const cur = base.workspaceHistory.current('side')
+        if (cur?.data?.item?.kind === 'profile' && cur.data.item.id === prevId) {
+          cur.data.item = { ...cur.data.item, id: nextId }
+          cur.href = itemHref(cur.data.item)
+          base.workspaceHistory.save()
+        }
+      }
+      if (own.profiles.st.target?.kind === 'agent' && own.profiles.st.target.id === prevId) {
+        own.profiles.st.target = { ...own.profiles.st.target, id: nextId }
+      }
+      own.profileActivity.filter('agent', nextId)
+      own.schedules.load(nextId)
+    }
+  }
+  return { host, threads: own.threads, setView: own.threads.setView, item, open, clear, guard, transfer, view, afterRender, onAgentRenamed,
     pending: () => Boolean(own.threads.st.open?.creating || own.threads.st.open?.createFailed), empty: () => state.screen === 'threads' && !own.threads.st.open }
 }

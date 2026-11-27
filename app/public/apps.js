@@ -62,7 +62,7 @@ export function appLetter(app, catalog = []) {
 // Start the draft with the starter agent or the first awake agent. Send only when the person writes.
 export function buildAppThread(threads, agents = []) {
   const awake = agents.filter((agent) => !agent.archived)
-  const agent = awake.find((a) => a.id === 'iris') ?? awake[0] ?? null
+  const agent = awake.find((a) => a.starter) ?? awake.find((a) => a.id === 'iris') ?? awake[0] ?? null
   return threads.create(agent?.id ?? null, {
     promptTitle: agent ? `Build an app with ${agent.name}` : 'Build an app',
     promptBody: `Describe what you’d like in a sentence or two. ${agent ? agent.name : 'Your agent'} will ask what’s needed, then build it.`,

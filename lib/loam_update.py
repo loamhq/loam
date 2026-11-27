@@ -1300,6 +1300,27 @@ class Box:
     def provider_memory(self) -> str:
         return self._run(self.bin("provider-memory"), "pin")
 
+    def _migrate_renamed_agents(self) -> str:
+        """Bring any previously renamed agents (``slug(display) != id``) into
+        line once the new broker is up and idle. Fail-soft so a busy agent or
+        collision never rolls back an update."""
+        prov = Path(self.bin("provision"))
+        try:
+            if "--migrate-renamed-agents" not in prov.read_text(encoding="utf-8"):
+                return ""
+        except OSError:
+            return ""
+        done = subprocess.run(
+            [sys.executable, str(prov), "--migrate-renamed-agents"],
+            capture_output=True, text=True, check=False, timeout=300, env=self.env)
+        lines = [ln.strip() for ln in (done.stdout + "\n" + done.stderr).splitlines()
+                 if ln.strip()]
+        if done.returncode != 0:
+            note = "; ".join(lines[-3:]) or f"exit {done.returncode}"
+            return f"renamed-agent migration skipped ({note})"
+        migrated = [ln for ln in lines if ln.startswith("migrated ")]
+        return "; ".join(migrated) if migrated else ""
+
     def broker(self) -> str:
         seam = os.environ.get("LOAM_UPDATE_RESTART")
         if seam:
@@ -1315,7 +1336,9 @@ class Box:
                 raise BrokerDeferred(proc.stderr.strip())
             if proc.returncode:
                 raise RuntimeError(proc.stderr.strip() or f"exit {proc.returncode}")
-            return proc.stdout.strip()
+            note = self._migrate_renamed_agents()
+            out = proc.stdout.strip()
+            return f"{out}; {note}" if (out and note) else (note or out)
         before = _main_pid(BROKER_UNIT)
         proc = subprocess.Popen([sys.executable, self.bin("restart-broker"), "--when-idle"],
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -1334,7 +1357,9 @@ class Box:
         while time.monotonic() < deadline:
             pid = _main_pid(BROKER_UNIT)
             if pid and pid != before and _broker_up():
-                return f"the broker answers again (pid {pid})"
+                note = self._migrate_renamed_agents()
+                base = f"the broker answers again (pid {pid})"
+                return f"{base}; {note}" if note else base
             time.sleep(2)
         raise RuntimeError(f"the broker did not answer within {BROKER_UP_S} s "
                            f"of its restart")

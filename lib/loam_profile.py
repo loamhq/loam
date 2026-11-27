@@ -1,6 +1,7 @@
 """Read and update agent, engineer and reviewer profiles. Agent display preferences
-belong in agent.json. A rename keeps the workspace ID used by units, sessions
-and existing mentions. Engineer and reviewer choices belong in locked runtime
+belong in agent.json. Renaming an agent moves its id, workspace folder, units
+and runtime state to match the new name while preserving past ids as aliases for
+historical thread records. Engineer and reviewer choices belong in locked runtime
 settings so a page action cannot dirty the checkout. The reviewer timer applies
 its schedule through a drop-in. See broker/README.md for the route contract."""
 
@@ -28,10 +29,11 @@ SETTABLE = ("display", *DEFAULT_KEYS)
 # Kept over a provision besides the settable ones: Codex's optional
 # `verbosity` override (rendered into `.codex/config.toml` as
 # `model_verbosity`, ignored by other providers), an uploaded face, its
-# permanent theme face slot, the archive mark (lib/loam_agents.py), and
-# the retired emoji an older file still holds (2026-11-16), so its bytes do
-# not change.
-KEPT = (*SETTABLE, "verbosity", "face", "face_slot", "archived", "self_name", "emoji")
+# permanent theme face slot, the archive mark (lib/loam_agents.py), past ids
+# from renames (`former_ids`), and the retired emoji an older file still holds
+# (2026-11-16), so its bytes do not change.
+KEPT = (*SETTABLE, "verbosity", "face", "face_slot", "archived", "self_name",
+        "emoji", "former_ids")
 DISPLAY_MAX = 40
 # Words a display name may not be: the owner's, and `@all` / `@everyone`.
 RESERVED_NAMES = tuple(dict.fromkeys((lc.OWNER_ID, *lc.LEGACY_OWNER_IDS, "all", "everyone", "system")))
@@ -237,13 +239,16 @@ def reviewer_choice(model: str, pinned: bool = False,
 
 def render_agent(config: dict) -> str:
     """agent.json as text, in its one order: the provisioned keys, then the
-    defaults that are set, then anything else the file carries. bin/provision
-    and bin/check-drift render through this too, so a page's write and a
-    provision agree byte for byte."""
+    defaults that are set, then the kept profile keys in KEPT order, then
+    anything else the file carries. bin/provision and bin/check-drift render
+    through this too, so a page's write, rename and provision agree byte for byte."""
     ordered = {k: config[k] for k in BASE_KEYS if k in config}
     optional_defaults = (*DEFAULT_KEYS, "verbosity")
     for k in optional_defaults:
         if config.get(k) is not None:
+            ordered[k] = config[k]
+    for k in KEPT:
+        if k not in ordered and k not in optional_defaults and config.get(k) is not None:
             ordered[k] = config[k]
     for k, v in config.items():
         if k not in ordered and k not in optional_defaults:
@@ -310,39 +315,58 @@ def read_agent(agent: str) -> dict:
 
 
 def _clean_display(agent: str, value) -> str:
-    if value is None:
-        return agent.capitalize()
-    if not isinstance(value, str):
-        raise ProfileError("`display` is a name, or null for the agent's own")
-    name = " ".join(value.split())
-    if not name or len(name) > DISPLAY_MAX:
-        raise ProfileError(f"`display` is 1 to {DISPLAY_MAX} characters")
-    if any(unicodedata.category(c).startswith("C") for c in name):
-        raise ProfileError("`display` has a control character in it")
-    if name.lower() in RESERVED_NAMES:
-        raise ProfileError(f"{name!r} is a word the threads keep for themselves")
-    for other in roster():
-        if other == agent:
+    import loam_rename  # noqa: PLC0415
+    try:
+        _, clean, _ = loam_rename.validate_rename(agent, value, ai_labs=_ai_labs())
+        return clean
+    except loam_rename.RenameError as exc:
+        raise ProfileError(exc.message, exc.status) from None
+
+
+def _apply_defaults(config: dict, patch: dict, check) -> dict:
+    """Validate and apply ``provider``, ``model`` and ``effort`` onto a copy of ``config``."""
+    new = dict(config)
+    before = providers.configured(config)
+    if "provider" in patch:
+        p = patch["provider"]
+        if p is not None and p not in PROVIDERS:
+            raise ProfileError(f"`provider` is one of {', '.join(PROVIDERS)}, "
+                               f"or null to use a connected provider")
+        if p is None:
+            new.pop("provider", None)
+        else:
+            new["provider"] = p
+        if p is None or p != (before or "claude-code"):
+            for k in ("model", "effort"):
+                if k not in patch:
+                    new.pop(k, None)
+    for field in ("model", "effort"):
+        if field not in patch:
             continue
-        try:
-            shown = json.loads(agent_path(other).read_text(encoding="utf-8")).get("display")
-        except (OSError, ValueError, AttributeError):
-            shown = None
-        if name.lower() in (other.lower(), str(shown or "").lower()):
-            raise ProfileError(f"{name!r} is {other}'s name; an @ would not know "
-                               f"which of them it meant", 409)
-    return name
+        if patch[field] is None:
+            new.pop(field, None)
+        else:
+            provider = providers.configured(new) or providers.automatic()
+            if provider is None:
+                raise ProfileError(providers.SETUP, 409)
+            if not providers.configured(new) and provider != "claude-code":
+                for k in ("model", "effort"):
+                    new.pop(k, None)
+            new[field] = check(provider, field, patch[field])
+            new["provider"] = provider
+    return new
 
 
-def update_agent(agent: str, patch: dict, check) -> dict:
-    """Write the named fields of an agent's agent.json in one write.
+def update_agent(agent: str, patch: dict, check, *, by: str | None = None,
+                 busy=None, systemd=None) -> dict:
+    """Write the named fields of an agent's profile.
 
-    ``patch`` takes ``display``, ``provider``, ``model`` and
-    ``effort``; null restores the id's name, automatic provider selection, or the provider's own model and level. A provider that
-    changes takes the model and level back to its own unless the same patch
-    names them. ``check(provider, field, value)`` is the broker's: it
-    answers the value as that provider takes it or raises. Nothing is
-    written on a refusal. Answers the new agent.json."""
+    ``patch`` takes ``display``, ``provider``, ``model`` and ``effort``; null
+    restores the id's name, automatic provider selection, or the provider's own
+    model and level. When ``display`` changes the agent's slug id, the rename
+    moves the workspace folder, units, sessions and registries together
+    (lib/loam_rename.py). Nothing is written on a refusal. Answers the new
+    agent.json (with ``name`` set to the new id when renamed)."""
     if not isinstance(patch, dict):
         raise ProfileError("the body is an object")
     unknown = sorted(set(patch) - set(SETTABLE) - {"by"})
@@ -351,52 +375,52 @@ def update_agent(agent: str, patch: dict, check) -> dict:
                            f"it takes {', '.join(SETTABLE)}")
     if not set(patch) - {"by"}:
         raise ProfileError(f"name a field to change: {', '.join(SETTABLE)}")
+    import loam_rename  # noqa: PLC0415
     import loam_schedule  # noqa: PLC0415 -- its lock is the agent.json writers' lock
+
+    # Pre-validate everything before mutating anything on disk.
+    labs = _ai_labs()
+    config = read_agent(agent)
+    _apply_defaults(config, patch, check)
+    id_changed = False
+    if "display" in patch:
+        try:
+            _, _, id_changed = loam_rename.validate_rename(
+                agent, patch["display"], ai_labs=labs)
+        except loam_rename.RenameError as exc:
+            raise ProfileError(exc.message, exc.status) from None
+
+    target_agent = agent
+    if id_changed:
+        try:
+            renamed = loam_rename.rename_agent(
+                agent, patch["display"], by=by, busy=busy,
+                systemd=systemd or SYSTEMD, ai_labs=labs)
+        except loam_rename.RenameError as exc:
+            raise ProfileError(exc.message, exc.status) from None
+        target_agent = renamed["new_id"]
+        if not (set(patch) - {"display", "by"}):
+            return renamed["config"]
+
     with loam_schedule.locked():
-        config = read_agent(agent)
-        new = dict(config)
-        if "display" in patch:
-            new["display"] = _clean_display(agent, patch["display"])
-        before = providers.configured(config)
-        if "provider" in patch:
-            p = patch["provider"]
-            if p is not None and p not in PROVIDERS:
-                raise ProfileError(f"`provider` is one of {', '.join(PROVIDERS)}, "
-                                   f"or null to use a connected provider")
-            if p is None:
-                new.pop("provider", None)
-            else:
-                new["provider"] = p
-            if p is None or p != (before or "claude-code"):
-                for k in ("model", "effort"):
-                    if k not in patch:
-                        new.pop(k, None)
-        for field in ("model", "effort"):
-            if field not in patch:
-                continue
-            if patch[field] is None:
-                new.pop(field, None)
-            else:
-                provider = providers.configured(new) or providers.automatic()
-                if provider is None:
-                    raise ProfileError(providers.SETUP, 409)
-                if not providers.configured(new) and provider != "claude-code":
-                    for k in ("model", "effort"):
-                        new.pop(k, None)
-                new[field] = check(provider, field, patch[field])
-                new["provider"] = provider
-        target = agent_path(agent)
+        config = read_agent(target_agent)
+        new = _apply_defaults(config, patch, check)
+        if "display" in patch and not id_changed:
+            new["display"] = _clean_display(target_agent, patch["display"])
+        target = agent_path(target_agent)
         if new != config:
             text = render_agent(new)
             tmp = target.with_name(target.name + ".tmp")
             tmp.write_text(text, encoding="utf-8")
             os.replace(tmp, target)
+            import loam_agents  # noqa: PLC0415
+            loam_agents.clear_cache()
         # The conversational default follows the profile (2026-11-19): a
         # chat started with no model reads settings.json, so the profile's
         # model is written there too, or that chat runs on another model.
         sync_settings_model(target.parent, new)
-        if "display" in patch:
-            sync_display_instructions(agent, target.parent, new)
+        if "display" in patch and not id_changed:
+            sync_display_instructions(target_agent, target.parent, new)
     return new
 
 
@@ -410,13 +434,17 @@ def _face(agent: str, config: dict) -> dict | None:
 
 
 def identity(agent: str, config: dict) -> dict:
+    import loam_agents  # noqa: PLC0415
+    former = loam_agents.former_ids_of(config)
     return {"id": agent,
             "display": display_name(agent, config),
             "face": _face(agent, config),
             "archived": config.get("archived") or None,
             "default_display": agent.capitalize(),
-            "rename": "display name only: the id is the workspace, the units "
-                      "and every old @; @ matches the id and the display name"}
+            **({"former_ids": former} if former else {}),
+            "rename": "moves the agent's id, workspace folder, units and "
+                      "runtime state to match the new name; past ids remain "
+                      "as aliases for thread history"}
 
 
 def defaults(agent: str, config: dict, wake_model: str = "fable",

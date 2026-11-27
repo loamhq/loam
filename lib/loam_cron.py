@@ -52,6 +52,7 @@ UNIT_DIR = lc.USER_UNIT_DIR
 VAULT = lc.VAULT
 
 UNIT_PREFIX = "loam-cron-"
+WAKE_PREFIX = "loam-wake-"
 
 # Write the time zone into OnCalendar so systemd honors the schedule when the host
 # uses another zone.

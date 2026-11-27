@@ -29,6 +29,7 @@ import loam_config as lc
 ARCHIVE_KEY = "archived"
 FACE_KEY = "face"
 FACE_SLOT_KEY = "face_slot"
+FORMER_IDS_KEY = "former_ids"
 FACE_VARIANT_COUNT = 8
 # Folders under the workspaces root that are not agents, and words an id may
 # not be: the routes' own path words, the owner's, and the threads'.
@@ -145,6 +146,65 @@ def live(names: list[str], root: Path | None = None) -> list[str]:
 
 def archived(root: Path | None = None) -> list[str]:
     return [n for n in every(root) if is_archived(n, root)]
+
+
+def clear_cache() -> None:
+    """Drop cached agent.json reads (e.g. after renaming an agent)."""
+    _CARDS.clear()
+
+
+def former_ids_of(config: dict | None) -> list[str]:
+    """Past ids this agent was renamed from, normalised lower-case, unique, in order."""
+    if not isinstance(config, dict):
+        return []
+    raw = config.get(FORMER_IDS_KEY)
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for item in raw:
+        if isinstance(item, str):
+            val = item.strip().lower()
+            if val and val not in out:
+                out.append(val)
+    return out
+
+
+def alias_map(root: Path | None = None) -> dict[str, str]:
+    """Return ``{former_id: current_id}`` across every agent (archived included)."""
+    root = root or ai_labs()
+    out: dict[str, str] = {}
+    for agent in every(root):
+        for old in former_ids_of(card(agent, root)):
+            if old != agent:
+                out.setdefault(old, agent)
+    return out
+
+
+def resolve_id(name: str, root: Path | None = None) -> str:
+    """Resolve a current or former agent id to its current canonical id.
+    Returns ``name`` unchanged when already current or unknown."""
+    if not isinstance(name, str) or not name:
+        return name
+    low = name.strip().lower()
+    root = root or ai_labs()
+    if (root / low / "agent.json").is_file():
+        return low
+    return alias_map(root).get(low, name)
+
+
+def starter_agent(root: Path | None = None) -> str:
+    """The current id of the starter agent (follows a rename of Iris)."""
+    root = root or ai_labs()
+    try:
+        marker = json.loads((state() / "starter.json").read_text(encoding="utf-8"))
+        who = marker.get("agent") if isinstance(marker, dict) else None
+        if isinstance(who, str) and who.strip():
+            resolved = resolve_id(who.strip(), root)
+            if (root / resolved / "agent.json").is_file():
+                return resolved
+    except (OSError, ValueError):
+        pass
+    return resolve_id(STARTER, root)
 
 
 # ---------------------------------------------------------------------------
@@ -572,17 +632,21 @@ def slug(name: str) -> str:
     return text[:24].rstrip("-")
 
 
-def _names_taken(except_agent: str | None = None) -> dict[str, str]:
-    """{lower-cased id or display name: whose}, archived agents included:
-    a restore must never meet its own name taken."""
+def _names_taken(except_agent: str | None = None, root: Path | None = None) -> dict[str, str]:
+    """{lower-cased id, display name or former id: whose}, archived agents
+    included: a restore or rename must never collide with another agent's
+    past or present name."""
     out = {}
-    for a in every():
+    for a in every(root):
         if a == except_agent:
             continue
         out[a.lower()] = a
-        shown = card(a).get("display")
+        cfg = card(a, root)
+        shown = cfg.get("display")
         if isinstance(shown, str) and shown.strip():
             out[shown.strip().lower()] = a
+        for old in former_ids_of(cfg):
+            out.setdefault(old, a)
     return out
 
 
@@ -1171,6 +1235,7 @@ def face_of(agent: str, config: dict | None = None) -> dict | None:
 
 
 def face_bytes(agent: str) -> tuple[bytes, str]:
+    agent = resolve_id(agent)
     if agent not in every():
         raise AgentsError(f"no agent named {agent!r} on this box", 404)
     face = card(agent).get(FACE_KEY)

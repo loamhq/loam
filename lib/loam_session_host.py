@@ -484,6 +484,44 @@ class SessionHost:
         held = self.protected_sessions() if protected is None else protected
         return held.get(session.id)
 
+    async def stop_agent_idle(self, agent: str) -> dict:
+        """Stop every idle resident session for ``agent`` before a folder rename.
+        Refuses with 409 if any session of ``agent`` is starting or busy."""
+        for sid, (owner, _, _) in list(self._opening.items()):
+            if owner == agent:
+                raise BrokerError(409, f"{agent} is starting a session ({sid}); "
+                                       f"try again in a moment")
+        protected = self.protected_sessions()
+        mine = [s for s in self.live() if s.agent == agent]
+        for s in mine:
+            why = self.hold_reason(s, protected)
+            if why is not None:
+                raise BrokerError(409, f"{agent} is busy ({why}); wait for it to "
+                                       f"finish and try again")
+        # Cancel any background private summary for this agent's sessions.
+        for sum_sid, task in list(self._summaries.items()):
+            sess = self.sessions.get(sum_sid)
+            if sess is not None and sess.agent == agent:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+        stopped: list[str] = []
+        for s in mine:
+            # Re-check immediately before stopping in case a turn arrived.
+            why = self.hold_reason(s)
+            if why is not None:
+                raise BrokerError(409, f"{agent} became busy ({why}); wait for it to "
+                                       f"finish and try again")
+            await s.stop(reason="rename")
+            if s.stdout_task is not None:
+                await s.stdout_task
+            stopped.append(s.id)
+        # Drop any resident/exited session entries for `agent` so the next load
+        # reads the updated agent id and workspace path from disk.
+        for sid, s in list(self.sessions.items()):
+            if s.agent == agent and s.state != "running":
+                self.sessions.pop(sid, None)
+        return {"stopped": stopped}
+
     async def make_room(self, agent: str) -> None:
         """While admission is short of memory, reclaim the least recently active idle session
         outside the grace period. Its ID can resume. If all remaining sessions are busy,

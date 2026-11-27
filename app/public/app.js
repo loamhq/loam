@@ -396,13 +396,46 @@ const profileActivity = createActivity({ ...activityOptions, scoped: true })
 const engineerActivity = createActivity({ ...activityOptions, scoped: true })
 const quickActions = createQuickActions({ api, redraw: schedule })
 let agentsRequest = null, agentRosterRevision = 0
-const changedAgent = agent => {
+const changedAgent = (agent, info = {}) => {
   if (!agent) return
   agentRosterRevision++
   recordFaceSlots([agent])
+  const prevId = info?.previousId || agent.renamed_from || null
+  const renamed = Boolean(prevId && prevId !== agent.id)
+  const matchId = renamed ? prevId : agent.id
   const rows = state.agents.list
-  state.agents = createAgents(agent.archived ? rows.filter(row => row.id !== agent.id)
-    : state.agents.byId.has(agent.id) ? rows.map(row => row.id === agent.id ? { ...(row.faceSlot !== undefined ? { faceSlot: row.faceSlot } : {}), ...agent } : row) : [...rows, agent])
+  const nextRows = agent.archived
+    ? rows.filter(row => row.id !== agent.id && (!renamed || row.id !== prevId))
+    : rows.some(row => row.id === matchId || row.id === agent.id)
+      ? rows.filter(row => !renamed || row.id !== agent.id)
+          .map(row => row.id === matchId ? { ...(row.faceSlot !== undefined ? { faceSlot: row.faceSlot } : {}), ...agent } : row)
+      : [...rows, agent]
+  state.agents = createAgents(nextRows)
+  if (renamed) {
+    if (state.profileAgent === prevId) {
+      state.profileAgent = agent.id
+      if (state.mainItem?.kind === 'profile' && state.mainItem.id === prevId) {
+        state.mainItem = { ...state.mainItem, id: agent.id }
+        const cur = workspaceHistory.current('main')
+        if (cur?.data?.item?.kind === 'profile' && cur.data.item.id === prevId) {
+          cur.data.item = { ...cur.data.item, id: agent.id }
+          cur.href = itemHref(cur.data.item)
+          workspaceHistory.save()
+          globalThis.history?.replaceState?.(globalThis.history.state, '', cur.href)
+        }
+      }
+      profileActivity.filter('agent', agent.id)
+      schedules.load(agent.id)
+    }
+    if (state.sheet?.detail?.kind === 'agent' && state.sheet.detail.id === prevId) {
+      state.sheet = { ...state.sheet, detail: { ...state.sheet.detail, id: agent.id } }
+      engineerActivity.filter('agent', agent.id)
+      schedules.load(agent.id)
+    }
+    sidePanel.onAgentRenamed?.(prevId, agent.id)
+    threads.load({ quiet: true })
+    sidePanel.threads.load({ quiet: true })
+  }
   threads.refreshAgents()
   sidePanel.threads.refreshAgents()
   loadAgentAvailability(true)

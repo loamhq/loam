@@ -92,20 +92,24 @@ def roster() -> list[str]:
 def display(persona: str) -> str:
     if lc.is_owner(persona):
         return lc.OWNER_NAME
-    from loam_agents import card
+    from loam_agents import card, resolve_id
     from loam_profile import display_name
-    return display_name(persona, card(persona, AI_LABS))
+    canonical = resolve_id(persona, AI_LABS)
+    return display_name(canonical, card(canonical, AI_LABS))
 
 
 def mentions(text: str, people: list[str] | None = None) -> list[str]:
     """The personas an ``@Name`` names, in order, each once. A name is
-    matched to a persona's id or its display name, case-insensitively; an
-    ``@`` that names nobody is ordinary text."""
+    matched to a persona's id, display name or former id, case-insensitively;
+    an ``@`` that names nobody is ordinary text."""
+    import loam_agents  # noqa: PLC0415
     people = roster() if people is None else people
     names = {}
     for p in people:
         names[p.lower()] = p
         names[display(p).lower()] = p
+        for old in loam_agents.former_ids_of(loam_agents.card(p, AI_LABS)):
+            names.setdefault(old, p)
     out: list[str] = []
     for match in MENTION_RE.finditer(text or ""):
         who = names.get(match.group(1).lower())
@@ -925,13 +929,64 @@ def record_path(thread_id: str, *, save_index: bool = True) -> Path:
 
 # Parsed records, keyed by path and invalidated by (mtime, size): opening a
 # thread is a stat and, when it changed, one read of one file.
-_CACHE: dict[str, tuple[tuple[int, int], dict, list[dict]]] = {}
+_CACHE: dict[str, tuple[tuple[int, int, tuple], dict, list[dict]]] = {}
+
+
+def clear_cache() -> None:
+    """Drop cached thread reads (e.g. after renaming an agent)."""
+    _CACHE.clear()
+
+
+def _rekey_map(mapping: dict, aliases: dict[str, str]) -> dict:
+    if not isinstance(mapping, dict) or not aliases:
+        return mapping
+    out: dict = {}
+    # Write aliased entries first so any entry already under the canonical id wins.
+    for k, v in mapping.items():
+        if k in aliases:
+            out[aliases[k]] = v
+    for k, v in mapping.items():
+        if k not in aliases:
+            out[k] = v
+    return out
+
+
+def _resolve_record(meta: dict, msgs: list[dict], aliases: dict[str, str]) -> None:
+    """Resolve former agent ids in a parsed thread record in memory without
+    rewriting the historical vault file on disk."""
+    if not aliases:
+        return
+    if isinstance(meta.get("default"), str) and meta["default"] in aliases:
+        meta["default"] = aliases[meta["default"]]
+    if isinstance(meta.get("members"), list):
+        meta["members"] = list(dict.fromkeys(
+            aliases.get(m, m) if isinstance(m, str) else m for m in meta["members"]))
+    if isinstance(meta.get("engines"), dict):
+        meta["engines"] = _rekey_map(meta["engines"], aliases)
+    if isinstance(meta.get("models"), dict):
+        meta["models"] = _rekey_map(meta["models"], aliases)
+    for m in msgs:
+        author = m.get("author")
+        if isinstance(author, str) and author != "system" and not lc.is_owner(author):
+            if author in aliases:
+                m["author"] = aliases[author]
+        persona = m.get("persona")
+        if isinstance(persona, str) and persona in aliases:
+            m["persona"] = aliases[persona]
+        rs = m.get("reply_source")
+        if isinstance(rs, dict):
+            ra = rs.get("author")
+            if isinstance(ra, str) and ra != "system" and not lc.is_owner(ra) and ra in aliases:
+                m["reply_source"] = {**rs, "author": aliases[ra]}
 
 
 def read(thread_id: str) -> tuple[dict, list[dict], Path]:
+    import loam_agents  # noqa: PLC0415
     path = record_path(thread_id)
     st = path.stat()
-    key = (st.st_mtime_ns, st.st_size)
+    aliases = loam_agents.alias_map(AI_LABS)
+    alias_key = tuple(sorted(aliases.items()))
+    key = (st.st_mtime_ns, st.st_size, alias_key)
     hit = _CACHE.get(str(path))
     if hit and hit[0] == key:
         return _copy_meta(hit[1]), hit[2], path
@@ -949,6 +1004,7 @@ def read(thread_id: str) -> tuple[dict, list[dict], Path]:
     meta["branched_window"] = (meta.get("branched_window")
                                if isinstance(meta.get("branched_window"), list) else [])
     msgs = [_strip_system(m) for m in parse_messages(body)]
+    _resolve_record(meta, msgs, aliases)
     _CACHE[str(path)] = (key, meta, msgs)
     return _copy_meta(meta), msgs, path
 
@@ -1130,9 +1186,11 @@ def ensure_general() -> None:
         if missing:
             update(GENERAL_ID, add=missing)
     except ThreadError:
+        import loam_agents  # noqa: PLC0415
         people = roster()
         if people:
-            default = lc.LEAD_AGENT if lc.LEAD_AGENT in people else people[0]
+            lead = loam_agents.resolve_id(lc.LEAD_AGENT, AI_LABS)
+            default = lead if lead in people else people[0]
             create(default, GENERAL_TITLE, thread_id=GENERAL_ID,
                    members=people, pinned=True)
 

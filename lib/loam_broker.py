@@ -1194,14 +1194,17 @@ def agent_card(name: str) -> dict:
     import loam_agents  # noqa: PLC0415
     from loam_profile import display_name
     loam_agents.ensure_face_slots(AI_LABS)
+    name = loam_agents.resolve_id(name, AI_LABS)
     config = loam_agents.card(name, AI_LABS)
     slot = loam_agents.face_slot_of(name, config, AI_LABS)
+    starter = loam_agents.starter_agent(AI_LABS)
     return {
         "id": name,
         "name": display_name(name, config),
         # An uploaded face (2026-11-14): over any theme's.
         "face": loam_agents.face_of(name, config),
         **({"face_slot": slot} if slot is not None else {}),
+        **({"starter": True} if name == starter and (AI_LABS / starter / "agent.json").is_file() else {}),
     }
 
 

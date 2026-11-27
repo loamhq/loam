@@ -363,7 +363,7 @@ export function mount(host) {
   // ------------------------------------------------------------ build it
   function agents() {
     const awake = host.state.agents.list.filter(a => !a.archived)
-    const first = awake.find(a => a.id === 'iris')
+    const first = awake.find(a => a.starter) ?? awake.find(a => a.id === 'iris')
     return first ? [first, ...awake.filter(a => a !== first)] : awake
   }
   function startBuild(agent, q, k) {

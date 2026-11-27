@@ -26,10 +26,14 @@ not a job (see `loam-making-an-agent`). Its face is drawn by the theme until
 the owner uploads a picture.
 
 An agent's current name appears in the app, including its space in Files,
-and Loam tells it that name when its session loads. A rename keeps the same
-workspace address. The owner can ask an agent to carry the name into current
-documents (`loam-agent-name-and-face`). Saved messages, including the first
-chat's greeting, keep the words they were written with.
+and Loam tells it that name when its session loads. Renaming an agent moves
+its id, workspace folder, schedules, commons inbox, rendered runtime files,
+and registries to the new name while keeping git history and resumable
+conversations intact; past thread records in the vault are never rewritten
+and still resolve to the renamed agent through its `former_ids`. The owner
+can ask an agent to carry the name into current documents
+(`loam-agent-name-and-face`). Saved messages, including the first chat's
+greeting, keep the words they were written with.
 
 **Providers.** Connect an account in Settings › Connections. A provider
 is ready when its CLI is installed and its sign-in is usable. One
