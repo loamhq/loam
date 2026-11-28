@@ -3474,3 +3474,9 @@ listener for immediate notification in an open page.
   unscaled. Playwright's `frame.locator(...).hover()` adds unscaled inner offsets to the zoomed
   iframe rect and can miss small targets like SVG bars; use `page.mouse.move` with
   `frameRect.x + innerCenter * zoom` in browser tests.
+- **Off-screen opaque-origin iframes throttle `requestAnimationFrame`:** In Chromium/WebKit,
+  a `sandbox="allow-scripts"` iframe scrolled above the viewport pauses `rAF` until it enters
+  view. If visual height measurement waits solely on `rAF`, older off-screen messages in a
+  thread stay stuck at `min-height` and jump when scrolled up. `app/src/visual-frame.js`
+  therefore measures synchronously on `renderHtml` and pairs `rAF` with a 40 ms timer in
+  `scheduleMeasure()`.

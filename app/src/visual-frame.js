@@ -162,11 +162,13 @@ const BOOTSTRAP_JS = `(() => {
 
   let lastHeight = 0;
   let measureQueued = false;
+  let measureTimer = null;
   function send(payload) {
     window.parent.postMessage({ loamVisual: true, id: frameId, ...payload }, '*');
   }
   function measureNow() {
     measureQueued = false;
+    if (measureTimer) { clearTimeout(measureTimer); measureTimer = null; }
     const sh = Math.max(
       stage.getBoundingClientRect().height,
       document.body.getBoundingClientRect().height,
@@ -181,7 +183,11 @@ const BOOTSTRAP_JS = `(() => {
   function scheduleMeasure() {
     if (measureQueued) return;
     measureQueued = true;
+    // Opaque-origin iframes outside the viewport throttle requestAnimationFrame
+    // in Chromium/WebKit; pair rAF with a short timer so off-screen messages
+    // still settle to their exact height immediately.
     requestAnimationFrame(measureNow);
+    measureTimer = setTimeout(measureNow, 40);
   }
 
   let lastFontsCss = '';
@@ -223,8 +229,8 @@ const BOOTSTRAP_JS = `(() => {
     stage.replaceChildren(frag);
     enhanceStage();
     lastHeight = 0;
-    scheduleMeasure();
-    setTimeout(scheduleMeasure, 50);
+    measureNow();
+    setTimeout(scheduleMeasure, 60);
     document.fonts?.ready?.then(scheduleMeasure);
   }
 
