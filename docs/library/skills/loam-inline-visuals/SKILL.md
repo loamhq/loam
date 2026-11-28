@@ -37,7 +37,7 @@ Every visual sits on the reading column's ground and receives the active theme's
 ## Limits
 
 - **Sealed:** no `<script>` runs, and there is no network access (no remote images, external fonts, CDNs, or fetches). Keep everything self-contained inline HTML, CSS, and SVG.
-- **Phone width:** replies are read at 390 px on phones as well as 760 px on desktop. Prefer `viewBox` on `<svg>` (omit fixed pixel `width` so it scales cleanly) and responsive grids (`grid-template-columns: repeat(auto-fit, minmax(150px, 1fr))`). Bare `<table>` elements scroll horizontally if wide.
+- **Phone & desktop width:** replies are read at 390 px on phones as well as 760 px on desktop. Prefer `viewBox="0 0 W H"` on `<svg>` and omit `width`: Loam renders it at its natural `viewBox` width (`W` px) on desktop and shrinks it proportionally on narrow screens, so SVG labels stay about the size of surrounding reply prose instead of blowing up. Design compact charts around 420–640 px wide; if you deliberately want an SVG to stretch across the full column regardless of its `viewBox`, set `width="100%"` or CSS `width: 100%`. Use responsive grids (`grid-template-columns: repeat(auto-fit, minmax(150px, 1fr))`). Bare `<table>` elements match Markdown reply tables and scroll horizontally if wide.
 - **No forced height:** the visual grows to fit its content cleanly without inner scrollbars.
 
 ## Examples
@@ -68,27 +68,27 @@ Every visual sits on the reading column's ground and receives the active theme's
 ````markdown
 ```visual Monthly coffee spend
 <figure>
-  <svg viewBox="0 0 420 148" role="img" aria-label="Monthly coffee spend from July to October">
-    <line x1="88" y1="16" x2="88" y2="122" stroke="var(--paper-rule-strong)" />
+  <svg viewBox="0 0 440 152" role="img" aria-label="Monthly coffee spend from July to October">
+    <line x1="92" y1="14" x2="92" y2="128" stroke="var(--paper-rule-strong)" />
     <g>
-      <text x="80" y="34" text-anchor="end" fill="var(--paper-ink-2)">July</text>
-      <rect x="88" y="21" width="180" height="18" rx="4" fill="var(--persona-slate)"><title>July: $72</title></rect>
-      <text x="276" y="34" fill="var(--paper-ink-3)">$72</text>
+      <text x="84" y="34" text-anchor="end" fill="var(--paper-ink-2)">July</text>
+      <rect x="92" y="20" width="180" height="20" rx="4" fill="var(--persona-slate)"><title>July: $72</title></rect>
+      <text x="280" y="34" fill="var(--paper-ink-3)">$72</text>
     </g>
     <g>
-      <text x="80" y="62" text-anchor="end" fill="var(--paper-ink-2)">August</text>
-      <rect x="88" y="49" width="235" height="18" rx="4" fill="var(--persona-teal)"><title>August: $94 (two bags + café)</title></rect>
-      <text x="331" y="62" fill="var(--paper-ink-3)">$94</text>
+      <text x="84" y="64" text-anchor="end" fill="var(--paper-ink-2)">August</text>
+      <rect x="92" y="50" width="235" height="20" rx="4" fill="var(--persona-teal)"><title>August: $94 (two bags + café)</title></rect>
+      <text x="335" y="64" fill="var(--paper-ink-3)">$94</text>
     </g>
     <g>
-      <text x="80" y="90" text-anchor="end" fill="var(--paper-ink-2)">September</text>
-      <rect x="88" y="77" width="145" height="18" rx="4" fill="var(--persona-slate)"><title>September: $58</title></rect>
-      <text x="241" y="90" fill="var(--paper-ink-3)">$58</text>
+      <text x="84" y="94" text-anchor="end" fill="var(--paper-ink-2)">September</text>
+      <rect x="92" y="80" width="145" height="20" rx="4" fill="var(--persona-slate)"><title>September: $58</title></rect>
+      <text x="245" y="94" fill="var(--paper-ink-3)">$58</text>
     </g>
     <g>
-      <text x="80" y="118" text-anchor="end" fill="var(--paper-ink-2)">October</text>
-      <rect x="88" y="105" width="160" height="18" rx="4" fill="var(--signal-crema)"><title>October: $64 (target: $65)</title></rect>
-      <text x="256" y="118" fill="var(--paper-ink)">$64</text>
+      <text x="84" y="124" text-anchor="end" fill="var(--paper-ink-2)">October</text>
+      <rect x="92" y="110" width="160" height="20" rx="4" fill="var(--signal-crema)"><title>October: $64 (target: $65)</title></rect>
+      <text x="260" y="124" fill="var(--paper-ink)">$64</text>
     </g>
   </svg>
   <figcaption>Whole beans plus café stops; October back under the $65 target.</figcaption>

@@ -2,7 +2,8 @@
 //   1. seal_blocks_parent_dom_storage_and_all_network
 //   2. streaming_placeholder_and_non_drawing_fallbacks
 //   3. live_theme_mode_and_plugin_theme_recolouring
-//   4. layout_no_chrome_hover_tooltip_expand_and_save_to_files
+//   4. layout_no_chrome_hover_tooltip_and_save_to_files
+//   5. polish_svg_scale_table_parity_and_meaningful_expand
 //
 // Run:
 //   LOAM_PLAYWRIGHT=.../playwright-core/index.mjs LOAM_CHROME=/usr/bin/chromium-headless-shell \
@@ -61,6 +62,45 @@ const COMPARISON_AND_CHART_REPLY = [
   '',
   '```html',
   '<p class="keep-as-code">Hello</p>',
+  '```',
+].join('\n')
+
+const POLISH_REPLY = [
+  'Markdown table for direct comparison:',
+  '',
+  '| Grinder | Price | Burr | Best for |',
+  '| --- | ---: | --- | --- |',
+  '| **Fellow Ode Gen 2** | $345 | 64 mm flat | Clarity, quiet mornings |',
+  '| **Baratza Encore ESP** | $199 | 40 mm conical | Filter + entry espresso |',
+  '',
+  'Bare visual table:',
+  '',
+  '```visual Bare grinders',
+  '<table>',
+  '  <thead><tr><th>Grinder</th><th>Price</th><th>Burr</th><th>Best for</th></tr></thead>',
+  '  <tbody>',
+  '    <tr><td><strong>Fellow Ode Gen 2</strong></td><td>$345</td><td>64 mm flat</td><td>Clarity, quiet mornings</td></tr>',
+  '    <tr><td><strong>Baratza Encore ESP</strong></td><td>$199</td><td>40 mm conical</td><td>Filter + entry espresso</td></tr>',
+  '  </tbody>',
+  '</table>',
+  '```',
+  '',
+  'Wide table that overflows inline and earns Expand:',
+  '',
+  '```visual Quarterly roaster matrix',
+  '<table>',
+  '  <thead><tr><th>Roaster</th><th>Region &amp; Farm</th><th>Process</th><th>Variety</th><th>Roast</th><th>Bag</th><th>Price</th><th>Tasting notes</th><th>Recommended brew</th></tr></thead>',
+  '  <tbody>',
+  '    <tr><td><strong>Sey</strong></td><td>Huila, Finca El Paraiso</td><td>Washed</td><td>Pink Bourbon</td><td>Light</td><td>250 g</td><td>$24</td><td>White peach, bergamot, silky finish</td><td>V60 1:17 at 96 °C</td></tr>',
+  '    <tr><td><strong>Heart</strong></td><td>Nyeri, Karatina Factory</td><td>Washed</td><td>SL28 / SL34</td><td>Light-med</td><td>340 g</td><td>$23</td><td>Red currant, grapefruit, cane sugar</td><td>Kalita Wave 1:16 at 94 °C</td></tr>',
+  '  </tbody>',
+  '</table>',
+  '```',
+  '',
+  'Deliberate full-width SVG:',
+  '',
+  '```visual Full-width graphic',
+  '<svg viewBox="0 0 440 120" width="100%" role="img" aria-label="Full width graphic"><rect x="0" y="10" width="440" height="100" rx="8" fill="var(--persona-teal)"/><text x="20" y="64" fill="var(--paper-ink)">Wide</text></svg>',
   '```',
 ].join('\n')
 
@@ -127,6 +167,17 @@ function makeFixture({ evilOrigin, udpPort }) {
       archived: false,
       created: '2026-11-27T16:55:00Z',
     },
+    {
+      id: 't-polish',
+      title: 'Visual polish checks',
+      default: 'iris',
+      members: [{ persona: 'iris', engine: 'claude-code', model: null, running: false, busy: false }],
+      last: { author: 'iris', text: 'Visual: Bare grinders', at: '2026-11-27T17:02:00Z' },
+      unread: 0,
+      pinned: false,
+      archived: false,
+      created: '2026-11-27T17:01:00Z',
+    },
   ]
 
   const messagesByThread = {
@@ -140,6 +191,10 @@ function makeFixture({ evilOrigin, udpPort }) {
     ],
     't-stream': [
       { id: 'm1', author: 'you', kind: 'message', text: 'Show me a chart', at: '2026-11-27T16:56:00Z' },
+    ],
+    't-polish': [
+      { id: 'm1', author: 'you', kind: 'message', text: 'Check table parity, SVG scale, and Expand.', at: '2026-11-27T17:01:30Z' },
+      { id: 'm2', author: 'iris', kind: 'message', text: POLISH_REPLY, at: '2026-11-27T17:02:00Z' },
     ],
   }
 
@@ -593,14 +648,21 @@ try {
         await chartFrame.waitForSelector('#loam-tip:not([hidden])')
         assert.equal(await chartFrame.locator('#loam-tip').textContent(), 'August: $94 (two bags + café)')
 
-        // Hover reveals Expand & Save to Files, clicking Expand opens dialog, Escape closes it.
+        // Compact visuals that already fit inline at 1440px hide Expand while keeping Save to Files.
         const firstVisual = page.locator('.reply-visual').first()
         await firstVisual.hover()
-        await firstVisual.locator('.reply-visual-action', { hasText: 'Expand' }).click()
-        await page.waitForSelector('dialog.visual-view[open]')
-        await waitVisualReady(page, '.visual-view .reply-visual-frame', 0)
-        await page.keyboard.press('Escape')
-        assert.equal(await page.locator('dialog.visual-view').count(), 0)
+        assert.equal(await firstVisual.locator('.reply-visual-action', { hasText: 'Expand' }).isVisible(), false, 'compact visual that fits inline omits Expand on desktop')
+
+        // Chart SVG stays at natural viewBox width (460px) instead of ballooning to 760px.
+        const chartScale = await chartFrame.evaluate(() => {
+          const svg = document.querySelector('svg')
+          const vb = svg.viewBox.baseVal
+          const r = svg.getBoundingClientRect()
+          const label = document.querySelector('svg g text')
+          return { vbW: vb.width, svgW: r.width, fontSize: getComputedStyle(label).fontSize }
+        })
+        assert.ok(Math.abs(chartScale.svgW - chartScale.vbW) <= 4, `SVG keeps natural viewBox width on desktop: ${JSON.stringify(chartScale)}`)
+        assert.equal(chartScale.fontSize, '14px')
 
         // Clicking Save to Files creates standalone HTML file in vault via POST /api/files/file.
         const beforeSaved = fixture.savedFiles.length
@@ -611,11 +673,118 @@ try {
         assert.match(fixture.savedFiles.at(-1).path, /Pour-over grinders compared\.html$/)
         assert.match(fixture.savedFiles.at(-1).text, /Fellow Ode Gen 2/)
         assert.ok(!fixture.savedFiles.at(-1).text.includes('<script'))
+      } else {
+        // On 390px phone, the 460px SVG shrinks cleanly to fit the column.
+        const chartFrame = visualFrames[1]
+        const phoneSvg = await chartFrame.evaluate(() => {
+          const svg = document.querySelector('svg')
+          return { svgW: svg.getBoundingClientRect().width, docW: document.documentElement.clientWidth }
+        })
+        assert.ok(phoneSvg.svgW <= phoneSvg.docW + 1, `SVG shrinks to fit 390px phone: ${JSON.stringify(phoneSvg)}`)
       }
 
       await context.close()
     }
-    console.log('PASS  layout_no_chrome_hover_tooltip_expand_and_save_to_files')
+    console.log('PASS  layout_no_chrome_hover_tooltip_and_save_to_files')
+  }
+
+  // ------------------------------------------------------------------ Test 5
+  {
+    for (const width of [1440, 390]) {
+      const context = await browser.newContext({
+        viewport: { width, height: width === 390 ? 844 : 900 },
+        colorScheme: 'dark',
+        isMobile: width === 390,
+        hasTouch: width === 390,
+      })
+      const page = await context.newPage()
+      page.setDefaultTimeout(12000)
+      await page.goto(`${appOrigin}/threads/t-polish`)
+      await waitVisualReady(page, '.reply-visual-frame', 0)
+      await waitVisualReady(page, '.reply-visual-frame', 1)
+      await waitVisualReady(page, '.reply-visual-frame', 2)
+      await page.waitForTimeout(200)
+
+      const frames = page.frames().filter((f) => f.url().includes('/visual-frame.html'))
+      assert.equal(frames.length, 3)
+
+      // 1. Bare visual table matches Markdown reply table in font size, header size, and bold weight.
+      const mdTableStyle = await page.evaluate(() => ({
+        tdFont: getComputedStyle(document.querySelector('.md table tbody td')).fontSize,
+        thFont: getComputedStyle(document.querySelector('.md table thead th')).fontSize,
+        strongWeight: getComputedStyle(document.querySelector('.md table strong')).fontWeight,
+      }))
+      const bareTableStyle = await frames[0].evaluate(() => {
+        const priceTd = document.querySelectorAll('tbody tr')[0].querySelectorAll('td')[1]
+        const range = document.createRange()
+        range.selectNodeContents(priceTd)
+        return {
+          tdFont: getComputedStyle(document.querySelector('tbody td')).fontSize,
+          thFont: getComputedStyle(document.querySelector('thead th')).fontSize,
+          strongWeight: getComputedStyle(document.querySelector('tbody strong')).fontWeight,
+          priceLines: range.getClientRects().length,
+        }
+      })
+      assert.equal(bareTableStyle.tdFont, mdTableStyle.tdFont, `visual table body matches Markdown table at ${width}px`)
+      assert.equal(bareTableStyle.thFont, mdTableStyle.thFont, `visual table header matches Markdown table at ${width}px`)
+      assert.equal(bareTableStyle.strongWeight, mdTableStyle.strongWeight, `visual table strong matches Markdown table at ${width}px`)
+      assert.equal(bareTableStyle.priceLines, 1, `short value "$345" never wraps mid-number at ${width}px`)
+
+      // 2. Deliberate width="100%" SVG still spans the full column on desktop.
+      if (width === 1440) {
+        const fullSvgW = await frames[2].evaluate(() => document.querySelector('svg').getBoundingClientRect().width)
+        assert.ok(fullSvgW >= 740, `explicit width="100%" SVG still fills the 760px desktop column (got ${fullSvgW})`)
+      }
+
+      // 3. Wide table overflows inline and opens an Expanded view that fits its content with no dead band.
+      const wideInline = await frames[1].evaluate(() => {
+        const w = document.querySelector('.loam-table-wrap')
+        return { clientW: w.clientWidth, scrollW: w.scrollWidth }
+      })
+      assert.ok(wideInline.scrollW > wideInline.clientW + 2, `wide table overflows horizontally inline at ${width}px: ${JSON.stringify(wideInline)}`)
+
+      const wideVisual = page.locator('.reply-visual').nth(1)
+      if (width === 1440) await wideVisual.hover()
+      const expandBtn = wideVisual.locator('.reply-visual-action', { hasText: 'Expand' })
+      assert.equal(await expandBtn.isVisible(), true, `wide overflowing table shows Expand at ${width}px`)
+      await expandBtn.click()
+      await page.waitForSelector('dialog.visual-view[open]')
+      await waitVisualReady(page, '.visual-view .reply-visual-frame', 0)
+      await page.waitForTimeout(200)
+
+      const dialogCheck = await page.evaluate(() => {
+        const sheet = document.querySelector('.visual-view-sheet').getBoundingClientRect()
+        const frame = document.querySelector('.visual-view .reply-visual-frame').getBoundingClientRect()
+        return { sheetW: sheet.width, sheetH: sheet.height, frameH: frame.height }
+      })
+      const dlgFrame = page.frames().filter((f) => f.url().includes('/visual-frame.html')).at(-1)
+      const dlgInner = await dlgFrame.evaluate(() => {
+        const w = document.querySelector('.loam-table-wrap')
+        return {
+          clientW: w.clientWidth,
+          scrollW: w.scrollWidth,
+          stageH: document.getElementById('stage').getBoundingClientRect().height,
+          docClientH: document.documentElement.clientHeight,
+        }
+      })
+      // Zero dead vertical band in the expanded frame at both widths.
+      assert.ok(
+        Math.abs(dlgInner.docClientH - dlgInner.stageH) <= 6,
+        `expanded frame fits its content with no dead band at ${width}px: ${JSON.stringify(dlgInner)}`,
+      )
+      if (width === 1440) {
+        assert.ok(dlgInner.clientW > wideInline.clientW + 100, `expanded view is meaningfully wider on desktop: ${JSON.stringify({ inline: wideInline.clientW, expanded: dlgInner.clientW })}`)
+        assert.ok(dlgInner.scrollW <= dlgInner.clientW + 2, `wide table no longer scrolls sideways in expanded desktop view: ${JSON.stringify(dlgInner)}`)
+      } else {
+        assert.equal(Math.round(dialogCheck.sheetW), 390, 'phone expanded view fills full width')
+        assert.equal(Math.round(dialogCheck.sheetH), 844, 'phone expanded view fills full height')
+      }
+
+      await page.keyboard.press('Escape')
+      assert.equal(await page.locator('dialog.visual-view').count(), 0)
+      await context.close()
+    }
+    console.log('PASS  polish_svg_scale_table_parity_and_meaningful_expand')
   }
 } finally {
   await browser.close()

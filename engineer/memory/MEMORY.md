@@ -3486,3 +3486,19 @@ listener for immediate notification in an open page.
   example switching Loam to dark mode on a light-OS browser). `.reply-visual-frame` sets
   `color-scheme: light` and `:root[data-theme="dark"] .reply-visual-frame` sets
   `color-scheme: dark` (matching `.fs-iframe` / `.apps-embed`).
+- **Inline visual sizing, bare tables, and meaningful Expand:**
+  - Bare `<svg viewBox="0 0 W H">` without `width` gets `--loam-vb-w: Wpx` on the element
+    (both in `visual-frame.js` `enhanceStage()` and standalone export `buildStandaloneVisualHtml`),
+    paired with `:where(svg[viewBox]:not([width])) { width: min(100%, var(--loam-vb-w, 100%)); height: auto; }`.
+    Desktop charts stay at their natural `viewBox` width while narrow phones shrink cleanly,
+    and deliberate `width="100%"` or agent CSS still overrides zero-specificity `:where()`.
+  - SVG presentation attributes (`fill`, `font-size`, `stroke`) sit before author rules even
+    at `(0,0,0)` specificity, so base rules guard them with `:not([fill])`, `:not([font-size])`
+    (default `14px`), and `:not([stroke])`.
+  - Bare visual `<table>` defaults match `.md table` (`15px` body, `12.5px` header, `700` bold,
+    `tbody tr + tr td` rules, `overflow-wrap: break-word`, and `data-loam-col`/`data-loam-nowrap`
+    short-value protection so values like `$345` never break mid-token on 390 px phones).
+  - `Expand` is hidden when a visual already fits inline without horizontal overflow, SVG
+    shrinking, or tall height; when shown, the dialog sizes from the visual's overflowing
+    `naturalWidth` (never starting from `viewportW`, which would ratchet wide) with no
+    `min-height: 240px` dead band on `.reply-visual-frame.large`.

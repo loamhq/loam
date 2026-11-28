@@ -209,7 +209,7 @@ body { overflow-x: clip; overflow-y: hidden; }
 :where(h4, h5, h6) { font-size: var(--type-small, 13px); color: var(--paper-ink-2); }
 :where(p) { margin: 0 0 var(--space-sm, 8px); color: var(--paper-ink, CanvasText); overflow-wrap: anywhere; }
 :where(small) { font-size: var(--type-caption, 12px); color: var(--paper-ink-3); }
-:where(strong, b) { font-weight: 650; }
+:where(strong, b) { font-weight: 700; }
 :where(code) {
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 0.88em;
@@ -257,39 +257,59 @@ body { overflow-x: clip; overflow-y: hidden; }
   width: 100%;
   max-width: 100%;
   overflow-x: auto;
+  overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
 }
 :where(table) {
   width: 100%;
   border-collapse: collapse;
-  font-size: var(--type-small, 13px);
+  font-size: var(--type-body, 15px);
   line-height: 1.45;
   font-variant-numeric: tabular-nums;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
-:where(thead th) {
+:where(th, td) {
+  padding: 10px 8px;
   text-align: left;
-  font-size: var(--type-caption, 12px);
+  vertical-align: top;
+}
+:where(th:first-child, td:first-child) { padding-left: 0; }
+:where(th:last-child, td:last-child) { padding-right: 0; }
+:where(thead th) {
+  padding-top: 4px;
+  padding-bottom: 8px;
+  background: transparent;
+  font-size: 12.5px;
+  line-height: 1.35;
   font-weight: 600;
   color: var(--paper-ink-3);
-  border-bottom: 1px solid var(--paper-rule-strong);
-  padding: 8px 12px 8px 0;
   vertical-align: bottom;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--paper-rule-strong);
 }
+:where(thead th[data-loam-wrap]) { white-space: normal; }
+:where(th code) { font-size: 0.92em; }
 :where(tbody td) {
-  padding: 9px 12px 9px 0;
-  border-bottom: 1px solid var(--paper-rule);
-  vertical-align: top;
   color: var(--paper-ink, CanvasText);
-  overflow-wrap: anywhere;
 }
-:where(tbody tr:last-child td) { border-bottom: 0; }
-:where(th:last-child, td:last-child) { padding-right: 0; }
+:where(td[data-loam-col="compact"], td[data-loam-nowrap]) { white-space: nowrap; }
+:where(td[data-loam-col="medium"]) { min-width: 5rem; }
+:where(td[data-loam-col="prose"]) { min-width: 6.5rem; }
+:where(td a, td code, th a, th code) { overflow-wrap: anywhere; }
+:where(tbody tr + tr td) { border-top: 1px solid var(--paper-rule); }
 @media (hover: hover) {
   :where(tbody tr:hover td) { background: var(--paper-hover-alpha); }
 }
+@media (min-width: 720px) {
+  :where(th, td) { padding: 10px 12px; }
+  :where(th:first-child, td:first-child) { padding-left: 0; }
+  :where(th:last-child, td:last-child) { padding-right: 0; }
+  :where(td[data-loam-col="medium"]) { min-width: 7.5rem; }
+  :where(td[data-loam-col="prose"]) { min-width: 10.5rem; }
+}
 @media (max-width: 460px) {
-  :where(thead th) { padding: 7px 8px 7px 0; }
-  :where(tbody td) { padding: 7px 8px 7px 0; }
   :where(dl) { grid-template-columns: minmax(76px, auto) 1fr; gap: 5px var(--space-md, 12px); }
 }
 :where(progress) {
@@ -336,13 +356,33 @@ body { overflow-x: clip; overflow-y: hidden; }
   color: var(--paper-ink, CanvasText);
   font-family: var(--font-body, system-ui, sans-serif);
 }
-:where(svg[viewBox]:not([width])) { width: 100%; }
-:where(svg text, svg tspan) {
-  fill: var(--paper-ink, CanvasText);
-  font-family: var(--font-body, system-ui, sans-serif);
-  font-size: 12px;
+:where(svg[viewBox]:not([width])) {
+  width: min(100%, var(--loam-vb-w, 100%));
+  height: auto;
 }
-:where(svg line, svg polyline) {
+.loam-svg-wrap {
+  max-width: 100%;
+}
+.loam-svg-wrap.loam-svg-pan {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+:where(.loam-svg-pan svg[viewBox]:not([width])) {
+  width: var(--loam-vb-w, 100%);
+  max-width: none;
+}
+:where(svg text:not([fill])) {
+  fill: var(--paper-ink, CanvasText);
+}
+:where(svg text) {
+  font-family: var(--font-body, system-ui, sans-serif);
+}
+:where(svg text:not([font-size])) {
+  font-size: 14px;
+}
+:where(svg line:not([stroke]), svg polyline:not([stroke])) {
   stroke: var(--paper-rule-strong);
 }
 :where(svg [data-tip], svg [data-loam-tip]) {
@@ -428,11 +468,34 @@ function escapeHtml(text) {
     .replace(/"/g, '&quot;')
 }
 
+export function parseSvgViewBoxWidth(viewBox) {
+  const parts = String(viewBox ?? '').trim().split(/[\s,]+/).map(Number)
+  if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) return 0
+  return parts[2] > 0 && parts[3] > 0 ? parts[2] : 0
+}
+
+function annotateSvgViewBoxWidth(html) {
+  return String(html ?? '').replace(/<svg\b([^>]*)>/gi, (whole, attrs) => {
+    if (/\bwidth\s*=/i.test(attrs)) return whole
+    const vbMatch = /\bviewBox\s*=\s*(?:"([^"]+)"|'([^']+)')/i.exec(attrs)
+    const vbW = parseSvgViewBoxWidth(vbMatch?.[1] ?? vbMatch?.[2] ?? '')
+    if (!vbW) return whole
+    const prop = `--loam-vb-w:${vbW}px`
+    if (/\bstyle\s*=\s*"/i.test(attrs)) {
+      return `<svg${attrs.replace(/\bstyle\s*=\s*"([^"]*)"/i, (_, s) => `style="${s}${s && !s.trim().endsWith(';') ? ';' : ''}${prop}"`)}>`
+    }
+    if (/\bstyle\s*=\s*'/i.test(attrs)) {
+      return `<svg${attrs.replace(/\bstyle\s*=\s*'([^']*)'/i, (_, s) => `style='${s}${s && !s.trim().endsWith(';') ? ';' : ''}${prop}'`)}>`
+    }
+    return `<svg${attrs} style="${prop}">`
+  })
+}
+
 export function buildStandaloneVisualHtml({ html = '', title = '', tokens = {}, mode = 'light', fontsCss = '' } = {}) {
   const safeTitle = escapeHtml(title || 'Visual')
   const safeMode = mode === 'dark' ? 'dark' : 'light'
   const tokenCss = serializeTokenCss(tokens)
-  const cleanHtml = sanitizeVisualHtmlString(html)
+  const cleanHtml = annotateSvgViewBoxWidth(sanitizeVisualHtmlString(html))
   const safeFonts = String(fontsCss ?? '').replace(/<\/style/gi, '<\\/style')
   const standaloneCss = `
 html, body {

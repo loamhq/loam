@@ -15,15 +15,17 @@ globalThis.Node ??= Object.getPrototypeOf(document.createElement('div').construc
 const { markdown, strip } = await import('../public/markdown.js')
 const { replyVisuals, saveVisualToFiles } = await import('../public/reply-visuals.js')
 const { quoteLine } = await import('../public/thread-replies.js')
-const {
+import {
   isVisualLang,
   visualTitle,
   visualFallbackLine,
   stripVisualBlocks,
   holdPartialVisualFence,
   buildStandaloneVisualHtml,
+  parseSvgViewBoxWidth,
+  VISUAL_BASE_CSS,
   VISUAL_TOKENS,
-} = await import('../public/visual-doc.js')
+} from '../public/visual-doc.js'
 const { renderMarkdown: renderSharedMarkdown } = await import('../../plugins/sharing/page/markdown.js')
 const { speakable, speakableBlocks } = await import('../../plugins/_listed/read-aloud/page/speakable.js')
 
@@ -257,4 +259,29 @@ test('Save to Files produces sanitized standalone themed HTML and handles name c
   assert.ok(calls[0].body.path.endsWith('Grinder comparison.html'))
   assert.ok(saved.path.endsWith('Grinder comparison 2.html'))
   assert.match(calls[1].body.text, /Saved card/)
+})
+
+test('bare table base CSS matches Markdown reply tables and SVG viewBox defaults prevent desktop ballooning', () => {
+  // Bare table defaults match `.md table` in style.css (15px body, 12.5px header, 700 bold, hairline row rules).
+  assert.match(VISUAL_BASE_CSS, /:where\(table\)\s*\{[^}]*font-size:\s*var\(--type-body,\s*15px\)/)
+  assert.match(VISUAL_BASE_CSS, /:where\(thead th\)\s*\{[^}]*font-size:\s*12\.5px/)
+  assert.match(VISUAL_BASE_CSS, /:where\(strong,\s*b\)\s*\{\s*font-weight:\s*700;\s*\}/)
+  assert.match(VISUAL_BASE_CSS, /:where\(tbody tr \+ tr td\)\s*\{\s*border-top:\s*1px solid var\(--paper-rule\);\s*\}/)
+  // SVG defaults cap bare viewBox SVGs to natural viewBox width and keep text readable while respecting SVG attributes.
+  assert.match(VISUAL_BASE_CSS, /:where\(svg\[viewBox\]:not\(\[width\]\)\)\s*\{[^}]*width:\s*min\(100%,\s*var\(--loam-vb-w,\s*100%\)\)/)
+  assert.match(VISUAL_BASE_CSS, /:where\(svg text:not\(\[font-size\]\)\)\s*\{\s*font-size:\s*14px;\s*\}/)
+  assert.match(VISUAL_BASE_CSS, /:where\(svg text:not\(\[fill\]\)\)\s*\{/)
+
+  assert.equal(parseSvgViewBoxWidth('0 0 440 152'), 440)
+  assert.equal(parseSvgViewBoxWidth('0,0,520,180'), 520)
+  assert.equal(parseSvgViewBoxWidth('0 0 0 100'), 0)
+  assert.equal(parseSvgViewBoxWidth('bad'), 0)
+
+  // Standalone HTML annotates bare viewBox SVGs with --loam-vb-w while leaving explicit width="100%" untouched.
+  const standalone = buildStandaloneVisualHtml({
+    html: '<svg viewBox="0 0 440 152"><rect width="10" height="10"/></svg><svg viewBox="0 0 440 152" width="100%"><rect width="10" height="10"/></svg>',
+    title: 'Charts',
+  })
+  assert.match(standalone, /<svg viewBox="0 0 440 152" style="--loam-vb-w:440px">/)
+  assert.match(standalone, /<svg viewBox="0 0 440 152" width="100%">/)
 })
