@@ -347,8 +347,13 @@ have never met.
   `.composer-actions` free of `@media`/`@container` rules per `test/style.test.js`).
   `.tt-list` (`container: list / inline-size`) compacts `:root .tt-list :is(.home-head,.list-head)`
   (outranking `running.css`'s `.tt-list .list-head`) so title and 4–5 actions
-  stay on one row, `.strip` uses `repeat(auto-fit, minmax(72px, 1fr))` (`58px`
-  with `48px` blobs at `<= 265px`) to fill/centre rows at `60%–200%`, and `.desk`
+  stay on one row, `.tt-list .tt-row` stacks `.srow-meta` under `.srow-who` with
+  a `36px` avatar, `overflow-wrap: break-word` two-line title clamp, and bottom-row
+  hover `.tt-row-pin` inside `@container list (max-width: 280px)` (`public/threads.css`,
+  with `public/thread-selection.js` placing the desktop selection underline below
+  stacked `.srow-meta` while leaving `60%`/`100%` `80px` rows untouched), `.strip`
+  uses `repeat(auto-fit, minmax(72px, 1fr))` (`58px` with `48px` blobs at
+  `<= 265px`) to fill/centre rows at `60%–200%`, and `.desk`
   (`container: desk / inline-size`, `<= 960px`) trims `.rail` (`64px`) and
   `.listcol:not(.away)` (`260px`) so high-zoom desktop keeps two panes with a
   generous thread pane. Extended sizes (`60`–`70` and `155`–`200`) cache locally under

@@ -18,7 +18,33 @@
       "headerRows": {
         "count": 5,
         "spread": 0,
-        "titleTruncated": false
+        "titleTruncated": false,
+        "rowChecks": [
+          {
+            "title": "General",
+            "width": 299,
+            "share": 0.79,
+            "brokenWords": []
+          },
+          {
+            "title": "Visuals inside agent replies",
+            "width": 298,
+            "share": 0.79,
+            "brokenWords": []
+          },
+          {
+            "title": "Hosted Loam: sign up, pick a plan, get a box",
+            "width": 293,
+            "share": 0.77,
+            "brokenWords": []
+          },
+          {
+            "title": "Somewhere new for the weekend",
+            "width": 310,
+            "share": 0.82,
+            "brokenWords": []
+          }
+        ]
       },
       "agentBalance": {
         "firstRowCount": 7,
@@ -136,7 +162,33 @@
       "headerRows": {
         "count": 5,
         "spread": 0,
-        "titleTruncated": false
+        "titleTruncated": false,
+        "rowChecks": [
+          {
+            "title": "General",
+            "width": 238,
+            "share": 0.64,
+            "brokenWords": []
+          },
+          {
+            "title": "Visuals inside agent replies",
+            "width": 239,
+            "share": 0.64,
+            "brokenWords": []
+          },
+          {
+            "title": "Hosted Loam: sign up, pick a plan, get a box",
+            "width": 232,
+            "share": 0.62,
+            "brokenWords": []
+          },
+          {
+            "title": "Somewhere new for the weekend",
+            "width": 258,
+            "share": 0.69,
+            "brokenWords": []
+          }
+        ]
       },
       "agentBalance": {
         "firstRowCount": 5,
@@ -254,7 +306,33 @@
       "headerRows": {
         "count": 5,
         "spread": 0,
-        "titleTruncated": false
+        "titleTruncated": false,
+        "rowChecks": [
+          {
+            "title": "General",
+            "width": 257,
+            "share": 0.7,
+            "brokenWords": []
+          },
+          {
+            "title": "Visuals inside agent replies",
+            "width": 257,
+            "share": 0.7,
+            "brokenWords": []
+          },
+          {
+            "title": "Hosted Loam: sign up, pick a plan, get a box",
+            "width": 257,
+            "share": 0.7,
+            "brokenWords": []
+          },
+          {
+            "title": "Somewhere new for the weekend",
+            "width": 257,
+            "share": 0.7,
+            "brokenWords": []
+          }
+        ]
       },
       "agentBalance": {
         "firstRowCount": 3,
@@ -372,7 +450,33 @@
       "headerRows": {
         "count": 5,
         "spread": 0,
-        "titleTruncated": false
+        "titleTruncated": false,
+        "rowChecks": [
+          {
+            "title": "General",
+            "width": 299,
+            "share": 0.79,
+            "brokenWords": []
+          },
+          {
+            "title": "Visuals inside agent replies",
+            "width": 298,
+            "share": 0.79,
+            "brokenWords": []
+          },
+          {
+            "title": "Hosted Loam: sign up, pick a plan, get a box",
+            "width": 293,
+            "share": 0.77,
+            "brokenWords": []
+          },
+          {
+            "title": "Somewhere new for the weekend",
+            "width": 310,
+            "share": 0.82,
+            "brokenWords": []
+          }
+        ]
       },
       "agentBalance": {
         "firstRowCount": 7,
@@ -490,7 +594,33 @@
       "headerRows": {
         "count": 5,
         "spread": 0,
-        "titleTruncated": false
+        "titleTruncated": false,
+        "rowChecks": [
+          {
+            "title": "General",
+            "width": 238,
+            "share": 0.64,
+            "brokenWords": []
+          },
+          {
+            "title": "Visuals inside agent replies",
+            "width": 239,
+            "share": 0.64,
+            "brokenWords": []
+          },
+          {
+            "title": "Hosted Loam: sign up, pick a plan, get a box",
+            "width": 232,
+            "share": 0.62,
+            "brokenWords": []
+          },
+          {
+            "title": "Somewhere new for the weekend",
+            "width": 258,
+            "share": 0.69,
+            "brokenWords": []
+          }
+        ]
       },
       "agentBalance": {
         "firstRowCount": 5,
@@ -608,7 +738,33 @@
       "headerRows": {
         "count": 5,
         "spread": 0,
-        "titleTruncated": false
+        "titleTruncated": false,
+        "rowChecks": [
+          {
+            "title": "General",
+            "width": 257,
+            "share": 0.7,
+            "brokenWords": []
+          },
+          {
+            "title": "Visuals inside agent replies",
+            "width": 257,
+            "share": 0.7,
+            "brokenWords": []
+          },
+          {
+            "title": "Hosted Loam: sign up, pick a plan, get a box",
+            "width": 257,
+            "share": 0.7,
+            "brokenWords": []
+          },
+          {
+            "title": "Somewhere new for the weekend",
+            "width": 257,
+            "share": 0.7,
+            "brokenWords": []
+          }
+        ]
       },
       "agentBalance": {
         "firstRowCount": 3,
@@ -726,7 +882,33 @@
       "headerRows": {
         "count": 6,
         "spread": 0,
-        "titleTruncated": false
+        "titleTruncated": false,
+        "rowChecks": [
+          {
+            "title": "General",
+            "width": 110,
+            "share": 0.58,
+            "brokenWords": []
+          },
+          {
+            "title": "Visuals inside agent replies",
+            "width": 109,
+            "share": 0.57,
+            "brokenWords": []
+          },
+          {
+            "title": "Hosted Loam: sign up, pick a plan, get a box",
+            "width": 104,
+            "share": 0.55,
+            "brokenWords": []
+          },
+          {
+            "title": "Somewhere new for the weekend",
+            "width": 121,
+            "share": 0.64,
+            "brokenWords": []
+          }
+        ]
       },
       "agentBalance": {
         "firstRowCount": 5,
@@ -761,9 +943,9 @@
       },
       "desktopPane": {
         "paneWidth": 1189,
-        "titleWidth": 136,
+        "titleWidth": 229,
         "truncated": false,
-        "titleText": "A little room for the week"
+        "titleText": "Hosted Loam: sign up, pick a plan, get a box"
       },
       "issues": []
     },
@@ -859,7 +1041,33 @@
       "headerRows": {
         "count": 6,
         "spread": 0,
-        "titleTruncated": false
+        "titleTruncated": false,
+        "rowChecks": [
+          {
+            "title": "General",
+            "width": 183,
+            "share": 0.58,
+            "brokenWords": []
+          },
+          {
+            "title": "Visuals inside agent replies",
+            "width": 184,
+            "share": 0.58,
+            "brokenWords": []
+          },
+          {
+            "title": "Hosted Loam: sign up, pick a plan, get a box",
+            "width": 177,
+            "share": 0.56,
+            "brokenWords": []
+          },
+          {
+            "title": "Somewhere new for the weekend",
+            "width": 203,
+            "share": 0.64,
+            "brokenWords": []
+          }
+        ]
       },
       "agentBalance": {
         "firstRowCount": 5,
@@ -894,9 +1102,9 @@
       },
       "desktopPane": {
         "paneWidth": 1022,
-        "titleWidth": 224,
+        "titleWidth": 370,
         "truncated": false,
-        "titleText": "A little room for the week"
+        "titleText": "Hosted Loam: sign up, pick a plan, get a box"
       },
       "issues": []
     },
@@ -992,7 +1200,33 @@
       "headerRows": {
         "count": 6,
         "spread": 0,
-        "titleTruncated": false
+        "titleTruncated": false,
+        "rowChecks": [
+          {
+            "title": "General",
+            "width": 335,
+            "share": 0.75,
+            "brokenWords": []
+          },
+          {
+            "title": "Visuals inside agent replies",
+            "width": 335,
+            "share": 0.75,
+            "brokenWords": []
+          },
+          {
+            "title": "Hosted Loam: sign up, pick a plan, get a box",
+            "width": 335,
+            "share": 0.75,
+            "brokenWords": []
+          },
+          {
+            "title": "Somewhere new for the weekend",
+            "width": 335,
+            "share": 0.75,
+            "brokenWords": []
+          }
+        ]
       },
       "agentBalance": {
         "firstRowCount": 4,
@@ -1029,7 +1263,7 @@
         "paneWidth": 835,
         "titleWidth": 373,
         "truncated": true,
-        "titleText": "A little room for the week"
+        "titleText": "Hosted Loam: sign up, pick a plan, get a box"
       },
       "issues": []
     },
@@ -1125,7 +1359,33 @@
       "headerRows": {
         "count": 6,
         "spread": 0,
-        "titleTruncated": false
+        "titleTruncated": false,
+        "rowChecks": [
+          {
+            "title": "General",
+            "width": 110,
+            "share": 0.58,
+            "brokenWords": []
+          },
+          {
+            "title": "Visuals inside agent replies",
+            "width": 109,
+            "share": 0.57,
+            "brokenWords": []
+          },
+          {
+            "title": "Hosted Loam: sign up, pick a plan, get a box",
+            "width": 104,
+            "share": 0.55,
+            "brokenWords": []
+          },
+          {
+            "title": "Somewhere new for the weekend",
+            "width": 121,
+            "share": 0.64,
+            "brokenWords": []
+          }
+        ]
       },
       "agentBalance": {
         "firstRowCount": 5,
@@ -1160,9 +1420,9 @@
       },
       "desktopPane": {
         "paneWidth": 1189,
-        "titleWidth": 136,
+        "titleWidth": 229,
         "truncated": false,
-        "titleText": "A little room for the week"
+        "titleText": "Hosted Loam: sign up, pick a plan, get a box"
       },
       "issues": []
     },
@@ -1258,7 +1518,33 @@
       "headerRows": {
         "count": 6,
         "spread": 0,
-        "titleTruncated": false
+        "titleTruncated": false,
+        "rowChecks": [
+          {
+            "title": "General",
+            "width": 183,
+            "share": 0.58,
+            "brokenWords": []
+          },
+          {
+            "title": "Visuals inside agent replies",
+            "width": 184,
+            "share": 0.58,
+            "brokenWords": []
+          },
+          {
+            "title": "Hosted Loam: sign up, pick a plan, get a box",
+            "width": 177,
+            "share": 0.56,
+            "brokenWords": []
+          },
+          {
+            "title": "Somewhere new for the weekend",
+            "width": 203,
+            "share": 0.64,
+            "brokenWords": []
+          }
+        ]
       },
       "agentBalance": {
         "firstRowCount": 5,
@@ -1293,9 +1579,9 @@
       },
       "desktopPane": {
         "paneWidth": 1022,
-        "titleWidth": 224,
+        "titleWidth": 370,
         "truncated": false,
-        "titleText": "A little room for the week"
+        "titleText": "Hosted Loam: sign up, pick a plan, get a box"
       },
       "issues": []
     },
@@ -1391,7 +1677,33 @@
       "headerRows": {
         "count": 6,
         "spread": 0,
-        "titleTruncated": false
+        "titleTruncated": false,
+        "rowChecks": [
+          {
+            "title": "General",
+            "width": 335,
+            "share": 0.75,
+            "brokenWords": []
+          },
+          {
+            "title": "Visuals inside agent replies",
+            "width": 335,
+            "share": 0.75,
+            "brokenWords": []
+          },
+          {
+            "title": "Hosted Loam: sign up, pick a plan, get a box",
+            "width": 335,
+            "share": 0.75,
+            "brokenWords": []
+          },
+          {
+            "title": "Somewhere new for the weekend",
+            "width": 335,
+            "share": 0.75,
+            "brokenWords": []
+          }
+        ]
       },
       "agentBalance": {
         "firstRowCount": 4,
@@ -1428,7 +1740,7 @@
         "paneWidth": 835,
         "titleWidth": 373,
         "truncated": true,
-        "titleText": "A little room for the week"
+        "titleText": "Hosted Loam: sign up, pick a plan, get a box"
       },
       "issues": []
     },

@@ -45,15 +45,37 @@ for (const [key, handler] of Object.entries(filesHost().routes)) {
   if (key.includes('/v1/files/')) app.routes[key] = handler
 }
 
+const listing = await app.f.api('GET', '/threads')
+const nowMs = Date.now()
+const ago = (mins) => new Date(nowMs - mins * 60000).toISOString()
+const realTitleThreads = listing.threads.map((t, i) => {
+  if (t.id === 'general') {
+    return { ...t, title: 'General', last: { ...(t.last || {}), at: ago(125) } }
+  }
+  if (t.id === 'a-quieter-week') {
+    return { ...t, title: 'Hosted Loam: sign up, pick a plan, get a box', last: { ...(t.last || {}), at: ago(1500) } }
+  }
+  if (i === 2) {
+    return { ...t, title: 'Visuals inside agent replies', last: { ...(t.last || {}), at: ago(210) } }
+  }
+  return { ...t, last: { ...(t.last || {}), at: ago(3000) } }
+})
+
 const baseRecord = await app.f.api('GET', '/threads/a-quieter-week')
 const longRecord = {
   ...baseRecord,
+  thread: { ...baseRecord.thread, title: 'Hosted Loam: sign up, pick a plan, get a box' },
   messages: [
     ...baseRecord.messages,
     { id: 'm-long', author: baseRecord.thread.members[0].id, kind: 'message', at: '2026-11-27T17:10:00Z', text: LONG_REPLY },
   ],
 }
 const json = (res, body, status = 200) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)) }
+app.routes['GET /v1/threads'] = (req, res) => json(res, { ...listing, threads: realTitleThreads })
+app.routes['GET /v1/threads/events'] = (req, res) => {
+  res.writeHead(200, { 'content-type': 'text/event-stream' })
+  res.write(`: open ping=15000\n\ndata: ${JSON.stringify({ type: 'threads.snapshot', threads: realTitleThreads, agents: app.f.agents })}\n\n`)
+}
 app.routes['GET /v1/threads/a-quieter-week'] = (req, res) => json(res, longRecord)
 
 let refuseExtended = false
@@ -160,6 +182,50 @@ async function measure(page, screen) {
           }
         }
       }
+      // Verify chat list rows: no mid-word breaks inside titles, generous title
+      // width on narrow lists, and unchanged 80px row height at 60% and 100%.
+      const scaleNum = Number(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale').trim()) || 1
+      const listEl = document.querySelector('.tt-list')
+      const listLayoutW = listEl ? listEl.getBoundingClientRect().width / scaleNum : 999
+      const rowChecks = []
+      for (const rowEl of document.querySelectorAll('.tt-list .tt-row')) {
+        const rr = rowEl.getBoundingClientRect()
+        const titleEl = rowEl.querySelector('.srow-title')
+        if (!titleEl || !rr.width) continue
+        const tr = titleEl.getBoundingClientRect()
+        const textNode = titleEl.firstChild
+        const brokenWords = []
+        if (textNode && textNode.nodeType === 3) {
+          const txt = textNode.textContent || ''
+          const wordRe = /\S+/g
+          let match
+          while ((match = wordRe.exec(txt))) {
+            const range = document.createRange()
+            range.setStart(textNode, match.index)
+            range.setEnd(textNode, match.index + match[0].length)
+            const rects = [...range.getClientRects()].filter((r) => r.width > 0.5 && r.height > 0.5)
+            // Ignore characters clipped out by -webkit-line-clamp beyond the box bottom.
+            const visible = rects.filter((r) => r.top < tr.bottom - 1)
+            const lines = new Set(visible.map((r) => Math.round(r.top / 4)))
+            if (lines.size > 1) brokenWords.push(match[0])
+          }
+        }
+        const share = tr.width / rr.width
+        rowChecks.push({ title: titleEl.textContent, width: Math.round(tr.width), share: Number(share.toFixed(2)), brokenWords })
+        if (brokenWords.length) issues.push(`mid-word break in "${titleEl.textContent}": ${brokenWords.join(', ')}`)
+        if (listLayoutW <= 280 && share < 0.6) issues.push(`narrow row title too squeezed ("${titleEl.textContent}"): share=${share.toFixed(2)}`)
+        if (listLayoutW > 280 && Math.abs(rr.height - 80 * scaleNum) > 1.5) {
+          issues.push(`row height drifted at normal width ("${titleEl.textContent}"): ${rr.height.toFixed(1)} vs ${(80 * scaleNum).toFixed(1)}`)
+        }
+        const pin = rowEl.closest('.tt-row-wrap')?.querySelector('.tt-row-pin')
+        if (pin && Number(getComputedStyle(pin).opacity) > 0.5) {
+          const pr = pin.getBoundingClientRect()
+          if (pr.left < tr.right - 1 && tr.left < pr.right - 1 && pr.top < tr.bottom - 1 && tr.top < pr.bottom - 1) {
+            issues.push(`row pin overlaps title ("${titleEl.textContent}")`)
+          }
+        }
+      }
+      headerRows = { ...headerRows, rowChecks }
     }
 
     // 2. Composer: no overlap, send stays on right beside mic (never stranded on far left).
@@ -244,31 +310,29 @@ async function measure(page, screen) {
 const summary = []
 try {
   if (baseline) {
-    // Baseline mode against main (f6312f4): capture the 3 broken spots at 200%
-    // (and 60% phone agent strip) with the same 7-agent / 4-button / mic fixture.
+    // Baseline mode against main (295ef08): capture the squeezed 200% chat list
+    // rows on 390 phone and 1440 desktop with real-length thread titles.
     for (const mode of ['light', 'dark']) {
-      for (const size of [60, 200]) {
-        values.phone = { mode, size, theme: 'latte' }
-        const { ctx, page } = await newPage(390, 844, mode)
-        await page.goto(app.url)
-        await page.locator('.tt-row').first().waitFor()
-        await settle(page)
-        const m = await measure(page, 'chats')
-        summary.push({ phase: 'before', width: 390, mode, size, screen: 'chats', ...m })
-        if (out) await page.screenshot({ path: path.join(out, `before-polish-390-${mode}-${size}-chats.png`), animations: 'disabled' })
-        await ctx.close()
-      }
+      values.phone = { mode, size: 200, theme: 'latte' }
+      const { ctx: pCtx, page: pPage } = await newPage(390, 844, mode)
+      await pPage.goto(app.url)
+      await pPage.locator('.tt-row').first().waitFor()
+      await pPage.evaluate(() => document.querySelector('.tt-section-heading')?.scrollIntoView({ block: 'start' }))
+      await settle(pPage)
+      const pm = await measure(pPage, 'chats')
+      summary.push({ phase: 'before', width: 390, mode, size: 200, screen: 'chat-rows', ...pm })
+      if (out) await pPage.screenshot({ path: path.join(out, `before-rows-390-${mode}-200-chat-rows.png`), animations: 'disabled' })
+      await pCtx.close()
+
       values.desktop = { mode, size: 200, theme: 'latte' }
-      const { ctx, page } = await newPage(1440, 900, mode)
-      await page.goto(app.url)
-      await page.locator('.tt-row').first().waitFor()
-      await page.locator('.tt-row', { hasText: 'A little room for the week' }).click()
-      await page.locator('.tt-message', { hasText: 'Weekly synthesis and next steps' }).waitFor()
-      await settle(page)
-      const m = await measure(page, 'thread')
-      summary.push({ phase: 'before', width: 1440, mode, size: 200, screen: 'thread', ...m })
-      if (out) await page.screenshot({ path: path.join(out, `before-polish-1440-${mode}-200-thread.png`), animations: 'disabled' })
-      await ctx.close()
+      const { ctx: dCtx, page: dPage } = await newPage(1440, 900, mode)
+      await dPage.goto(app.url)
+      await dPage.locator('.tt-row').first().waitFor()
+      await settle(dPage)
+      const dm = await measure(dPage, 'chats')
+      summary.push({ phase: 'before', width: 1440, mode, size: 200, screen: 'chats', ...dm })
+      if (out) await dPage.screenshot({ path: path.join(out, `before-rows-1440-${mode}-200-chats.png`), animations: 'disabled' })
+      await dCtx.close()
     }
   } else {
     const expectedScale = { 60: '0.54', 100: '0.9', 200: '1.8' }
@@ -295,8 +359,15 @@ try {
           await page.locator('.tt-row').first().waitFor()
           await check('chats')
 
+          // At 200% on phone, also capture the chat rows scrolled clearly into view.
+          if (isPhone && size === 200) {
+            await page.evaluate(() => document.querySelector('.tt-section-heading')?.scrollIntoView({ block: 'start' }))
+            await settle(page)
+            if (out) await page.screenshot({ path: path.join(out, `after-390-${mode}-200-chat-rows.png`), animations: 'disabled' })
+          }
+
           // Open the thread containing the long markdown reply + composer.
-          await page.locator('.tt-row', { hasText: 'A little room for the week' }).click()
+          await page.locator('.tt-row', { hasText: 'Hosted Loam' }).click()
           await page.locator('.tt-message', { hasText: 'Weekly synthesis and next steps' }).waitFor()
           await page.locator('.tt-message', { hasText: 'Weekly synthesis and next steps' }).scrollIntoViewIfNeeded()
           await check('thread')
@@ -368,7 +439,7 @@ try {
   }
 
   if (out) {
-    await writeFile(path.join(out, baseline ? 'baseline-polish.json' : 'after.json'), JSON.stringify({ fixtureOnly: true, summary }, null, 2) + '\n')
+    await writeFile(path.join(out, baseline ? 'baseline-rows.json' : 'after.json'), JSON.stringify({ fixtureOnly: true, summary }, null, 2) + '\n')
   }
 } finally {
   await browser.close()

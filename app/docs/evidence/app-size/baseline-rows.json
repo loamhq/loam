@@ -1,0 +1,259 @@
+{
+  "fixtureOnly": true,
+  "summary": [
+    {
+      "phase": "before",
+      "width": 390,
+      "mode": "light",
+      "size": 200,
+      "screen": "chat-rows",
+      "height": 844,
+      "scale": "1.8",
+      "app": {
+        "x": 0,
+        "right": 390,
+        "width": 390,
+        "height": 844
+      },
+      "headerRows": {
+        "count": 5,
+        "spread": 0,
+        "titleTruncated": false,
+        "rowChecks": [
+          {
+            "title": "General",
+            "width": 88,
+            "share": 0.25,
+            "brokenWords": []
+          },
+          {
+            "title": "Visuals inside agent replies",
+            "width": 85,
+            "share": 0.24,
+            "brokenWords": [
+              "Visuals"
+            ]
+          },
+          {
+            "title": "Hosted Loam: sign up, pick a plan, get a box",
+            "width": 69,
+            "share": 0.2,
+            "brokenWords": [
+              "Hosted"
+            ]
+          },
+          {
+            "title": "Somewhere new for the weekend",
+            "width": 126,
+            "share": 0.36,
+            "brokenWords": [
+              "Somewhere"
+            ]
+          }
+        ]
+      },
+      "agentBalance": {
+        "firstRowCount": 3,
+        "leftGap": 14,
+        "rightGap": 14
+      },
+      "composerInfo": null,
+      "desktopPane": null,
+      "issues": [
+        "narrow row title too squeezed (\"General\"): share=0.25",
+        "mid-word break in \"Visuals inside agent replies\": Visuals",
+        "narrow row title too squeezed (\"Visuals inside agent replies\"): share=0.24",
+        "mid-word break in \"Hosted Loam: sign up, pick a plan, get a box\": Hosted",
+        "narrow row title too squeezed (\"Hosted Loam: sign up, pick a plan, get a box\"): share=0.20",
+        "mid-word break in \"Somewhere new for the weekend\": Somewhere",
+        "narrow row title too squeezed (\"Somewhere new for the weekend\"): share=0.36"
+      ]
+    },
+    {
+      "phase": "before",
+      "width": 1440,
+      "mode": "light",
+      "size": 200,
+      "screen": "chats",
+      "height": 900,
+      "scale": "1.8",
+      "app": {
+        "x": 0,
+        "right": 1440,
+        "width": 1440,
+        "height": 900
+      },
+      "headerRows": {
+        "count": 6,
+        "spread": 0,
+        "titleTruncated": false,
+        "rowChecks": [
+          {
+            "title": "General",
+            "width": 166,
+            "share": 0.38,
+            "brokenWords": []
+          },
+          {
+            "title": "Visuals inside agent replies",
+            "width": 163,
+            "share": 0.38,
+            "brokenWords": []
+          },
+          {
+            "title": "Hosted Loam: sign up, pick a plan, get a box",
+            "width": 147,
+            "share": 0.34,
+            "brokenWords": []
+          },
+          {
+            "title": "Somewhere new for the weekend",
+            "width": 204,
+            "share": 0.47,
+            "brokenWords": []
+          }
+        ]
+      },
+      "agentBalance": {
+        "firstRowCount": 4,
+        "leftGap": 14,
+        "rightGap": 14
+      },
+      "composerInfo": null,
+      "desktopPane": null,
+      "issues": [
+        "narrow row title too squeezed (\"General\"): share=0.38",
+        "narrow row title too squeezed (\"Visuals inside agent replies\"): share=0.38",
+        "narrow row title too squeezed (\"Hosted Loam: sign up, pick a plan, get a box\"): share=0.34",
+        "narrow row title too squeezed (\"Somewhere new for the weekend\"): share=0.47"
+      ]
+    },
+    {
+      "phase": "before",
+      "width": 390,
+      "mode": "dark",
+      "size": 200,
+      "screen": "chat-rows",
+      "height": 844,
+      "scale": "1.8",
+      "app": {
+        "x": 0,
+        "right": 390,
+        "width": 390,
+        "height": 844
+      },
+      "headerRows": {
+        "count": 5,
+        "spread": 0,
+        "titleTruncated": false,
+        "rowChecks": [
+          {
+            "title": "General",
+            "width": 88,
+            "share": 0.25,
+            "brokenWords": []
+          },
+          {
+            "title": "Visuals inside agent replies",
+            "width": 85,
+            "share": 0.24,
+            "brokenWords": [
+              "Visuals"
+            ]
+          },
+          {
+            "title": "Hosted Loam: sign up, pick a plan, get a box",
+            "width": 69,
+            "share": 0.2,
+            "brokenWords": [
+              "Hosted"
+            ]
+          },
+          {
+            "title": "Somewhere new for the weekend",
+            "width": 126,
+            "share": 0.36,
+            "brokenWords": [
+              "Somewhere"
+            ]
+          }
+        ]
+      },
+      "agentBalance": {
+        "firstRowCount": 3,
+        "leftGap": 14,
+        "rightGap": 14
+      },
+      "composerInfo": null,
+      "desktopPane": null,
+      "issues": [
+        "narrow row title too squeezed (\"General\"): share=0.25",
+        "mid-word break in \"Visuals inside agent replies\": Visuals",
+        "narrow row title too squeezed (\"Visuals inside agent replies\"): share=0.24",
+        "mid-word break in \"Hosted Loam: sign up, pick a plan, get a box\": Hosted",
+        "narrow row title too squeezed (\"Hosted Loam: sign up, pick a plan, get a box\"): share=0.20",
+        "mid-word break in \"Somewhere new for the weekend\": Somewhere",
+        "narrow row title too squeezed (\"Somewhere new for the weekend\"): share=0.36"
+      ]
+    },
+    {
+      "phase": "before",
+      "width": 1440,
+      "mode": "dark",
+      "size": 200,
+      "screen": "chats",
+      "height": 900,
+      "scale": "1.8",
+      "app": {
+        "x": 0,
+        "right": 1440,
+        "width": 1440,
+        "height": 900
+      },
+      "headerRows": {
+        "count": 6,
+        "spread": 0,
+        "titleTruncated": false,
+        "rowChecks": [
+          {
+            "title": "General",
+            "width": 166,
+            "share": 0.38,
+            "brokenWords": []
+          },
+          {
+            "title": "Visuals inside agent replies",
+            "width": 163,
+            "share": 0.38,
+            "brokenWords": []
+          },
+          {
+            "title": "Hosted Loam: sign up, pick a plan, get a box",
+            "width": 147,
+            "share": 0.34,
+            "brokenWords": []
+          },
+          {
+            "title": "Somewhere new for the weekend",
+            "width": 204,
+            "share": 0.47,
+            "brokenWords": []
+          }
+        ]
+      },
+      "agentBalance": {
+        "firstRowCount": 4,
+        "leftGap": 14,
+        "rightGap": 14
+      },
+      "composerInfo": null,
+      "desktopPane": null,
+      "issues": [
+        "narrow row title too squeezed (\"General\"): share=0.38",
+        "narrow row title too squeezed (\"Visuals inside agent replies\"): share=0.38",
+        "narrow row title too squeezed (\"Hosted Loam: sign up, pick a plan, get a box\"): share=0.34",
+        "narrow row title too squeezed (\"Somewhere new for the weekend\"): share=0.47"
+      ]
+    }
+  ]
+}

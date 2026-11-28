@@ -362,6 +362,27 @@
 /* One 80px row at every state; quiet titles take the subtitle's space. */
 .tt-row { height:80px; }
 .tt-quiet .srow-title { white-space:normal; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; overflow-wrap:anywhere; }
+/* On narrow zoomed lists (high phone zoom and trimmed desktop sidebar), move
+ * the time under the title column and slim the avatar so titles keep most of
+ * the row and never break mid-word. 60% and 100% lists stay untouched. */
+@container list (max-width:280px) {
+  .tt-list .tt-section { padding-inline:6px; }
+  .tt-list .tt-row { height:auto; min-height:68px; padding:10px 8px; }
+  .tt-list .tt-row .srow-top { display:grid; grid-template-columns:36px minmax(0,1fr); column-gap:10px; row-gap:2px; align-items:start; }
+  .tt-list .tt-row .avatar-wrap { grid-row:1 / span 2; width:36px; height:36px; margin-top:2px; }
+  .tt-list .tt-row .avatar-wrap > .blob,
+  .tt-list .tt-row .avatar-wrap > .thread-tile { width:36px !important; height:36px !important; font-size:16px !important; }
+  .tt-list .tt-row .avatar-wrap > .thread-tile svg { width:18px; height:18px; }
+  .tt-list .tt-row .srow-who { grid-column:2; grid-row:1; }
+  .tt-list .tt-row .srow-title { font-size:15px; line-height:1.25; white-space:normal; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; overflow-wrap:break-word; word-break:normal; }
+  .tt-list .tt-row .srow-name { font-size:12.5px; }
+  .tt-list .tt-row .srow-meta { grid-column:2; grid-row:2; flex-direction:row; align-items:center; justify-content:flex-start; gap:6px; padding-top:0; padding-inline-end:28px; }
+  .tt-list .tt-row .srow-time { font-size:11.5px; height:auto; line-height:1.3; }
+  .tt-list .tt-row .tt-row-notification { width:auto; height:auto; }
+  .tt-list .tt-row-wrap .tt-row-pin { top:auto; bottom:5px; inset-inline-end:6px; transform:none; width:24px; height:24px; background:var(--paper-pane); }
+  .tt-list .tt-row-wrap .tt-row-pin svg { width:14px; height:14px; }
+  .tt-list .tt-row-wrap:has(.tt-row.on) .tt-row-pin { background:var(--paper-card); }
+}
 
 .profile-system-help { font-size: .88rem; color: var(--paper-ink-2); margin: 0 0 .8rem; line-height: 1.45; }
 .profile-system-help summary { cursor: pointer; width: fit-content; }

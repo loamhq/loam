@@ -21,9 +21,11 @@ export function threadSelection({ dom = document } = {}) {
     if (!text) { stop(); target = null; dress(rule, { opacity: '0' }); return }
     const parent = list.getBoundingClientRect(), box = row.getBoundingClientRect(), column = text.getBoundingClientRect()
     if (!box.width) return // A collapsed sidebar is measured when it returns.
+    const meta = row.querySelector('.srow-meta')?.getBoundingClientRect()
+    const bottom = meta && meta.height && meta.top >= column.bottom - 2 ? meta.bottom : column.bottom
     // The text column already leaves the row's gap on both sides, including
     // before the time/default-face column. Underline only that text column.
-    const next = { row, x: layoutPixels(column.left - parent.left), y: layoutPixels(column.bottom - parent.top) + 5.5,
+    const next = { row, x: layoutPixels(column.left - parent.left), y: layoutPixels(bottom - parent.top) + 5.5,
       width: layoutPixels(column.width) }
     const reduced = motion?.matches
     if (target?.row === row && target.x === next.x && target.y === next.y && target.width === next.width && !reduced) return
