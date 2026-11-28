@@ -2108,11 +2108,15 @@ def hash_password(password: str, binary: Path | None = None, timeout: float = 60
                     except OSError:
                         break
                 break
-        if proc.poll() is None:
+        # On Linux a master PTY raises EIO as soon as the child closes its slave
+        # FDs during exit, which can precede process reaping by a few ms. Wait
+        # for the child up to the remaining deadline instead of polling once.
+        try:
+            _, err_bytes = proc.communicate(timeout=max(0.05, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
             proc.kill()
             proc.communicate(timeout=5)
-            raise RuntimeError("hashing timed out")
-        _, err_bytes = proc.communicate(timeout=5)
+            raise RuntimeError("hashing timed out") from None
     finally:
         os.close(master)
     out = b"".join(chunks).decode("utf-8", "replace")

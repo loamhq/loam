@@ -263,6 +263,27 @@ class TestPtyPasswordHashing(unittest.TestCase):
         digest = dep.hash_password("p@ss!w0rd#café", binary=fake_bin)
         self.assertEqual(digest, "$argon2id$v=19$m=65536,t=3,p=4$dGVzdHNhbHQ$dGVzdGhhc2g")
 
+    def test_hash_password_waits_for_exit_after_pty_eof(self):
+        # Closing the slave PTY before the child finishes exiting triggers EIO
+        # on the master fd; hash_password must wait for exit instead of timing out.
+        fake_bin = self.tmp / "authelia-slow-exit"
+        fake_bin.write_text(
+            "#!/usr/bin/env python3\n"
+            "import os, sys, time\n"
+            "sys.stdout.write('Enter Password: ')\n"
+            "sys.stdout.flush()\n"
+            "pw = sys.stdin.readline().rstrip('\\r\\n')\n"
+            "assert pw == 'secret-123'\n"
+            "print('Digest: $argon2id$v=19$m=65536,t=3,p=4$c2FsdA$aGFzaA', flush=True)\n"
+            "os.close(0)\n"
+            "os.close(1)\n"
+            "time.sleep(0.05)\n",
+            encoding="utf-8",
+        )
+        fake_bin.chmod(0o755)
+        digest = dep.hash_password("secret-123", binary=fake_bin)
+        self.assertEqual(digest, "$argon2id$v=19$m=65536,t=3,p=4$c2FsdA$aGFzaA")
+
 
 class TestDataCopyAndMigration(unittest.TestCase):
     def setUp(self):
