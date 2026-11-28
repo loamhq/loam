@@ -18,7 +18,9 @@ import { modelPill, settingsRow, listHeading, personaGrid, rowTop, chatHeader, c
 import { authenticatedFetch as fetch, authExpired, failureSentence } from './auth.js'
 import { createPermissionCards } from './permission-cards.js'
 import { h, kept, blob, avatarLook, icon, dress } from './ui.js'
-import { markdown } from './markdown.js'
+import { markdown, strip } from './markdown.js'
+import { replyVisuals } from './reply-visuals.js'
+import { stripVisualBlocks } from './visual-doc.js'
 import { splitCards, plainWords } from './market-card.js'
 import { copyText } from './clipboard.js'
 import { emptyState } from './empty-state.js'
@@ -563,8 +565,11 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
       cache,
       // A newly formatted node must replace its plain node, rather than lend
       // its children to it: this cache keeps the actual node across redraws.
-      plain: (text, key, pictures) => h('div', { key: `prose:${++proseSerial}`, class: 'tt-prose-content tt-prose-plain', 'data-prose-pending': key, text: pictures ? pictures.words(text) : text }),
-      build: (text, pictures) => h('div', { key: `prose:${++proseSerial}`, class: 'tt-prose-content' }, ...mentionMarkdown(text, pictures)),
+      plain: (text, key, media) => {
+        const plain = stripVisualBlocks(media?.pictures ? media.pictures.words(text) : text)
+        return h('div', { key: `prose:${++proseSerial}`, class: 'tt-prose-content tt-prose-plain', 'data-prose-pending': key, text: plain })
+      },
+      build: (text, media) => h('div', { key: `prose:${++proseSerial}`, class: 'tt-prose-content' }, ...mentionMarkdown(text, media?.pictures ?? null, media?.visuals ?? null)),
       changed: (format) => { if (st.open !== o) return; rememberReading(o); format(); redraw() },
     })
   }
@@ -1215,7 +1220,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
   function builtinList(wide = st.wide) {
     st.wide = wide
 
-    const rows = [...st.threads].sort((a, b) => compareThreads(a, b, { pinned: !st.archived })).filter((t) => Boolean(t.archived) === Boolean(st.archived)).filter((t) => `${t.title} ${t.last?.text ?? ''}`.toLowerCase().includes(st.query.toLowerCase()))
+    const rows = [...st.threads].sort((a, b) => compareThreads(a, b, { pinned: !st.archived })).filter((t) => Boolean(t.archived) === Boolean(st.archived)).filter((t) => `${t.title} ${strip(t.last?.text ?? '')}`.toLowerCase().includes(st.query.toLowerCase()))
     if (archiveQuery !== st.query) { archiveQuery = st.query; archiveLimit = archivePage; st.resetListScroll = true }
     const visible = st.archived ? rows.slice(0, archiveLimit) : rows
     return h('section', { class: `${st.wide ? 'listcol' : 'screen home'} tt-list${st.wide && collapsed() ? ' away' : ''}`, inert: st.wide && collapsed() ? true : null, 'aria-hidden': st.wide && collapsed() ? 'true' : null, 'aria-label': 'Threads' },
@@ -1337,7 +1342,7 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     const o = st.open
     // An agent's pictures are not words: Copy takes the words around them.
     const pictures = isOwner(message.author) ? null : replyImages(message)
-    const copied = await copyText(messageSegments(message).filter((p) => p.text).map((p) => pictures ? pictures.words(p.text) : p.text).filter((t) => t?.trim()).join('\n\n') || quoteLine(message))
+    const copied = await copyText(messageSegments(message).filter((p) => p.text).map((p) => stripVisualBlocks(pictures ? pictures.words(p.text) : p.text)).filter((t) => t?.trim()).join('\n\n') || quoteLine(message))
     if (!copied || st.open !== o) return
     clearTimeout(o.copyMessageTimer)
     o.copiedMessage = message.id; redraw()
@@ -1519,16 +1524,23 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
     const mine = isOwner(m.author) || m === st.open.pending
     const permissions = [...st.open.permissions.values()].filter((p) => p.message_id === m.id)
     const viewKey = `${st.open.thread.id}:${m.viewKey ?? m.id}`
-    // An agent's images sit where it wrote them (replyImages); what has no
+    // An agent's images and inline visuals sit where it wrote them; what has no
     // place in its words, and everything the owner attached, is drawn as files.
     const pictures = mine ? null : replyImages(m, viewKey, { streaming: Boolean(m.streaming) })
+    const visuals = mine ? null : replyVisuals(m, viewKey, { streaming: Boolean(m.streaming), api: st.fixture ? null : transport, openRef })
+    const mediaContext = pictures || visuals ? { pictures, visuals, signature: `${pictures?.signature ?? ''}|${visuals?.signature ?? ''}` } : null
     const segments = messageSegments(m), lastText = segments.findLastIndex((part) => part.text?.trim())
     const files = messageFiles(pictures ? pictures.rest(segments.filter((part) => part.text).map((part) => part.text)) : m.attachments, viewKey)
     const footer = messageFooter(m, segments, mine)
     const key = `thread:${st.open.thread.id}:${m.id}`, long = longMessages.has(key), shown = openMessages.has(key)
     // Live prose is already formatted. Completion must not send it through
     // the plain-text opening placeholder and replace it a second time.
-    const prose = (text, slot) => st.open.prose && !m.streaming && !m.viewKey ? kept(st.open.prose.node(text, `${m.id}:${slot}`, pictures)) : mentionMarkdown(pictures ? pictures.live(text) : text, pictures)
+    const liveText = (text) => {
+      let out = pictures ? pictures.live(text) : text
+      if (visuals) out = visuals.live(out)
+      return out
+    }
+    const prose = (text, slot) => st.open.prose && !m.streaming && !m.viewKey ? kept(st.open.prose.node(text, `${m.id}:${slot}`, mediaContext)) : mentionMarkdown(liveText(text), pictures, visuals)
     // Render the listing card separately so installation changes can update it while the reply stays cached.
     const said = (text, slot) => {
       const pieces = splitCards(text)
@@ -1728,10 +1740,10 @@ export function createThreads({ registry = createCoreRegistry(), linePending = (
         pulse && id !== 'more' && !entry.leaving ? h('span', { key: `pulse:${o.pulse}`, class: 'tt-listener-ripple', 'aria-hidden': 'true' }) : null,
         h('span', { class: 'tt-listener-look' }, id === 'more' ? h('span', { class: 'tt-listener-more', text: `+${extra || o.listenerExtra || 0}` }) : avatar(id, 26)))))
   }
-  function mentionMarkdown(text, pictures = null) {
-    const nodes = renderText(text ?? '', { images: pictures?.images })
+  function mentionMarkdown(text, pictures = null, visuals = null) {
+    const nodes = renderText(text ?? '', { images: pictures?.images, visuals: visuals?.visuals })
     const visit = (node) => {
-      if (['CODE', 'PRE', 'A', 'FIGURE'].includes(node.nodeName)) return
+      if (['CODE', 'PRE', 'A', 'FIGURE', 'IFRAME', 'DETAILS'].includes(node.nodeName) || node.classList?.contains?.('reply-visual')) return
       for (const child of [...(node.childNodes ?? [])]) {
         if (child.nodeType !== 3) { visit(child); continue }
         const parts = String(child.nodeValue).split(/((?<![\w@])@[\p{L}\p{N}_-]+)/u)

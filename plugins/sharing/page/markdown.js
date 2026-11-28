@@ -67,13 +67,25 @@ export function renderMarkdown(source) {
     if (fence) {
       const mark = fence[1][0]
       const len = fence[1].length
+      const info = fence[2].trim()
+      const lang = (info.split(/\s+/)[0] || '').toLowerCase()
       const codeLines = []
       i++
       while (i < lines.length && !new RegExp(`^${mark}{${len},}\\s*$`).test(lines[i])) {
         codeLines.push(lines[i++])
       }
       if (i < lines.length) i++
-      nodes.push(h('pre', { class: 'sh-md-pre' }, h('code', { text: codeLines.join('\n') })))
+      const body = codeLines.join('\n')
+      if (lang === 'visual') {
+        const title = info.slice(6).trim().slice(0, 120)
+        nodes.push(h('details', { class: 'sh-md-visual' },
+          h('summary', { class: 'sh-md-visual-head' },
+            h('span', { class: 'sh-md-visual-title', text: title ? `Visual · ${title}` : 'Visual' }),
+            h('span', { class: 'sh-md-visual-note', text: 'Shown inline in Loam' })),
+          h('pre', { class: 'sh-md-pre' }, h('code', { text: body }))))
+      } else {
+        nodes.push(h('pre', { class: 'sh-md-pre' }, h('code', { text: body })))
+      }
       continue
     }
 

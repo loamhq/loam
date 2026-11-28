@@ -89,6 +89,18 @@ after the working file is removed. If a referenced local image cannot be kept,
 notifies the agent so it can fix or retake it; an unavailable image keeps its
 caption and shows **Image no longer available**.
 
+An agent can also weave inline HTML or SVG visuals into a reply with a fenced
+`visual` block (` ```visual Optional title `). Loam draws each block in a
+sealed, script-free, zero-network frame with the active theme's tokens and base
+styles, recolouring live on theme, mode, or option changes (including installed
+plugin themes). While a reply streams, an unfinished visual block shows a quiet
+placeholder until its closing fence arrives; quiet controls beneath the visual
+let the owner expand it large or save a standalone HTML copy into Files. The
+thread record keeps the fenced block verbatim, and surfaces that do not draw
+visuals (quotes, thread search, Activity previews, classic Markdown in Files,
+share pages, and Read aloud) fall back to the visual's label instead of raw
+markup. See `loam-inline-visuals`.
+
 **Dictation and Read aloud.** These Market plugins work without a key in browsers that support speech recognition or speech synthesis, respectively. With a server key, they select Google first and OpenAI second. A provider error stays with that provider. Each plugin’s settings show the active provider. The Gemini key guide walks through creating, checking and saving a shared key. Dictation can suggest it once after a take that used browser recognition. Record first and Polish, spoken Briefs and generated table descriptions need a server key.
 
 From Dictation 1.2.3, Record first shows Polish, the recording limit, microphone selection and Names and terms. Create or open the terms note in Files from that card. Add one name or term per line. Record first reads it fresh for each take and sends the terms to the transcriber. As you speak uses browser recognition and keeps your Record first preferences for when you switch back.

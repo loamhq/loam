@@ -3441,3 +3441,36 @@ listener for immediate notification in an open page.
   stays pinned on Loam `0.2.40` because `prepare.py` only reads `lib/loam_plugins.py`
   (unchanged); stock installs on `<= 0.2.40` need the next Loam release (`0.2.41`)
   to display `note.differences`, while continuing to install listings safely until then.
+
+## 2026-11-27 — Inline visuals in agent replies (`visual` fences + `/visual-frame.html`)
+
+- **Why `app/src/preview.js` did not fit directly:** `preview.js` serves vault HTML files
+  with `sandbox=""` (opaque origin, no scripts). Without any script inside the frame, neither
+  the parent nor the frame can measure `scrollHeight` for zero-scrollbar auto-sizing or apply
+  live theme/mode switches in place. Inline visuals therefore use a dedicated endpoint,
+  `GET /visual-frame.html` (`app/src/visual-frame.js`), rather than `<iframe srcdoc>`
+  (which inherits the main page's `script-src 'self'` CSP and cannot loosen it via `<meta>`).
+- **Seal + Chromium WebRTC STUN finding:** Empirically testing Chromium 156 showed that
+  `new RTCPeerConnection({ iceServers: [{ urls: 'stun:...' }] })` leaks UDP packets even under
+  `sandbox allow-scripts; default-src 'none'; connect-src 'none'; frame-src 'none'`, and
+  monkey-patching `window.RTCPeerConnection` is bypassable by spawning a grandchild `srcdoc`
+  frame if untrusted scripts run. `/visual-frame.html` therefore serves a per-response
+  cryptographic `script-src 'nonce-<random>'` with **no** `'unsafe-inline'` for scripts: only
+  Loam's own tiny bootstrap script runs, strips its `<script>` tag immediately, parses and
+  sanitizes visual markup via `DOMParser` before mounting into `#stage`, syncs active `:root`
+  tokens and local same-origin fonts (inlined as `data:` URIs) via `postMessage`, auto-sizes
+  height via `ResizeObserver`, and drives `textContent`-only tooltips for `[data-tip]` and
+  SVG `<title>`.
+- **Shared visual contract (`app/public/visual-doc.js`, `app/public/reply-visuals.js`):**
+  Fenced ```` ```visual ```` blocks (with optional title on the opening line) render live in
+  agent replies while ordinary ```` ```html ```` / ```` ```svg ```` blocks stay code blocks.
+  `VISUAL_BASE_CSS` uses `:where(...)` (zero specificity) so bare tables, `<dl>`, `<details>`,
+  `<progress>`, and SVG match Loam by default while agent `<style>` wins cleanly. Unfinished
+  blocks while streaming render a calm placeholder (`Drawing …`), and non-drawing surfaces
+  (Files classic Markdown view, Activity/search snippets, quotes, copy, share pages,
+  read-aloud, broker `summary()["last"]["text"]`) degrade cleanly to the plain title.
+- **Playwright cross-frame hit-testing under CSS `zoom`:** On desktop, `body { zoom: var(--ui-scale) }`
+  (default `0.9`) scales an iframe's viewport rect while leaving iframe-local coordinates
+  unscaled. Playwright's `frame.locator(...).hover()` adds unscaled inner offsets to the zoomed
+  iframe rect and can miss small targets like SVG bars; use `page.mouse.move` with
+  `frameRect.x + innerCenter * zoom` in browser tests.

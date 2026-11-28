@@ -1860,6 +1860,60 @@ def last_spoke(msgs: list[dict]) -> dict[str, str]:
     return out
 
 
+_FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+_VISUAL_HEADING = re.compile(r"<(?:h[1-4]|figcaption|title)\b[^>]*>([\s\S]*?)</(?:h[1-4]|figcaption|title)\s*>", re.IGNORECASE)
+
+
+def _visual_label(info_title: str, body: str) -> str:
+    title = " ".join((info_title or "").split())[:100].strip()
+    if not title and body:
+        m = _VISUAL_HEADING.search(body)
+        if m:
+            title = " ".join(re.sub(r"<[^>]*>", " ", m.group(1)).split())[:100].strip()
+    return f"Visual: {title}" if title else "Visual"
+
+
+def _snippet(text: str, limit: int = 200) -> str:
+    """Short thread-list snippet: replaces inline visual fences with their
+    plain label so previews and search never see raw HTML/SVG markup."""
+    if not text:
+        return ""
+    if "```" not in text and "~~~" not in text:
+        return text[:limit]
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        m = _FENCE_OPEN.match(lines[i])
+        if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+            ch, length = m.group(1)[0], len(m.group(1))
+            info = m.group(2).strip()
+            lang = (info.split(None, 1)[0] if info else "").lower()
+            close_re = re.compile(rf"^ {{0,3}}{re.escape(ch)}{{{length},}}\s*$")
+            if lang == "visual":
+                body: list[str] = []
+                i += 1
+                while i < len(lines) and not close_re.match(lines[i]):
+                    body.append(lines[i])
+                    i += 1
+                if i < len(lines):
+                    i += 1
+                out.append(_visual_label(info[6:].strip(), "\n".join(body)))
+                continue
+            out.append(lines[i])
+            i += 1
+            while i < len(lines) and not close_re.match(lines[i]):
+                out.append(lines[i])
+                i += 1
+            if i < len(lines):
+                out.append(lines[i])
+                i += 1
+            continue
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out).strip()[:limit]
+
+
 def summary(thread_id: str, running=None) -> dict:
     """Build a thread row with each member's last_spoke_at and running state. Parallel
     turns may put more than one member in the running field.
@@ -1882,7 +1936,7 @@ def summary(thread_id: str, running=None) -> dict:
                      "last_spoke_at": spoke.get(p), "running": p in live,
                      "busy": p in live}
                     for p in meta["members"]],
-        "last": ({"author": last["author"], "text": (last["text"] or "")[:200],
+        "last": ({"author": last["author"], "text": _snippet(last["text"] or ""),
                   "at": last["at"]} if last else None),
         "unread": unread(thread_id, msgs),
         "pinned": meta["id"] == GENERAL_ID or bool(meta.get("pinned")),

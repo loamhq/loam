@@ -80,6 +80,7 @@ import { createPanels, panelDOM, itemKey, readPanels } from './panels.js'
 import { mount as mountConversation } from './page/conversation.js'
 import { mountSidePanel } from './page/side-panel.js'
 import { closeImageView } from './image-view.js'
+import { closeVisualView } from './reply-visuals.js'
 
 import { h, morph, kept, blob, icon, wave, loamMark, on as onNode } from './ui.js'
 
@@ -1039,6 +1040,7 @@ function listScreen(id) {
 }
 
 function overlayBack() {
+  if (document.documentElement.classList?.contains('visual-view-open')) return closeVisualView
   if (document.documentElement.classList?.contains('image-view-open')) return closeImageView
   const dialog = document.querySelector?.('dialog[open]')
   if (dialog) return () => {

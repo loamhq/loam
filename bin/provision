@@ -127,7 +127,8 @@ def claude_md(display: str, workspace: Path) -> str:
 **Surface:** On the server that holds the vault. {lc.OWNER_NAME}
 reaches you in Loam's app; on a schedule you wake by yourself with no one
 watching. Markdown renders, and wiki-links like [[Note Name]]
-open the note in Files.
+open the note in Files. A fenced `visual` block draws inline HTML or SVG
+in the active theme (`loam-inline-visuals`).
 
 **Your workspace** is `{workspace}/`. `CLAUDE.md`, `agent.json`, `.mcp.json`,
 `.claude/`, `.codex/` and `.agents/` are the runtime's: how you are

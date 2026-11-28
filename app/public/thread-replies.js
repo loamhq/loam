@@ -1,4 +1,5 @@
 import { messageSegments } from './thread-record.js'
+import { stripVisualBlocks } from './visual-doc.js'
 
 export const canReply = (message) => Boolean(message?.id && message.kind !== 'system' && !message.streaming && !message.queued && message.id !== 'pending-send')
 // A quote is a glimpse of the words, read as words: its first line with the
@@ -14,7 +15,8 @@ export function plainLine(line) {
     .trim()
 }
 export function quoteLine(message) {
-  const text = messageSegments(message).find((part) => part.text?.trim())?.text ?? ''
+  const raw = messageSegments(message).find((part) => part.text?.trim())?.text ?? ''
+  const text = stripVisualBlocks(raw)
   const line = text.split(/\r?\n/).find((line) => line.trim() && !/^\s*(```|~~~|[-*_]{3,}\s*$)/.test(line))
   return (line && plainLine(line)) || message.attachments?.map((file) => file.name).join(', ') || 'Message'
 }
@@ -78,7 +80,7 @@ export function replyGesture({ reply, reduced = () => false }) {
     reset, paint,
     down(event, message) {
       reset()
-      if (event.pointerType !== 'touch' || event.isPrimary === false || selecting() || !canReply(message) || event.target.closest?.('button,a,input,textarea,pre,code,.tablewrap,[contenteditable]')) return
+      if (event.pointerType !== 'touch' || event.isPrimary === false || selecting() || !canReply(message) || event.target.closest?.('button,a,input,textarea,pre,code,.tablewrap,.reply-visual,[contenteditable]')) return
       const g = gesture = { node: event.currentTarget, message, x: event.clientX, y: event.clientY, pointer: event.pointerId }
       g.timer = setTimeout(() => {
         if (gesture !== g) return

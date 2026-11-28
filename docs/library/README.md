@@ -15,6 +15,7 @@ provider lists it and reads it when its subject comes up:
 |---|---|
 | `loam-how-it-works` | The parts of Loam and how a run is put together |
 | `loam-what-you-can-reach` | What an agent can reach and use on its box |
+| `loam-inline-visuals` | Drawing inline HTML/SVG visuals in thread replies using Loam's theme tokens |
 | `loam-skills` | The three shelves, which one wins, and writing a skill |
 | `loam-filing-a-bug-or-feature` | Offering a scrubbed bug, fix or idea to Loam’s makers and hearing back |
 | `loam-building-a-plugin` | A plugin (or a theme): the first way to change Loam |

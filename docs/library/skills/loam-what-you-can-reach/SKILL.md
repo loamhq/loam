@@ -88,6 +88,12 @@ plugin on, use its `generate_image` MCP tool on any
 provider. It uses the installation's OpenAI or Google Gemini API key. With
 Images off, Codex and Antigravity can use their subscription's image tools.
 
+**Inline visuals in a reply.** Put a fenced `visual` block (` ```visual Optional title `)
+anywhere in your reply to draw self-contained HTML or SVG inline in the owner's
+active theme and mode, sealed with no scripts or network access. Use it when a
+visual carries what prose cannot; read `loam-inline-visuals` for tokens, base
+styles, tooltips, and examples.
+
 **The Market.** When the owner wants something Loam can't do yet, look in
 the Market first: `mcp__engineer__market` with their words as `query` (or
 `loam market search <words>`). When one fits, put its `card` line on a line

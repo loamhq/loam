@@ -37,6 +37,7 @@
 // node at the end of one message and nothing else on the screen.
 
 import { h } from './ui.js'
+import { isVisualLang, visualTitle, visualFallbackLine } from './visual-doc.js'
 
 // ------------------------------------------------------------------ the page
 
@@ -54,14 +55,18 @@ import { h } from './ui.js'
 // (`onTask(n, checked)`, the nth task in the note) and an embed drawn
 // (`embed(target)`, a node). In a chat none of that is asked for and a task is
 // a box nobody can tick.
-export function markdown(text, { copy = null, from = null, onLink = null, anchors = false, vault = false, onTask = null, embed = null, images = null, soft = false } = {}) {
+export function markdown(text, { copy = null, from = null, onLink = null, anchors = false, vault = false, onTask = null, embed = null, images = null, visuals = null, soft = false } = {}) {
   const before = linking
   const beforeSoft = softening
   softening = soft
   const beforeAnchors = anchoring
   const beforeVault = vaulting
   const beforeImages = imaging
+  const beforeVisuals = visualizing
+  const beforeVisualIndex = visualIndex
   imaging = images
+  visualizing = visuals
+  visualIndex = 0
   const handler = onLink ?? fileLinks
   linking = handler ? { handler, from } : null
   anchoring = anchors
@@ -76,11 +81,15 @@ export function markdown(text, { copy = null, from = null, onLink = null, anchor
     anchoring = beforeAnchors
     vaulting = beforeVault
     imaging = beforeImages
+    visualizing = beforeVisuals
+    visualIndex = beforeVisualIndex
     softening = beforeSoft
   }
 }
 
 let vaulting = null
+let visualizing = null
+let visualIndex = 0
 
 // A document's soft line breaks (2026-11-19). A chat reply's single newline is
 // a break, because that is how people type in a chat; a README is written
@@ -324,7 +333,7 @@ function stripBlock(block, out) {
       out.push(stripInline(block.children))
       return
     case 'code':
-      out.push(block.text)
+      out.push(isVisualLang(block.lang) ? visualFallbackLine(block.lang, block.text) : block.text)
       return
     case 'quote':
     case 'callout':
@@ -409,9 +418,11 @@ function parseBlocks(lines) {
         i += 1
       }
       // A fence with no closing fence is a message still being written. It is a
-      // code block now and will still be one when the rest arrives.
-      if (i < lines.length) i += 1
-      out.push({ type: 'code', lang: fence.lang, text: body.join('\n') })
+      // code block now and will still be one when the rest arrives; visual
+      // blocks read `closed` so an unfinished block shows a calm placeholder.
+      const closed = i < lines.length
+      if (closed) i += 1
+      out.push({ type: 'code', lang: fence.lang, text: body.join('\n'), closed })
       continue
     }
 
@@ -1108,6 +1119,21 @@ function renderBlock(block, copy = null) {
     case 'heading':
       return h(`h${Math.min(block.level, 6)}`, anchoring ? { class: 'anchored', 'data-anchor': anchorOf(stripInline(block.children)) } : {}, ...renderInline(block.children))
     case 'code':
+      if (isVisualLang(block.lang)) {
+        if (visualizing) return visualizing.draw(block, visualIndex++)
+        const title = visualTitle(block.lang, block.text)
+        return h(
+          'details',
+          { class: 'md-visual-fallback' },
+          h(
+            'summary',
+            { class: 'md-visual-fallback-head' },
+            h('span', { class: 'md-visual-fallback-title', text: title ? `Visual · ${title}` : 'Visual' }),
+            h('span', { class: 'md-visual-fallback-note', text: 'Shown inline in threads' }),
+          ),
+          h('pre', { class: 'md-visual-fallback-src' }, h('code', { text: block.text })),
+        )
+      }
       return copyable(h('pre', {}, h('code', { class: langClass(block.lang), text: block.text })), block.text, 'code', copy)
     case 'rule':
       return h('hr', {})

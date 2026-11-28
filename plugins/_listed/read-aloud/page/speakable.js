@@ -31,6 +31,7 @@ export const READ_CODE_BLOCKS = false
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})/
 const DIAGRAM = /^(?:mermaid|plantuml|puml|dot|graphviz)$/i
+const VISUAL = /^visual$/i
 const HEADING = /^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$/
 const RULE = /^ {0,3}([-*_])(\s*\1){2,}\s*$/
 const SETEXT = /^ {0,3}(=+|-+)\s*$/
@@ -94,15 +95,22 @@ function blocks(lines) {
     if (fence) {
       flush()
       const marker = fence[1]
-      const language = line.slice(fence[0].length).trim().split(/\s+/)[0]
+      const info = line.slice(fence[0].length).trim()
+      const language = info.split(/\s+/)[0]
       const body = []
       i++
       while (i < lines.length && !new RegExp(`^ {0,3}${marker[0]}{${marker.length},}\\s*$`).test(lines[i])) {
         body.push(lines[i])
         i++
       }
-      add(READ_CODE_BLOCKS ? body.join('\n') : `A code block of ${count(body.length, 'line')}, skipped.`,
-        'code', '\n\n', DIAGRAM.test(language) ? { kind: 'diagram', language: language.toLowerCase(), content: body.join('\n') } : null)
+      if (VISUAL.test(language)) {
+        const title = inline(info.slice(language.length).trim())
+        add(title ? `A visual, ${title}, skipped.` : 'A visual, skipped.',
+          'code', '\n\n', { kind: 'diagram', language: 'visual', content: body.join('\n') })
+      } else {
+        add(READ_CODE_BLOCKS ? body.join('\n') : `A code block of ${count(body.length, 'line')}, skipped.`,
+          'code', '\n\n', DIAGRAM.test(language) ? { kind: 'diagram', language: language.toLowerCase(), content: body.join('\n') } : null)
+      }
       continue
     }
 

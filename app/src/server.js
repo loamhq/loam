@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url'
 
 import { readConfig, configComplaints } from './config.js'
 import { buildPreview, PREVIEW_POLICY, PREVIEW_LIMITS } from './preview.js'
+import { renderVisualFrame, visualFrameHeaders, visualFrameNonce } from './visual-frame.js'
 import { createContent } from './content.js'
 import { fileLink } from './file-links.js'
 import { createBroker, BrokerNotConfigured } from './broker.js'
@@ -114,6 +115,15 @@ export function createApp({
       // moment this app can serve — it is not a claim about the broker.
       if (pathname === '/up') {
         return send(res, 200, 'text/plain; charset=utf-8', 'ok')
+      }
+
+      // Sealed iframe host for inline agent visuals in replies: its own opaque
+      // sandbox + per-response script nonce so untrusted markup can neither
+      // run scripts nor reach the app, cookies, storage, broker or network.
+      if (pathname === '/visual-frame.html' && ['GET', 'HEAD'].includes(req.method)) {
+        const nonce = visualFrameNonce()
+        res.writeHead(200, visualFrameHeaders(nonce))
+        return res.end(req.method === 'HEAD' ? '' : renderVisualFrame(nonce))
       }
 
       if (pathname.startsWith('/api/')) {
