@@ -225,8 +225,9 @@ the last 26 hours; the session host answers; no provider login an agent runs
 on is gone or within three days of expiring; an agent is awake to hear; no
 memory pressure; the memory history is still written; every disk Loam
 writes to has room; no unit of Loam's own machinery (the sweeps, the off-box
-backup, the host's history) has failed; GitHub's authorization is not about
-to lapse. Once a day, at 01:40, it also runs the drift check and each
+backup, the host's history) has failed; every enabled plugin server can start
+(including sleeping servers whose environment is broken, and failed units);
+GitHub's authorization is not about to lapse. Once a day, at 01:40, it also runs the drift check and each
 agent's file check. When every fact is true it writes one file and does
 nothing else: no run, no cost. A fact that is false, or that cannot be read,
 goes to the agent that hears when Loam needs attention, told once like any
@@ -415,9 +416,16 @@ wake automatically on the first request that needs them:
   or their loopback `LOAM_PLUGIN_URL`, and go back to sleep after ten quiet
   minutes with no active request, stream, or WebSocket in flight. Plugins that
   need to stay running continuously declare `server.always_on: true` (and
-  plugins declaring an external `box.listener` stay on by default). Health
-  checks, Settings › Plugins, Apps and updates treat sleeping servers as
-  healthy without waking them.
+  plugins declaring an external `box.listener` stay on by default). When a
+  plugin server uses a local Python virtual environment (such as `.venv/bin/python`),
+  reconciliation and wake verify that the environment matches this server's
+  Python and rebuild it automatically from `uv.lock`/`pyproject.toml`
+  (`uv sync --frozen`) or `requirements.txt` if it is missing or was built for
+  another Python version, without changing tracked plugin files. Health
+  checks (`loam status` and `loam-check`), Settings › Plugins, Apps and updates
+  leave healthy sleeping servers asleep, while `loam status` and `loam-check`
+  report any enabled plugin server that has failed or whose environment cannot
+  start.
 
 **Data on its own disk.** A fresh install can place all of the owner's data on
 a separate mounted disk (`install.sh --data-dir DIR`): configuration, login

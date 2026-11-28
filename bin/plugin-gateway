@@ -575,7 +575,7 @@ async def handle(
         except LookupError:
             writer.write(answer(404, "Not Found", f"no plugin {pid!r} has a server here"))
             return
-        except (OSError, asyncio.TimeoutError, TimeoutError, ConnectionError):
+        except (OSError, asyncio.TimeoutError, TimeoutError, ConnectionError, servers.ServerError):
             writer.write(answer(502, "Bad Gateway",
                                 f"{pid}'s server is not answering: it is off, starting "
                                 f"or failing (Settings > Plugins shows which)"))
@@ -695,7 +695,7 @@ async def door(
         except LookupError:
             writer.write(answer(404, "Not Found", "not found", "X-Robots-Tag: noindex\r\n"))
             return
-        except (OSError, asyncio.TimeoutError, TimeoutError, ConnectionError):
+        except (OSError, asyncio.TimeoutError, TimeoutError, ConnectionError, servers.ServerError):
             writer.write(answer(502, "Bad Gateway", "this page is not answering just now",
                                 "X-Robots-Tag: noindex\r\n"))
             return

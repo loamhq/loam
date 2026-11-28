@@ -66,7 +66,7 @@ EXCLUDES = {
     "spaces": ["**/scratch/", "**/logs/", "**/cache/", "**/.locks/",
                "**/node_modules/", "**/__pycache__/", "*.pyc", "**/.venv/",
                ".DS_Store"],
-    "plugins": [".staging/", "**/__pycache__/", ".DS_Store"],
+    "plugins": [".staging/", "**/__pycache__/", "**/.venv/", ".DS_Store"],
 }
 
 

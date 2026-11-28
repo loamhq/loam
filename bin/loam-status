@@ -102,6 +102,44 @@ def broker_up() -> bool:
         return False
 
 
+def plugin_server_problems() -> list[dict]:
+    """Enabled plugin servers that have failed or cannot start (read-only)."""
+    if os.geteuid() == 0 and lc.UID != 0:
+        env = {
+            "HOME": str(lc.HOME),
+            "USER": lc.USER,
+            "XDG_RUNTIME_DIR": f"/run/user/{lc.UID}",
+            "PATH": lc.UNIT_PATH,
+        }
+        for key in ("LOAM_CONFIG", "LOAM_PLUGINS_DIR", "LOAM_PLUGIN_STATE",
+                    "LOAM_PLUGIN_UNITS", "LOAM_PLUGIN_SHIPPED"):
+            if key in os.environ:
+                env[key] = os.environ[key]
+        script = Path(__file__).resolve().parent / "plugin-servers"
+        argv = [
+            "runuser", "-u", lc.USER, "--", "env",
+            *(f"{k}={v}" for k, v in env.items()),
+            sys.executable, "-B", str(script), "health", "--json",
+        ]
+        res = run(argv)
+        if res.returncode not in (0, 1) or not res.stdout.strip():
+            err = (res.stderr or res.stdout or f"exit {res.returncode}").strip()[-200:]
+            return [{"id": "check", "name": "server check",
+                     "reason": f"could not check enabled plugin servers ({err})",
+                     "fix": f"sudo -u {lc.USER} {lc.ROOT}/bin/plugin-servers status"}]
+        try:
+            data = json.loads(res.stdout)
+            return list(data.get("problems") or [])
+        except ValueError as exc:
+            return [{"id": "check", "name": "server check",
+                     "reason": f"could not read plugin server health ({exc})",
+                     "fix": f"sudo -u {lc.USER} {lc.ROOT}/bin/plugin-servers status"}]
+    import loam_plugin_servers as servers  # noqa: PLC0415
+    if not servers.managed():
+        return []
+    return servers.server_problems()
+
+
 def gather() -> dict:
     edge = dep.EDGE
     domain = edge.get("domain") or dep.domain()
@@ -173,10 +211,23 @@ def gather() -> dict:
         part("broker", "Agents' engine", BAD, f"not answering ({active or 'unknown'})",
              f"sudo -u {lc.USER} systemctl --user restart {brk.SERVICE}")
     gw = user_systemctl("is-active", "loam-plugins-gateway.service")
+    plugin_probs = plugin_server_problems()
     part("gateway", "Plugins", OK if gw == "active" else BAD,
-         "running" if gw == "active" else f"not running ({gw or 'unknown'})",
+         ("gateway running" if plugin_probs else "running") if gw == "active"
+         else f"not running ({gw or 'unknown'})",
          "" if gw == "active" else
          f"sudo -u {lc.USER} systemctl --user restart loam-plugins-gateway.service")
+    for prob in plugin_probs:
+        pid = prob["id"]
+        name = prob.get("name") or pid
+        label = f"Plugin ({name})"
+        say = prob.get("say") or f"cannot start ({prob['reason']})"
+        fix = prob.get("fix") or (
+            f"sudo -u {lc.USER} {lc.ROOT}/bin/plugin-servers reconcile"
+            if prob.get("repairable")
+            else f"sudo -u {lc.USER} {lc.ROOT}/bin/plugin-servers status {pid}"
+        )
+        part(f"plugin:{pid}", label, BAD, say, fix)
     app_name = edge.get("app") or "loam-ui"
     app = app_health(app_name)
     part("app", "App", OK if app.endswith("healthy") and "unhealthy" not in app else BAD,

@@ -9,4 +9,4 @@ Description=Loam plugin servers: start what should run, stop what should not
 [Service]
 Type=oneshot
 ExecStart=@ROOT@/bin/plugin-servers reconcile
-TimeoutStartSec=120
+TimeoutStartSec=300

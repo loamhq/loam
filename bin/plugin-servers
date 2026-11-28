@@ -2,11 +2,14 @@
 """Server plugins from a terminal (2026-11-13): lib/loam_plugin_servers.py.
 
 Usage:
-  plugin-servers reconcile        what loam-plugins-reconcile.timer runs: start
-                                  every wanted server not loaded, stop what is
-                                  loaded and no longer wanted (a failed unit is
+  plugin-servers reconcile        what loam-plugins-reconcile.timer runs: repair
+                                  broken Python venvs, start every wanted server
+                                  not loaded, stop what is loaded and no longer
+                                  wanted (a failed unit whose env is healthy is
                                   left alone, so a crash loop stays visible)
   plugin-servers status [<id>]    every server plugin's state, or one with its log
+  plugin-servers health [--json]  check every enabled server plugin (including
+                                  sleeping ones) for failures or broken envs
   plugin-servers restart <id>     a fresh start of that one unit
   plugin-servers ports            the port table bin/plugin-gateway routes by
   plugin-servers gateway-state    refresh gateway.json and print it
@@ -48,11 +51,25 @@ def main(argv: list[str]) -> int:
         rows = [r for r in plugins.listing()["plugins"] if r.get("service")]
         for r in rows:
             s = r["service"]
+            extra = f" problem={s['env_problem']}" if s.get("env_problem") else ""
             print(f"{r['id']:<24} {s['state']:<9} wanted={str(s.get('wanted')).lower():<5} "
-                  f"port={s.get('port')} pid={s.get('pid')} restarts={s.get('restarts')}")
+                  f"port={s.get('port')} pid={s.get('pid')} restarts={s.get('restarts')}{extra}")
         if not rows:
             print("no plugin has a server")
         return 0
+    if cmd == "health":
+        managed = servers.managed()
+        probs = servers.server_problems() if managed else []
+        if "--json" in rest:
+            print(json.dumps({"managed": managed, "ok": not probs, "problems": probs},
+                             sort_keys=True))
+            return 0 if not probs else 1
+        if not probs:
+            print("all enabled plugin servers can start")
+            return 0
+        for p in probs:
+            print(f"{p['id']}: {p['reason']}")
+        return 1
     if cmd == "restart" and len(rest) == 1:
         row = plugins.restart_server(rest[0], "engineer")["plugin"]
         print(json.dumps(row.get("service"), indent=2))

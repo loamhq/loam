@@ -48,6 +48,9 @@ look:
   one-off transient units a job arms with ``systemd-run`` are left out: a
   persona's failed run is told to that persona at its next turn, a job's to
   whoever briefed it, and a one-off's to the job that armed it.
+- ``plugin-server:<id>``: every enabled server plugin (including sleeping
+  on-demand ones) can start on this server and has not failed
+  (``loam_plugin_servers.server_problems``).
 - ``github:...``: the GitHub integration's refresh token is not within
   fourteen days of its expiry and its installation is not gone, read from
   its store as the nightly housekeeping's call left it
@@ -400,6 +403,14 @@ def is_machinery(unit: str, shipped: set[str]) -> bool:
 def units(run: Callable[..., subprocess.CompletedProcess] = systemctl) -> list[dict]:
     out = []
     shipped = machinery()
+    wanted_server_units: set[str] = set()
+    try:
+        import loam_plugin_servers as servers  # noqa: PLC0415
+        if servers.managed():
+            import loam_plugins as plugins  # noqa: PLC0415
+            wanted_server_units = {servers.unit(pid) for pid in plugins.wanted_servers()}
+    except Exception:  # noqa: BLE001 -- fall back to reporting any failed unit
+        wanted_server_units = set()
     for scope in (["--user"], []):
         done = run(*scope, "list-units", "--failed", "--all", "--plain",
                    "--no-legend", "--no-pager", "loam-*")
@@ -410,12 +421,40 @@ def units(run: Callable[..., subprocess.CompletedProcess] = systemctl) -> list[d
             unit = line.split()[0] if line.split() else ""
             if not unit or not is_machinery(unit, shipped):
                 continue
+            if scope == ["--user"] and unit in wanted_server_units:
+                # Reported in plain words by plugin_servers() with the plugin's
+                # name and reason rather than a duplicate unit-only fact.
+                continue
             journal = f"`journalctl {' '.join(scope)} -u {unit}`".replace("  ", " ")
             out.append(fact(f"unit:{unit}", False,
                             f"{unit} has failed: its last run did not succeed", journal))
     if not out:
         out.append(fact("units", True, "no unit of Loam's machinery is failed",
                         "`systemctl --user list-units --failed 'loam-*'`"))
+    return out
+
+
+def plugin_servers() -> list[dict]:
+    import loam_plugin_servers as servers  # noqa: PLC0415
+    if not servers.managed():
+        return []
+    probs = servers.server_problems()
+    if not probs:
+        return [fact("plugin-servers", True,
+                     "every enabled plugin server can start",
+                     "`bin/plugin-servers health`")]
+    out = []
+    for p in probs:
+        pid = p["id"]
+        name = p.get("name") or pid
+        label = f"{name} ({pid})" if name.lower() != pid.lower() else pid
+        evidence = (f"`bin/plugin-servers status {pid}` and "
+                    f"`journalctl --user -u {servers.unit(pid)}`")
+        out.append(fact(
+            f"plugin-server:{pid}", False,
+            f"plugin {label} is turned on, but its server cannot start: {p['reason']}",
+            evidence,
+        ))
     return out
 
 
@@ -499,7 +538,7 @@ def every_tick(at: float, states: dict) -> list[tuple[str, Callable[[], list[dic
     return [("reflection", lambda: reflections(at)), ("broker", broker),
             ("login", lambda: logins(states)), ("hears", hears), ("memory", lambda: memory(at)),
             ("memsample", lambda: memsample(at)), ("disk", disks),
-            ("units", units), ("github", github)]
+            ("units", units), ("plugin_servers", plugin_servers), ("github", github)]
 
 
 def once_a_day() -> list[tuple[str, Callable[[], list[dict]]]]:

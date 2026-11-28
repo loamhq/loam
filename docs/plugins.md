@@ -1048,10 +1048,27 @@ lines; `GET /v1/plugins/<id>` always adds them. A row that is not in force
 says `stopped` with a `why`. Where units are not managed (a test, with Yours
 elsewhere and no `LOAM_PLUGIN_UNITS=1`) the state is `unmanaged`.
 
-`bin/plugin-servers status [<id>]`, `restart <id>`, `reconcile` and `ports`
-are the same from a shell. The first-party example is
+`bin/plugin-servers status [<id>]`, `health [--json]`, `restart <id>`,
+`reconcile` and `ports` are the same from a shell. The first-party example is
 `docs/examples/plugins/echo/`: an `app` whose server answers with what it
 was asked and whose `/crash` exits on purpose.
+
+**Python virtual environments across server moves and OS upgrades (2026-11-27).**
+`lib/loam_plugin_env.py` checks every enabled server plugin's runtime
+environment on `reconcile` (at install/migrate/revive, update, boot, and every
+five minutes) and before `start` (on wake or restart). If `server.run` invokes a
+Python virtual environment inside the plugin folder (for example
+`.venv/bin/python server/main.py` or `.venv/bin/uvicorn ...`) and the venv is
+missing, has a dangling interpreter symlink, has a broken console-script
+shebang, or was built for a different Python minor version than the interpreter
+now on this box, Loam moves the broken venv aside under a per-plugin lock and
+rebuilds it in place from `uv.lock` + `pyproject.toml` (`uv sync --frozen`),
+`pyproject.toml`, or `requirements.txt` without touching any tracked plugin
+file (rolling back on failure with cooldown backoff). Healthy environments are
+never rebuilt and running servers are never restarted. `loam status` and
+`loam-check` run the same read-only preflight on all enabled server plugins
+(including sleeping ones) and report both failed units and unstartable sleeping
+servers in plain words.
 
 ---
 

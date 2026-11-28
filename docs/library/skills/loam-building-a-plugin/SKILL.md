@@ -86,7 +86,13 @@ request, stream or WebSocket in flight. Bind the port given in `PORT` /
 background work. If a server genuinely needs to stay running continuously
 (for example an outbound bot connection or long-lived in-memory state),
 declare `server: { always_on: true }` in `PLUGIN.md` (plugins with an
-external `contributes.box.listener` stay on by default). A plugin that calls a paid service names its provider in
+external `contributes.box.listener` stay on by default). If a Python server
+runs from a local virtual environment (for example `server: { run: .venv/bin/python server/main.py }`),
+keep `pyproject.toml` and `uv.lock` (or `requirements.txt`) in the plugin folder
+and keep `.venv/` out of git: Loam automatically rebuilds `.venv` on reconcile
+or wake if it is missing or built for a different Python version (after a server
+move, OS upgrade, or restore), and reports unrepairable environments in `loam status`
+and the health check. A plugin that calls a paid service names its provider in
 `keys:` (`- provider: openai`, with a `why`) instead of asking for a key of
 its own: the owner enters each key once in Settings › Connections › API keys, and Loam
 hands the plugin the keys it declared, in the file `$LOAM_PLUGIN_KEYS`

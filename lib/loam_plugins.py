@@ -1845,7 +1845,8 @@ def wanted_servers() -> dict[str, dict]:
         spec = server_spec(row)
         if spec:
             out[row["id"]] = {**spec, "folder": row["folder"],
-                              "settings": row.get("settings")}
+                              "settings": row.get("settings"),
+                              "name": row.get("name")}
     return out
 
 

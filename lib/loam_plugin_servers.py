@@ -22,6 +22,7 @@ from pathlib import Path
 import loam_config as lc
 
 import loam_broker as cfg
+import loam_plugin_env as plugin_env
 
 UNIT_PREFIX = "loam-plugin-"
 GATEWAY_UNIT = "loam-plugins-gateway.service"
@@ -31,6 +32,7 @@ DOOR_PORT = 8936                    # its share door, /s/*, without the login (2
 GATEWAY_CODE_FILES = (
     "bin/plugin-gateway",
     "bin/plugin-servers",
+    "lib/loam_plugin_env.py",
     "lib/loam_plugin_servers.py",
     "lib/loam_plugins.py",
     "lib/loam_contributions.py",
@@ -593,6 +595,78 @@ def status(
     return out
 
 
+def _log_error_line(lines: list[str]) -> str | None:
+    """Pick the most informative recent error line from a failing unit's log."""
+    cleaned = [ln.strip() for ln in lines if ln.strip()]
+    if not cleaned:
+        return None
+    for ln in reversed(cleaned):
+        if any(tok in ln for tok in (
+            "Error:", "Exception:", "No such file", "not found",
+            "Permission denied", "FATAL", "Cannot find module", "ModuleNotFoundError",
+        )):
+            return ln[:200]
+    for ln in reversed(cleaned):
+        if not ln.startswith(("Failed with result", "Main process exited", "Started ", "Stopped ")):
+            return ln[:200]
+    return cleaned[-1][:200]
+
+
+def server_problems(
+    want: dict[str, dict] | None = None,
+    shown: dict[str, dict] | None = None,
+) -> list[dict]:
+    """Enabled plugin servers that have failed or cannot start on this host.
+
+    Read-only: inspects every enabled server plugin (including sleeping
+    on-demand servers) without waking or mutating anything.
+    """
+    if want is None:
+        import loam_plugins as plugins  # noqa: PLC0415
+        want = plugins.wanted_servers()
+    if not want:
+        return []
+    if shown is None:
+        shown = _show(sorted(want)) if managed() else {}
+    problems: list[dict] = []
+    for pid, spec in sorted(want.items()):
+        props = shown.get(pid, {})
+        always_on = bool(spec.get("always_on"))
+        st = _state(props)
+        if st == "stopped" and not always_on:
+            st = "asleep"
+        env = plugin_env.inspect(spec["folder"], spec["run"])
+        name = spec.get("name") or pid
+        if not env["ok"]:
+            rep_err = plugin_env.last_repair_error(pid, spec["folder"], spec["run"])
+            reason = plugin_env.format_reason(env, rep_err)
+            problems.append({
+                "id": pid,
+                "name": name,
+                "state": st,
+                "code": env.get("code") or "env_broken",
+                "reason": reason,
+                "repairable": bool(env.get("repairable") and not rep_err),
+                "unit": unit(pid),
+                "folder": str(spec["folder"]),
+            })
+        elif st == "failing":
+            tail = _log_error_line(logs(pid))
+            reason = (f"its server crashed and stopped retrying ({tail})"
+                      if tail else "its server crashed and stopped retrying")
+            problems.append({
+                "id": pid,
+                "name": name,
+                "state": st,
+                "code": "unit_failed",
+                "reason": reason,
+                "repairable": False,
+                "unit": unit(pid),
+                "folder": str(spec["folder"]),
+            })
+    return problems
+
+
 def annotate(rows: list[dict], logs: bool = False) -> list[dict]:
     """Each row that has a server gets ``service``: whether it should run
     (``wanted``), its state (running, asleep, starting, failing, stopping,
@@ -627,6 +701,11 @@ def annotate(rows: list[dict], logs: bool = False) -> list[dict]:
                      wanted=wanted, always_on=always_on)
         svc["wanted"] = wanted
         svc["run"] = spec["run"]
+        if wanted:
+            env = plugin_env.inspect(r["folder"], spec["run"])
+            if not env["ok"]:
+                rep_err = plugin_env.last_repair_error(r["id"], r["folder"], spec["run"])
+                svc["env_problem"] = plugin_env.format_reason(env, rep_err)
         r["service"] = svc
     return rows
 
@@ -664,6 +743,9 @@ def start(pid: str, want: dict, fresh: bool = False, port: int | None = None) ->
     state = _state(props)
     if state in ("running", "starting") and not fresh:
         return status(pid, props, wanted=True, always_on=bool(want.get("always_on")))
+    env_res = plugin_env.ensure_ready(pid, want["folder"], want["run"], force_retry=fresh)
+    if not env_res["ok"]:
+        raise ServerError(f"{pid}'s server cannot start: {env_res['reason']}")
     if props.get("LoadState") == "loaded":
         run(["systemctl", "--user", "stop", unit(pid)])
         run(["systemctl", "--user", "reset-failed", unit(pid)])
@@ -743,7 +825,7 @@ def reconcile() -> dict:
         door_owner = loam_contributions.door_owner()
     except Exception:  # noqa: BLE001
         pass
-    started, stopped, asleep, moved, errors = [], [], [], [], {}
+    started, stopped, asleep, moved, repaired, errors, env_problems = [], [], [], [], [], {}, {}
     can_sleep_front = True
     gateway_action: str | None = None
     gw_info = gateway_unit_status()
@@ -772,9 +854,25 @@ def reconcile() -> dict:
     loaded = set(loaded_units())
     for pid, spec in sorted(want.items()):
         try:
+            env_res = plugin_env.ensure_ready(
+                pid, spec["folder"], spec["run"],
+                cooldown_s=plugin_env.DEFAULT_REPAIR_COOLDOWN_S,
+            )
+            if env_res.get("repaired"):
+                repaired.append(pid)
+                if pid in loaded and _state(_show([pid]).get(pid, {})) == "failing":
+                    if spec.get("always_on"):
+                        start(pid, spec, fresh=True)
+                        started.append(pid)
+                    else:
+                        stop(pid)
+                        loaded.discard(pid)
+            elif not env_res["ok"]:
+                env_problems[pid] = env_res["reason"]
+
             front = port_for(pid)
             if spec.get("always_on"):
-                if pid not in loaded:
+                if pid not in loaded and env_res["ok"]:
                     start(pid, spec)
                     started.append(pid)
             else:
@@ -818,8 +916,11 @@ def reconcile() -> dict:
         pass
     notify_gateway()
     out = {"managed": True, "started": started, "stopped": stopped,
-           "asleep": sorted(asleep), "moved": moved, "errors": errors,
+           "asleep": sorted(asleep), "moved": moved, "repaired": repaired,
+           "errors": errors,
            "running": sorted(set(want) & (loaded | set(started)))}
+    if env_problems:
+        out["env_problems"] = env_problems
     if gateway_action is not None:
         out["gateway"] = gateway_action
     return out
