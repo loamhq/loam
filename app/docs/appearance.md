@@ -284,12 +284,17 @@ phone surfaces reach both edges. The app's viewport height and keyboard offset d
 by the scale; DOM-rectangle calculations for thread popovers, reading anchors
 and sheet dragging convert screen pixels back into layout pixels (`uiScale()` accepts
 `0.5`–`2`). Sticky author labels and the composer retain native CSS layout, with
-`.composer-actions` wrapping cleanly and `.composer-box .modelbtn` capping at
-`calc(100% - 48px)` so 200% on a 390px phone stays compact and free of overlap.
-Appearance's touch controls retain at least 44 screen CSS pixels at the small end,
-and at narrow container widths (`<= 240px`) the Size slider stacks above `−`/`+` and
-the phone bottom tab bar compacts so tab labels never clip. Narrow scaled thread-list
-headers compact, then wrap their actions rather than losing a button offscreen.
+`.composer-actions` wrapping cleanly, `.composer-end` (`margin-left: auto`) keeping
+the microphone and send buttons paired at the right edge even when wrapped, and
+`.composer-box .modelbtn` capping at `calc(100% - 48px)`. Appearance's touch controls
+retain at least 44 screen CSS pixels at the small end, and at narrow container widths
+(`<= 240px`) the Size slider stacks above `−`/`+` and the phone bottom tab bar
+compacts so tab labels never clip. Narrow scaled thread-list headers (`container: list`)
+compact title and icon targets together so actions stay on one composed row (using
+`:root .tt-list` specificity to outrank `running.css`), the `.strip` agent grid uses
+`repeat(auto-fit, minmax(…, 1fr))` to fill rows evenly at every scale, and desktop
+`.desk` (`container: desk`, `<= 960px`) trims `.rail` (`64px`) and `.listcol` (`260px`)
+to keep two-pane navigation while preserving a generous active reading pane at 200%.
 
 An older host that still enforces 75–150 rejects extended sizes (`60`–`70` and
 `155`–`200`). Those pending extended choices apply immediately and are cached under

@@ -341,9 +341,17 @@ have never met.
   full range. On narrow high-zoom phone canvases (`<= 240px` layout width),
   `.nav` compacts inside `@container`, `.appearance-card[aria-labelledby="appearance-size"]`
   stacks the slider full-width above `−`/`+`, and `.composer-actions` wraps
-  with `.composer-box .modelbtn { max-width: calc(100% - 48px) }` (keeping
+  with `.composer-end { margin-left: auto; flex: none; }` (pairing `extra`,
+  `microphone`, and `send` on the right edge wherever a break occurs) and
+  `.composer-box .modelbtn { max-width: calc(100% - 48px) }` (keeping
   `.composer-actions` free of `@media`/`@container` rules per `test/style.test.js`).
-  Extended sizes (`60`–`70` and `155`–`200`) cache locally under
+  `.tt-list` (`container: list / inline-size`) compacts `:root .tt-list :is(.home-head,.list-head)`
+  (outranking `running.css`'s `.tt-list .list-head`) so title and 4–5 actions
+  stay on one row, `.strip` uses `repeat(auto-fit, minmax(72px, 1fr))` (`58px`
+  with `48px` blobs at `<= 265px`) to fill/centre rows at `60%–200%`, and `.desk`
+  (`container: desk / inline-size`, `<= 960px`) trims `.rail` (`64px`) and
+  `.listcol:not(.away)` (`260px`) so high-zoom desktop keeps two panes with a
+  generous thread pane. Extended sizes (`60`–`70` and `155`–`200`) cache locally under
   `loam.appearance.size` when an older host rejects them and migrate once the
   host accepts `60`–`200`. See `test/appearance.test.js`,
   `test/appearance-browser.mjs`, `test/app-size-browser.mjs`, and

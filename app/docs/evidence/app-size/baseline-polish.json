@@ -1,0 +1,197 @@
+{
+  "fixtureOnly": true,
+  "summary": [
+    {
+      "phase": "before",
+      "width": 390,
+      "mode": "light",
+      "size": 60,
+      "screen": "chats",
+      "height": 844,
+      "scale": "0.54",
+      "app": {
+        "x": 0,
+        "right": 390,
+        "width": 390,
+        "height": 844
+      },
+      "headerRows": {
+        "count": 5,
+        "spread": 0,
+        "titleTruncated": false
+      },
+      "agentBalance": {
+        "firstRowCount": 7,
+        "leftGap": 6,
+        "rightGap": 82
+      },
+      "composerInfo": null,
+      "desktopPane": null,
+      "issues": [
+        "agent strip unbalanced: leftGap=6.5 rightGap=82.3"
+      ]
+    },
+    {
+      "phase": "before",
+      "width": 390,
+      "mode": "light",
+      "size": 200,
+      "screen": "chats",
+      "height": 844,
+      "scale": "1.8",
+      "app": {
+        "x": 0,
+        "right": 390,
+        "width": 390,
+        "height": 844
+      },
+      "headerRows": {
+        "count": 5,
+        "spread": 168,
+        "titleTruncated": false
+      },
+      "agentBalance": {
+        "firstRowCount": 2,
+        "leftGap": 22,
+        "rightGap": 84
+      },
+      "composerInfo": null,
+      "desktopPane": null,
+      "issues": [
+        "chats header wrapped across rows: spread=168px",
+        "agent strip unbalanced: leftGap=21.6 rightGap=84.0"
+      ]
+    },
+    {
+      "phase": "before",
+      "width": 1440,
+      "mode": "light",
+      "size": 200,
+      "screen": "thread",
+      "height": 900,
+      "scale": "1.8",
+      "app": {
+        "x": 0,
+        "right": 1440,
+        "width": 1440,
+        "height": 900
+      },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 355,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 86
+      },
+      "desktopPane": {
+        "paneWidth": 605,
+        "titleWidth": 78,
+        "truncated": true,
+        "titleText": "A little room for the week"
+      },
+      "issues": [
+        "send not on right edge: rightEdgeGap=355.5px",
+        "desktop composer wrapped unnecessarily: rowSpread=86px",
+        "desktop pane too narrow: 604.8px",
+        "desktop thread title too cramped: 77.5px"
+      ]
+    },
+    {
+      "phase": "before",
+      "width": 390,
+      "mode": "dark",
+      "size": 60,
+      "screen": "chats",
+      "height": 844,
+      "scale": "0.54",
+      "app": {
+        "x": 0,
+        "right": 390,
+        "width": 390,
+        "height": 844
+      },
+      "headerRows": {
+        "count": 5,
+        "spread": 0,
+        "titleTruncated": false
+      },
+      "agentBalance": {
+        "firstRowCount": 7,
+        "leftGap": 6,
+        "rightGap": 82
+      },
+      "composerInfo": null,
+      "desktopPane": null,
+      "issues": [
+        "agent strip unbalanced: leftGap=6.5 rightGap=82.3"
+      ]
+    },
+    {
+      "phase": "before",
+      "width": 390,
+      "mode": "dark",
+      "size": 200,
+      "screen": "chats",
+      "height": 844,
+      "scale": "1.8",
+      "app": {
+        "x": 0,
+        "right": 390,
+        "width": 390,
+        "height": 844
+      },
+      "headerRows": {
+        "count": 5,
+        "spread": 168,
+        "titleTruncated": false
+      },
+      "agentBalance": {
+        "firstRowCount": 2,
+        "leftGap": 22,
+        "rightGap": 84
+      },
+      "composerInfo": null,
+      "desktopPane": null,
+      "issues": [
+        "chats header wrapped across rows: spread=168px",
+        "agent strip unbalanced: leftGap=21.6 rightGap=84.0"
+      ]
+    },
+    {
+      "phase": "before",
+      "width": 1440,
+      "mode": "dark",
+      "size": 200,
+      "screen": "thread",
+      "height": 900,
+      "scale": "1.8",
+      "app": {
+        "x": 0,
+        "right": 1440,
+        "width": 1440,
+        "height": 900
+      },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 355,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 86
+      },
+      "desktopPane": {
+        "paneWidth": 605,
+        "titleWidth": 78,
+        "truncated": true,
+        "titleText": "A little room for the week"
+      },
+      "issues": [
+        "send not on right edge: rightEdgeGap=355.5px",
+        "desktop composer wrapped unnecessarily: rowSpread=86px",
+        "desktop pane too narrow: 604.8px",
+        "desktop thread title too cramped: 77.5px"
+      ]
+    }
+  ]
+}

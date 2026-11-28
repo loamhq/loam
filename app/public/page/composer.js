@@ -432,26 +432,29 @@ function builtinComposer(ctx) {
         // layout's own chrome.
         host.registry.draw('composer.tool', { host, slot: 'model', target: 'draft', context: ctx, defaultView: () => ctx.modelControl }),
         host.registry.draw('composer.tool', { host, slot: 'mention', target: 'draft', context: ctx, defaultView: () => ctx.mentionButton ?? null }),
-        h('div', { class: 'composer-gap' }),
-        host.registry.draw('composer.tool', { host, slot: 'extra', target: 'draft', context: ctx }),
-        host.registry.draw('composer.tool', { host, slot: 'microphone', target: 'draft' }),
-        // The send button is always on the right of row two — it is the only
-        // way to send on a phone now that Enter makes a line, so a button that
-        // came and went with the draft would be a button a person had to
-        // discover. It is disabled until there is something to send, which says
-        // the same thing without moving.
-        take
-          ? null
-          : host.registry.draw('composer.tool', { host, slot: 'send', target: 'draft', context: ctx, defaultView: () => h(
-              'button',
-              {
-                class: 'roundsend',
-                type: 'submit',
-                disabled: !has,
-                title: going ? 'Waiting for the files to finish going up' : 'Send',
-              },
-              icon.send(16),
-            ) }),
+        h(
+          'div',
+          { class: 'composer-end' },
+          host.registry.draw('composer.tool', { host, slot: 'extra', target: 'draft', context: ctx }),
+          host.registry.draw('composer.tool', { host, slot: 'microphone', target: 'draft' }),
+          // The send button is always on the right of row two — it is the only
+          // way to send on a phone now that Enter makes a line, so a button that
+          // came and went with the draft would be a button a person had to
+          // discover. It is disabled until there is something to send, which says
+          // the same thing without moving.
+          take
+            ? null
+            : host.registry.draw('composer.tool', { host, slot: 'send', target: 'draft', context: ctx, defaultView: () => h(
+                'button',
+                {
+                  class: 'roundsend',
+                  type: 'submit',
+                  disabled: !has,
+                  title: going ? 'Waiting for the files to finish going up' : 'Send',
+                },
+                icon.send(16),
+              ) }),
+        ),
       ),
       // Last in the box and drawn over its top edge, so the rows read in the
       // order they are seen: the notice, the field, the actions.
