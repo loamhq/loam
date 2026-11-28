@@ -15,6 +15,18 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": {
+        "count": 5,
+        "spread": 0,
+        "titleTruncated": false
+      },
+      "agentBalance": {
+        "firstRowCount": 7,
+        "leftGap": 7,
+        "rightGap": 7
+      },
+      "composerInfo": null,
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -31,6 +43,15 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 4,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -47,6 +68,15 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 4,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -63,6 +93,10 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": null,
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -79,6 +113,10 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": null,
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -95,6 +133,18 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": {
+        "count": 5,
+        "spread": 0,
+        "titleTruncated": false
+      },
+      "agentBalance": {
+        "firstRowCount": 5,
+        "leftGap": 11,
+        "rightGap": 11
+      },
+      "composerInfo": null,
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -111,6 +161,15 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 6,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -127,6 +186,15 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 6,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -143,6 +211,10 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": null,
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -159,6 +231,10 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": null,
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -175,6 +251,18 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": {
+        "count": 5,
+        "spread": 0,
+        "titleTruncated": false
+      },
+      "agentBalance": {
+        "firstRowCount": 3,
+        "leftGap": 14,
+        "rightGap": 14
+      },
+      "composerInfo": null,
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -191,6 +279,15 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 12,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 86
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -207,6 +304,15 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 12,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 86
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -223,6 +329,10 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": null,
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -239,6 +349,10 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": null,
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -255,6 +369,18 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": {
+        "count": 5,
+        "spread": 0,
+        "titleTruncated": false
+      },
+      "agentBalance": {
+        "firstRowCount": 7,
+        "leftGap": 7,
+        "rightGap": 7
+      },
+      "composerInfo": null,
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -271,6 +397,15 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 4,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -287,6 +422,15 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 4,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -303,6 +447,10 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": null,
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -319,6 +467,10 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": null,
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -335,6 +487,18 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": {
+        "count": 5,
+        "spread": 0,
+        "titleTruncated": false
+      },
+      "agentBalance": {
+        "firstRowCount": 5,
+        "leftGap": 11,
+        "rightGap": 11
+      },
+      "composerInfo": null,
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -351,6 +515,15 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 6,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -367,6 +540,15 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 6,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -383,6 +565,10 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": null,
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -399,6 +585,10 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": null,
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -415,6 +605,18 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": {
+        "count": 5,
+        "spread": 0,
+        "titleTruncated": false
+      },
+      "agentBalance": {
+        "firstRowCount": 3,
+        "leftGap": 14,
+        "rightGap": 14
+      },
+      "composerInfo": null,
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -431,6 +633,15 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 12,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 86
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -447,6 +658,15 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 12,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 86
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -463,6 +683,10 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": null,
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -479,6 +703,10 @@
         "width": 390,
         "height": 844
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": null,
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -495,6 +723,18 @@
         "width": 1440,
         "height": 900
       },
+      "headerRows": {
+        "count": 6,
+        "spread": 0,
+        "titleTruncated": false
+      },
+      "agentBalance": {
+        "firstRowCount": 5,
+        "leftGap": 4,
+        "rightGap": 4
+      },
+      "composerInfo": null,
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -510,6 +750,20 @@
         "right": 1440,
         "width": 1440,
         "height": 900
+      },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 4,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": {
+        "paneWidth": 1189,
+        "titleWidth": 136,
+        "truncated": false,
+        "titleText": "A little room for the week"
       },
       "issues": []
     },
@@ -527,6 +781,15 @@
         "width": 1440,
         "height": 900
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 4,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -543,6 +806,15 @@
         "width": 1440,
         "height": 900
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 4,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -559,6 +831,15 @@
         "width": 1440,
         "height": 900
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 4,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -575,6 +856,18 @@
         "width": 1440,
         "height": 900
       },
+      "headerRows": {
+        "count": 6,
+        "spread": 0,
+        "titleTruncated": false
+      },
+      "agentBalance": {
+        "firstRowCount": 5,
+        "leftGap": 7,
+        "rightGap": 7
+      },
+      "composerInfo": null,
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -590,6 +883,20 @@
         "right": 1440,
         "width": 1440,
         "height": 900
+      },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 6,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": {
+        "paneWidth": 1022,
+        "titleWidth": 224,
+        "truncated": false,
+        "titleText": "A little room for the week"
       },
       "issues": []
     },
@@ -607,6 +914,15 @@
         "width": 1440,
         "height": 900
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 6,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -623,6 +939,15 @@
         "width": 1440,
         "height": 900
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 6,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -639,6 +964,15 @@
         "width": 1440,
         "height": 900
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 6,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -655,6 +989,18 @@
         "width": 1440,
         "height": 900
       },
+      "headerRows": {
+        "count": 6,
+        "spread": 0,
+        "titleTruncated": false
+      },
+      "agentBalance": {
+        "firstRowCount": 4,
+        "leftGap": 14,
+        "rightGap": 14
+      },
+      "composerInfo": null,
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -670,6 +1016,20 @@
         "right": 1440,
         "width": 1440,
         "height": 900
+      },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 12,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": {
+        "paneWidth": 835,
+        "titleWidth": 373,
+        "truncated": true,
+        "titleText": "A little room for the week"
       },
       "issues": []
     },
@@ -687,6 +1047,15 @@
         "width": 1440,
         "height": 900
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 12,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -703,6 +1072,15 @@
         "width": 1440,
         "height": 900
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 12,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -719,6 +1097,15 @@
         "width": 1440,
         "height": 900
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 12,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -735,6 +1122,18 @@
         "width": 1440,
         "height": 900
       },
+      "headerRows": {
+        "count": 6,
+        "spread": 0,
+        "titleTruncated": false
+      },
+      "agentBalance": {
+        "firstRowCount": 5,
+        "leftGap": 4,
+        "rightGap": 4
+      },
+      "composerInfo": null,
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -750,6 +1149,20 @@
         "right": 1440,
         "width": 1440,
         "height": 900
+      },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 4,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": {
+        "paneWidth": 1189,
+        "titleWidth": 136,
+        "truncated": false,
+        "titleText": "A little room for the week"
       },
       "issues": []
     },
@@ -767,6 +1180,15 @@
         "width": 1440,
         "height": 900
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 4,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -783,6 +1205,15 @@
         "width": 1440,
         "height": 900
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 4,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -799,6 +1230,15 @@
         "width": 1440,
         "height": 900
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 4,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -815,6 +1255,18 @@
         "width": 1440,
         "height": 900
       },
+      "headerRows": {
+        "count": 6,
+        "spread": 0,
+        "titleTruncated": false
+      },
+      "agentBalance": {
+        "firstRowCount": 5,
+        "leftGap": 7,
+        "rightGap": 7
+      },
+      "composerInfo": null,
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -830,6 +1282,20 @@
         "right": 1440,
         "width": 1440,
         "height": 900
+      },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 6,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": {
+        "paneWidth": 1022,
+        "titleWidth": 224,
+        "truncated": false,
+        "titleText": "A little room for the week"
       },
       "issues": []
     },
@@ -847,6 +1313,15 @@
         "width": 1440,
         "height": 900
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 6,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -863,6 +1338,15 @@
         "width": 1440,
         "height": 900
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 6,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -879,6 +1363,15 @@
         "width": 1440,
         "height": 900
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 6,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -895,6 +1388,18 @@
         "width": 1440,
         "height": 900
       },
+      "headerRows": {
+        "count": 6,
+        "spread": 0,
+        "titleTruncated": false
+      },
+      "agentBalance": {
+        "firstRowCount": 4,
+        "leftGap": 14,
+        "rightGap": 14
+      },
+      "composerInfo": null,
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -910,6 +1415,20 @@
         "right": 1440,
         "width": 1440,
         "height": 900
+      },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 12,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": {
+        "paneWidth": 835,
+        "titleWidth": 373,
+        "truncated": true,
+        "titleText": "A little room for the week"
       },
       "issues": []
     },
@@ -927,6 +1446,15 @@
         "width": 1440,
         "height": 900
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 12,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -943,6 +1471,15 @@
         "width": 1440,
         "height": 900
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 12,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     },
     {
@@ -959,6 +1496,15 @@
         "width": 1440,
         "height": 900
       },
+      "headerRows": null,
+      "agentBalance": null,
+      "composerInfo": {
+        "rightEdgeGap": 12,
+        "sameRow": true,
+        "sendRightOfMic": true,
+        "rowSpread": 0
+      },
+      "desktopPane": null,
       "issues": []
     }
   ]

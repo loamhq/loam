@@ -1,8 +1,8 @@
 // Browser regression test and before/after captures for app sizing:
 // full-width main surfaces at every size, 0.9-base default (100% = --ui-scale 0.9),
-// and usable 60%–200% range across Chats, Thread (long message + composer),
-// Files, Settings > Appearance, and pop-up sheets at 390x844 and 1440x900,
-// light and dark.
+// and usable, composed 60%–200% layouts across Chats (with 7 agents and 4+
+// header actions), Thread (long message + composer with mic & send), Files,
+// Settings > Appearance, and pop-up sheets at 390x844 and 1440x900, light and dark.
 //
 // Run from app/:
 //   LOAM_PLAYWRIGHT=/path/to/playwright/index.mjs \
@@ -10,9 +10,9 @@
 //   APP_SIZE_EVIDENCE=docs/evidence/app-size node test/app-size-browser.mjs
 //
 // Pass APP_SIZE_BASELINE=1 against a git archive of main to capture pre-change
-// baseline screenshots (75% narrow-column bug and old 100% scale).
+// baseline screenshots of the 200% issues.
 import assert from 'node:assert/strict'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { oneProductFixture } from './one-product-fixture.mjs'
 import { filesHost } from './files-host.js'
@@ -30,12 +30,17 @@ const LONG_REPLY = [
   '',
   '- **Full-width surfaces:** Remove the legacy 460px ceiling on the app shell so Chats, Threads, Files, Apps, and the bottom tab bar always reach the viewport edges when zoomed out.',
   '- **Calibrated default:** Make 100% correspond to 0.9 of the previous scale (`--ui-scale: 0.9`), keeping the layout calm and airy while letting users scale from 60% up to 200%.',
-  '- **High-zoom usability:** Allow the composer action row and size slider controls to wrap cleanly on a 390px phone at 200% while keeping every target reachable.',
+  '- **High-zoom usability:** Keep the Chats header composed, balance the agent faces grid across the row, and keep Send beside the microphone at the right of the composer.',
   '',
   'Inline code such as `sizeToScale(100) === 0.9` and a longer token like `appearance.phone.size=60..200` should also stay contained inside the message column.',
 ].join('\n')
 
 const app = await oneProductFixture()
+// Seven synthetic agents to match real-world multi-agent grids at 60%, 100%, and 200%.
+app.f.agents.push(
+  { id: 'moss', name: 'Moss', engine: 'claude-code', color: '#4A6B5C', face_slot: 5 },
+  { id: 'fern', name: 'Fern', engine: 'claude-code', color: '#6E5A7A', face_slot: 6 },
+)
 for (const [key, handler] of Object.entries(filesHost().routes)) {
   if (key.includes('/v1/files/')) app.routes[key] = handler
 }
@@ -65,7 +70,36 @@ app.routes['PATCH /v1/settings/appearance'] = (req, res, url, raw) => {
   json(res, values)
 }
 
+// Register a synthetic plugin list action (like Board) and microphone button
+// so the test exercises the real 4/5-button header and mic+send composer row.
+const appSource = await readFile(new URL('../public/app.js', import.meta.url), 'utf8')
+const instrumentedApp = appSource + `
+;(() => {
+  const fx = registry.scope({ id: 'fixture-polish' })
+  fx.places['thread.list.action'].add({
+    id: 'fixture-board',
+    render: () => h('button', { class: 'iconbtn ghost', type: 'button', title: 'Board', 'aria-label': 'Board' }, icon.grid ? icon.grid(18) : icon.folder(18)),
+  })
+  fx.places.composer.tool.add({
+    id: 'fixture-mic',
+    slot: 'microphone',
+    when: (context) => context.slot === 'microphone' && context.target === 'draft',
+    render: () => h('button', { class: 'roundmic', type: 'button', title: 'Voice input', 'aria-label': 'Voice input', style: { borderRadius: '999px', border: '0' } }, icon.mic ? icon.mic(16) : icon.plus(16)),
+  })
+  schedule()
+})()
+`
+
 const browser = await chromium.launch({ executablePath: process.env.LOAM_CHROME, headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] })
+
+async function newPage(width, height, mode) {
+  const isPhone = width < 1100
+  const ctx = await browser.newContext({ viewport: { width, height }, colorScheme: mode, isMobile: isPhone, hasTouch: isPhone, reducedMotion: 'reduce' })
+  await ctx.route('**/app.js', (route) => route.fulfill({ contentType: 'text/javascript', body: instrumentedApp }))
+  const page = await ctx.newPage()
+  page.setDefaultTimeout(10000)
+  return { ctx, page }
+}
 
 async function settle(page) {
   await page.evaluate(async () => {
@@ -74,8 +108,8 @@ async function settle(page) {
   })
 }
 
-async function measure(page) {
-  return page.evaluate(() => {
+async function measure(page, screen) {
+  return page.evaluate((currentScreen) => {
     const W = innerWidth, H = innerHeight
     const appBox = document.querySelector('#app').getBoundingClientRect()
     const issues = []
@@ -91,6 +125,90 @@ async function measure(page) {
     if (document.documentElement.scrollHeight > H + 1) {
       issues.push(`doc overflowY: ${document.documentElement.scrollHeight} > ${H}`)
     }
+
+    // 1. Chats list header stays on one composed row (no stranded button) and
+    //    agent faces grid fills/centers its row symmetrically.
+    let headerRows = null, agentBalance = null
+    if (currentScreen === 'chats') {
+      const head = document.querySelector('.tt-list .home-head, .tt-list .list-head')
+      if (head) {
+        const items = [...head.querySelectorAll('.display, button')].filter((el) => el.getBoundingClientRect().width > 0)
+        const ys = items.map((el) => Math.round(el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2))
+        const spread = Math.max(...ys) - Math.min(...ys)
+        const title = head.querySelector('.display')
+        const titleTruncated = title ? title.scrollWidth > title.clientWidth + 1 : false
+        headerRows = { count: items.length, spread, titleTruncated }
+        if (spread > 10) issues.push(`chats header wrapped across rows: spread=${spread}px`)
+        if (titleTruncated) issues.push(`chats heading truncated: sw=${title.scrollWidth} cw=${title.clientWidth}`)
+        for (const el of items) {
+          const r = el.getBoundingClientRect()
+          if (r.left < -1 || r.right > W + 1) issues.push(`header item out: ${r.left.toFixed(1)}..${r.right.toFixed(1)}`)
+        }
+      }
+      const strip = document.querySelector('.tt-list .strip')
+      if (strip) {
+        const sr = strip.getBoundingClientRect()
+        const personas = [...strip.querySelectorAll('.persona')].map((p) => p.getBoundingClientRect()).filter((r) => r.width > 0)
+        if (personas.length) {
+          const firstRowTop = Math.min(...personas.map((r) => r.top))
+          const firstRow = personas.filter((r) => Math.abs(r.top - firstRowTop) < 10)
+          const leftGap = Math.min(...firstRow.map((r) => r.left)) - sr.left
+          const rightGap = sr.right - Math.max(...firstRow.map((r) => r.right))
+          agentBalance = { firstRowCount: firstRow.length, leftGap: Math.round(leftGap), rightGap: Math.round(rightGap) }
+          if (Math.abs(leftGap - rightGap) > 16) {
+            issues.push(`agent strip unbalanced: leftGap=${leftGap.toFixed(1)} rightGap=${rightGap.toFixed(1)}`)
+          }
+        }
+      }
+    }
+
+    // 2. Composer: no overlap, send stays on right beside mic (never stranded on far left).
+    let composerInfo = null
+    const compBox = document.querySelector('.composer-box')
+    const compBtns = [...document.querySelectorAll('.composer-actions button')].filter((b) => b.getBoundingClientRect().width > 0)
+    if (compBox && compBtns.length) {
+      const cbr = compBox.getBoundingClientRect()
+      for (let i = 0; i < compBtns.length; i++) {
+        const a = compBtns[i].getBoundingClientRect()
+        if (a.left < -1 || a.right > W + 1) issues.push(`composer btn ${i} out`)
+        if (compBtns[i].scrollWidth > compBtns[i].clientWidth + 2) issues.push(`composer btn ${i} inner clip`)
+        for (let j = i + 1; j < compBtns.length; j++) {
+          const b = compBtns[j].getBoundingClientRect()
+          if (a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1) {
+            issues.push(`composer overlap ${i} & ${j}`)
+          }
+        }
+      }
+      const mic = document.querySelector('.composer-actions .roundmic')
+      const send = document.querySelector('.composer-actions .roundsend')
+      if (mic && send) {
+        const mr = mic.getBoundingClientRect(), sr = send.getBoundingClientRect()
+        const rightEdgeGap = cbr.right - sr.right
+        const sameRow = Math.abs((mr.top + mr.height / 2) - (sr.top + sr.height / 2)) < 8
+        const sendRightOfMic = sr.left >= mr.right - 1
+        const allTops = compBtns.map((b) => Math.round(b.getBoundingClientRect().top + b.getBoundingClientRect().height / 2))
+        const rowSpread = Math.max(...allTops) - Math.min(...allTops)
+        composerInfo = { rightEdgeGap: Math.round(rightEdgeGap), sameRow, sendRightOfMic, rowSpread }
+        if (!sameRow || !sendRightOfMic) issues.push(`send not beside mic: sameRow=${sameRow} sendRightOfMic=${sendRightOfMic}`)
+        if (rightEdgeGap > 24) issues.push(`send not on right edge: rightEdgeGap=${rightEdgeGap.toFixed(1)}px`)
+        if (W >= 1100 && rowSpread > 10) issues.push(`desktop composer wrapped unnecessarily: rowSpread=${rowSpread}px`)
+      }
+    }
+
+    // 3. Desktop thread pane width & title readability.
+    let desktopPane = null
+    if (currentScreen === 'thread' && W >= 1100) {
+      const pane = document.querySelector('.pane')
+      const title = document.querySelector('.pane .chattitle .display')
+      if (pane && title) {
+        const pr = pane.getBoundingClientRect(), tr = title.getBoundingClientRect()
+        const truncated = title.scrollWidth > title.clientWidth + 1
+        desktopPane = { paneWidth: Math.round(pr.width), titleWidth: Math.round(tr.width), truncated, titleText: title.textContent }
+        if (pr.width < 750) issues.push(`desktop pane too narrow: ${pr.width.toFixed(1)}px`)
+        if (truncated && tr.width < 220) issues.push(`desktop thread title too cramped: ${tr.width.toFixed(1)}px`)
+      }
+    }
+
     const sheet = document.querySelector('[data-menu-surface]:popover-open, .sheet.settings')
     if (sheet) {
       const sr = sheet.getBoundingClientRect()
@@ -103,18 +221,6 @@ async function measure(page) {
       if (r.left < -1 || r.right > W + 1) issues.push(`nav btn out: ${b.textContent.trim()}`)
       if (b.scrollWidth > b.clientWidth + 1) issues.push(`nav btn clip: ${b.textContent.trim()} ${b.scrollWidth}>${b.clientWidth}`)
     }
-    const compBtns = [...document.querySelectorAll('.composer-actions > button')].filter((b) => b.getBoundingClientRect().width > 0)
-    for (let i = 0; i < compBtns.length; i++) {
-      const a = compBtns[i].getBoundingClientRect()
-      if (a.left < -1 || a.right > W + 1) issues.push(`composer btn ${i} out`)
-      if (compBtns[i].scrollWidth > compBtns[i].clientWidth + 2) issues.push(`composer btn ${i} inner clip`)
-      for (let j = i + 1; j < compBtns.length; j++) {
-        const b = compBtns[j].getBoundingClientRect()
-        if (a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1) {
-          issues.push(`composer overlap ${i} & ${j}`)
-        }
-      }
-    }
     const slider = document.querySelector('#appearance-zoom')
     if (slider) {
       const sr = slider.getBoundingClientRect()
@@ -126,36 +232,42 @@ async function measure(page) {
       height: H,
       scale: getComputedStyle(document.documentElement).getPropertyValue('--ui-scale').trim(),
       app: { x: Math.round(appBox.x), right: Math.round(appBox.right), width: Math.round(appBox.width), height: Math.round(appBox.height) },
+      headerRows,
+      agentBalance,
+      composerInfo,
+      desktopPane,
       issues,
     }
-  })
+  }, screen)
 }
 
 const summary = []
 try {
   if (baseline) {
-    // Baseline mode against main: capture the 75% narrow-column bug on phone
-    // and the old 100% default on phone and desktop (light and dark).
-    const cases = [
-      [390, 844, 'light', 75],
-      [390, 844, 'dark', 75],
-      [390, 844, 'light', 100],
-      [390, 844, 'dark', 100],
-      [1440, 900, 'light', 100],
-      [1440, 900, 'dark', 100],
-    ]
-    for (const [width, height, mode, size] of cases) {
-      const isPhone = width < 1100
-      const kind = isPhone ? 'phone' : 'desktop'
-      values[kind] = { mode, size, theme: 'latte' }
-      const ctx = await browser.newContext({ viewport: { width, height }, colorScheme: mode, isMobile: isPhone, hasTouch: isPhone, reducedMotion: 'reduce' })
-      const page = await ctx.newPage()
+    // Baseline mode against main (f6312f4): capture the 3 broken spots at 200%
+    // (and 60% phone agent strip) with the same 7-agent / 4-button / mic fixture.
+    for (const mode of ['light', 'dark']) {
+      for (const size of [60, 200]) {
+        values.phone = { mode, size, theme: 'latte' }
+        const { ctx, page } = await newPage(390, 844, mode)
+        await page.goto(app.url)
+        await page.locator('.tt-row').first().waitFor()
+        await settle(page)
+        const m = await measure(page, 'chats')
+        summary.push({ phase: 'before', width: 390, mode, size, screen: 'chats', ...m })
+        if (out) await page.screenshot({ path: path.join(out, `before-polish-390-${mode}-${size}-chats.png`), animations: 'disabled' })
+        await ctx.close()
+      }
+      values.desktop = { mode, size: 200, theme: 'latte' }
+      const { ctx, page } = await newPage(1440, 900, mode)
       await page.goto(app.url)
       await page.locator('.tt-row').first().waitFor()
+      await page.locator('.tt-row', { hasText: 'A little room for the week' }).click()
+      await page.locator('.tt-message', { hasText: 'Weekly synthesis and next steps' }).waitFor()
       await settle(page)
-      const m = await measure(page)
-      summary.push({ phase: 'before', width, mode, size, screen: 'chats', ...m })
-      if (out) await page.screenshot({ path: path.join(out, `before-${width}-${mode}-${size}-chats.png`), animations: 'disabled' })
+      const m = await measure(page, 'thread')
+      summary.push({ phase: 'before', width: 1440, mode, size: 200, screen: 'thread', ...m })
+      if (out) await page.screenshot({ path: path.join(out, `before-polish-1440-${mode}-200-thread.png`), animations: 'disabled' })
       await ctx.close()
     }
   } else {
@@ -166,15 +278,13 @@ try {
       for (const mode of ['light', 'dark']) {
         for (const size of [60, 100, 200]) {
           values[kind] = { mode, size, theme: 'latte' }
-          const ctx = await browser.newContext({ viewport: { width, height }, colorScheme: mode, isMobile: isPhone, hasTouch: isPhone, reducedMotion: 'reduce' })
-          const page = await ctx.newPage()
+          const { ctx, page } = await newPage(width, height, mode)
           const errors = []
           page.on('pageerror', (e) => errors.push(e.message))
-          page.setDefaultTimeout(10000)
 
           const check = async (screen) => {
             await settle(page)
-            const m = await measure(page)
+            const m = await measure(page, screen)
             assert.equal(m.scale, expectedScale[size], `${width}-${mode}-${size}-${screen} scale`)
             assert.deepEqual(m.issues, [], `${width}-${mode}-${size}-${screen}: ${m.issues.join('; ')}`)
             summary.push({ phase: 'after', width, mode, size, screen, ...m })
@@ -232,8 +342,7 @@ try {
     // and automatic migration once the host accepts 60..200.
     values.phone = { mode: 'light', size: 100, theme: 'latte' }
     refuseExtended = true
-    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: 'light', isMobile: true, hasTouch: true, reducedMotion: 'reduce' })
-    const page = await ctx.newPage()
+    const { ctx, page } = await newPage(390, 844, 'light')
     await page.goto(app.url)
     await page.locator('.nav button[aria-label="Settings"]').click()
     await page.getByText('Appearance', { exact: true }).click()
@@ -259,7 +368,7 @@ try {
   }
 
   if (out) {
-    await writeFile(path.join(out, baseline ? 'baseline.json' : 'after.json'), JSON.stringify({ fixtureOnly: true, summary }, null, 2) + '\n')
+    await writeFile(path.join(out, baseline ? 'baseline-polish.json' : 'after.json'), JSON.stringify({ fixtureOnly: true, summary }, null, 2) + '\n')
   }
 } finally {
   await browser.close()

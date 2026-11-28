@@ -234,17 +234,20 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
 }
 .home-head .display { font-size: 34px; flex: 1; }
 
-.strip { display: flex; gap: 2px; padding: 14px 12px 8px; overflow-x: auto; flex: none; overscroll-behavior: contain; }
+.strip {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  justify-items: center; gap: 4px 2px; padding: 14px 12px 8px; flex: none;
+}
 .persona {
   border: 0; background: transparent; padding: 6px 4px 4px; border-radius: 20px;
   display: flex; flex-direction: column; align-items: center; gap: 6px;
-  width: 78px; flex: none;
+  width: 100%; max-width: 96px; min-width: 0;
 }
 @media (hover: hover) { .persona:hover { background: var(--paper-hover-alpha); } }
 .persona:active { background: var(--paper-pressed); }
 .persona .blob { width: 60px; height: 60px; font-size: 24px; }
 /* Label typography must not reach the shared blob's initial. */
-.persona-name { font-size: 12.5px; font-weight: 600; color: var(--paper-ink); }
+.persona-name { font-size: 12.5px; font-weight: 600; color: var(--paper-ink); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .search {
   margin: 6px 20px 0; display: flex; align-items: center; gap: 8px;
@@ -1225,7 +1228,7 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
 }
 /* Scope the composer actions separately from the action sheet, whose actions stack vertically. */
 .composer-actions { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px; }
-.composer-gap { flex: 1; min-width: 8px; }
+.composer-end { display: flex; align-items: center; gap: 4px; margin-left: auto; flex: none; }
 
 /* The design's round button is 40px, which is also the touch target the rest of
  * this page is drawn to. Row two has the width for it now that the buttons are
@@ -1746,7 +1749,7 @@ a.ghline { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
  * `app.js` decides *which layout is drawn* at the same width; this file styles
  * the one it drew. */
 
-.desk { flex: 1; min-height: 0; display: flex; }
+.desk { flex: 1; min-height: 0; display: flex; container: desk / inline-size; }
 
 .rail {
   width: 80px; flex: none; display: flex; flex-direction: column; align-items: center;
@@ -1795,8 +1798,8 @@ a.ghline { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
 .listcol .scroll { padding-bottom: 24px; }
 /* The agents strip wraps here rather than scrolling sideways: there is room for
  * every agent at once, which is the handoff's own layout for it. */
-.desk .strip { flex-wrap: wrap; overflow: visible; padding: 12px 8px 6px; }
-.desk .persona { width: 70px; }
+.desk .strip { grid-template-columns: repeat(auto-fit, minmax(66px, 1fr)); padding: 12px 8px 6px; }
+.desk .persona { max-width: 84px; }
 /* Selection wears the avatar's hue. Give it consistent chroma for a quiet wash that
  * keeps its colour over warm paper; the right-edge bar carries the main signal.
  * A phone never draws .on: its list and thread are separate screens. */
@@ -2759,8 +2762,7 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
   .fs-source:hover { background: var(--paper-card); }
 }
 
-/* Shared chat refinements: one wrapping grid and one hint in either conversation. */
-.strip { flex-wrap:wrap; overflow:visible; }
+/* Shared chat refinements: one hint in either conversation. */
 .hint { font-size:12px; color:var(--paper-ink-3); text-align:center; padding:0 16px 12px; flex:none; line-height:1.5; }
 .msgcol > .pane-nothing { min-height:240px; padding:36px 0; }
 @media (max-width:1099px) {
@@ -2843,15 +2845,33 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 .appearance-status { display:flex; flex-wrap:wrap; gap:10px; align-items:center; color:var(--paper-ink-3); font-size:13px; }
 .appearance-status.err { color:var(--danger); }
 
-/* Keep the phone's header actions reachable when app zoom narrows its canvas. */
-.tt-list { container-type:inline-size; }
-@container (max-width:330px) {
-  .tt-list .home-head { padding-inline:16px; gap:6px; }
-  .tt-list .home-head .display { font-size:28px; min-width:0; }
+/* Keep header title, actions, and agent grid composed when zoom narrows the list. */
+.tt-list { container:list / inline-size; }
+@container list (max-width:330px) {
+  :root .tt-list :is(.home-head,.list-head) { padding-inline:14px; gap:6px; }
+  :root .tt-list :is(.home-head,.list-head) .display { font-size:26px; min-width:0; }
+  :root .tt-list :is(.home-head,.list-head) .iconbtn { width:34px; height:34px; min-width:34px; min-height:34px; }
 }
-@container (max-width:290px) {
-  .tt-list .home-head { flex-wrap:wrap; }
-  .tt-list .home-head .display { flex-basis:100%; }
+@container list (max-width:265px) {
+  :root .tt-list :is(.home-head,.list-head) { padding-inline:10px; gap:3px; }
+  :root .tt-list :is(.home-head,.list-head) .display { font-size:21px; min-width:0; flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  :root .tt-list :is(.home-head,.list-head) .iconbtn { width:28px; height:28px; min-width:28px; min-height:28px; }
+  :root .tt-list :is(.home-head,.list-head) .iconbtn svg { width:15px; height:15px; }
+  .tt-list .strip { grid-template-columns:repeat(auto-fit, minmax(58px, 1fr)); padding-inline:8px; }
+  .tt-list .persona { padding:4px 2px; gap:4px; }
+  .tt-list .persona .blob { width:48px !important; height:48px !important; font-size:20px !important; }
+}
+/* At high desktop zoom, keep two-pane navigation while trimming chrome so the active pane stays generous. */
+@container desk (max-width:960px) {
+  .desk .rail { width:64px; padding:14px 0 12px; gap:12px; }
+  .desk .rail .brand { width:36px; height:36px; }
+  .desk .rail .railtab { width:48px; height:48px; border-radius:16px; }
+  .desk .rail .railround { width:42px; height:42px; border-radius:14px; }
+  .desk .listcol:not(.away) { width:260px; }
+  .desk .pane { margin:8px 8px 8px 0; border-radius:22px; }
+  .desk .pane .chat-head { padding:12px 14px; gap:8px; }
+  .desk .pane .msgs { padding:8px 14px 112px; }
+  .desk .pane .thread-dock { padding:0 14px; }
 }
 @media (pointer: coarse) {
   .appearance-modes button,.appearance-reset { min-height:max(44px, calc(44px / var(--ui-scale, 1))); }
