@@ -27,7 +27,11 @@ LAT_MAX, LON_MAX, ZONE_MAX = 90, 180, 100
 # An IANA zone's shape; zoneinfo also opens `posix/...` and `right/...`
 # copies, which a browser's Intl does not take.
 ZONE = re.compile(r"^(?!posix/|right/)[A-Za-z][A-Za-z0-9_+-]*(?:/[A-Za-z0-9_+-]+)*$")
-SIZE_MIN, SIZE_MAX, SIZE_STEP = 75, 150, 5
+SIZE_MIN, SIZE_MAX, SIZE_STEP = 60, 200, 5
+LEGACY_SIZE_MIN, LEGACY_SIZE_MAX = 75, 150
+SIZE_BASE = 0.9
+SIZE_VERSION = 2
+SIZE_VERSION_KEY = "size_version"
 # The Sun transition's ids, the page's (app/public/sun-shift.js).
 TRANSITIONS = ("fast", "normal", "long")
 DEFAULT = {"mode": "system", "transition": "normal", "size": 100, "theme": "latte"}
@@ -210,6 +214,76 @@ def _valid_size(v) -> bool:
             and SIZE_MIN <= v <= SIZE_MAX and v % SIZE_STEP == 0)
 
 
+def _valid_legacy_size(v) -> bool:
+    return (isinstance(v, int) and not isinstance(v, bool)
+            and LEGACY_SIZE_MIN <= v <= LEGACY_SIZE_MAX and v % SIZE_STEP == 0)
+
+
+def migrate_legacy_size(old_size) -> int:
+    """Convert a pre-relabel stored percentage (where 100% was zoom 1.0) onto
+    the 0.9-base scale so non-default choices keep the same visual size, while
+    100% stays 100% so default installs adopt the 10% smaller default.
+    Matches ``migrateLegacySize()`` in ``app/public/scale.js``."""
+    if not isinstance(old_size, int) or isinstance(old_size, bool):
+        return DEFAULT["size"]
+    if old_size == DEFAULT["size"]:
+        return DEFAULT["size"]
+    stepped = math.floor(old_size / SIZE_BASE / SIZE_STEP + 0.5) * SIZE_STEP
+    return max(SIZE_MIN, min(SIZE_MAX, stepped))
+
+
+def _needs_size_migration(stored) -> bool:
+    if not isinstance(stored, dict):
+        return False
+    ver = stored.get(SIZE_VERSION_KEY)
+    return not (isinstance(ver, int) and not isinstance(ver, bool) and ver >= SIZE_VERSION)
+
+
+def _write_all(data: dict) -> None:
+    target = path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(target.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, target)
+
+
+def _migrate_unlocked(data: dict) -> tuple[dict | None, dict[str, tuple[int, int]]]:
+    """Run the one-time legacy size migration on ``data['appearance']`` and
+    persist ``size_version`` on disk when needed. Caller holds ``_lock``."""
+    stored = data.get("appearance")
+    if not _needs_size_migration(stored):
+        return stored, {}
+    migrated = dict(stored)
+    changes: dict[str, tuple[int, int]] = {}
+    for kind in KINDS:
+        raw = migrated.get(kind)
+        if isinstance(raw, dict) and "size" in raw and _valid_legacy_size(raw["size"]):
+            old = raw["size"]
+            new = migrate_legacy_size(old)
+            if new != old:
+                row = dict(raw)
+                row["size"] = new
+                migrated[kind] = row
+                changes[kind] = (old, new)
+    migrated[SIZE_VERSION_KEY] = SIZE_VERSION
+    data["appearance"] = migrated
+    _write_all(data)
+    return migrated, changes
+
+
+def migrate() -> dict[str, tuple[int, int]]:
+    """Run the one-time legacy size migration on disk if needed.
+
+    Returns ``{kind: (old, new)}`` for each device kind whose stored size
+    changed; empty dict when already migrated, nothing stored, or sizes stayed
+    at 100.
+    """
+    with _lock:
+        data = _load_all()
+        _, changes = _migrate_unlocked(data)
+        return changes
+
+
 def catalog() -> dict[str, dict[str, dict]]:
     """The installed themes' options, as validation wants them:
     ``{theme: {option: {"choices": [ids], "default": id}}}``."""
@@ -247,15 +321,23 @@ def _fill(stored) -> dict:
     option. Retain the legacy rows on disk and only update the account copy.
     """
     stored = stored if isinstance(stored, dict) else {}
+    migrate_sizes = _needs_size_migration(stored)
     account = {"mode": DEFAULT["mode"], "theme": DEFAULT["theme"], "options": {}}
     out = {}
     for kind in KINDS:
         row = stored.get(kind) if isinstance(stored.get(kind), dict) else {}
+        raw_size = row.get("size")
+        if migrate_sizes and _valid_legacy_size(raw_size):
+            size = migrate_legacy_size(raw_size)
+        elif _valid_size(raw_size):
+            size = raw_size
+        else:
+            size = DEFAULT["size"]
         out[kind] = {
             **row,
             "transition": (row["transition"] if row.get("transition") in TRANSITIONS
                            else DEFAULT["transition"]),
-            "size": row["size"] if _valid_size(row.get("size")) else DEFAULT["size"],
+            "size": size,
         }
     saved = stored.get(ACCOUNT)
     for row in [saved] if isinstance(saved, dict) else [out[kind] for kind in KINDS]:
@@ -265,6 +347,9 @@ def _fill(stored) -> dict:
         _merge_options(account["options"], _stored_options(row))
     out[ACCOUNT] = account
     out[LOCATION] = _stored_location(stored.get(LOCATION))
+    ver = stored.get(SIZE_VERSION_KEY)
+    out[SIZE_VERSION_KEY] = (ver if isinstance(ver, int) and not isinstance(ver, bool)
+                             and ver >= SIZE_VERSION else SIZE_VERSION)
     return out
 
 
@@ -299,7 +384,11 @@ def read_base() -> dict:
 
 
 def read() -> dict:
-    return _public(_fill(_load_all().get("appearance")), catalog())
+    with _lock:
+        data = _load_all()
+        stored, _ = _migrate_unlocked(data)
+        value = _fill(stored)
+    return _public(value, catalog())
 
 
 def validate(patch) -> dict:
@@ -399,11 +488,7 @@ def update(patch) -> dict:
                 else:
                     value[ACCOUNT if name in ("mode", "theme") else kind][name] = v
         data["appearance"] = value
-        target = path()
-        target.parent.mkdir(parents=True, exist_ok=True)
-        tmp = target.with_name(target.name + ".tmp")
-        tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        os.replace(tmp, target)
+        _write_all(data)
     return _public(value, catalog())
 
 
@@ -418,9 +503,5 @@ def mutate(key: str, change) -> object:
             data.pop(key, None)
         else:
             data[key] = value
-        target = path()
-        target.parent.mkdir(parents=True, exist_ok=True)
-        tmp = target.with_name(target.name + ".tmp")
-        tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        os.replace(tmp, target)
+        _write_all(data)
     return value

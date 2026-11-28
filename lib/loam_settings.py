@@ -560,7 +560,7 @@ ENTRIES: list[Entry] = [
                              "own); default system",
                     "transition": "fast (3 s), normal (10 s) or long (20 s); "
                                   "default normal",
-                    "size": "a whole percent, 75 to 150 in steps of 5; default 100",
+                    "size": "a whole percent, 60 to 200 in steps of 5; default 100",
                     "theme": "an installed theme's id (describe lists them); "
                              "default latte"}[field],
             options={"theme": "themes", "mode": "modes",

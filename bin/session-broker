@@ -3794,6 +3794,18 @@ async def serve(addr: str, port: int, remote_path=None) -> int:
     except (OSError, ValueError) as exc:
         print(f"starter: could not update the hello thread ({exc})",
               file=sys.stderr, flush=True)
+    # One-time appearance size relabel migration (0.9-base default, size_version 2).
+    try:
+        migrated_sizes = loam_appearance.migrate()
+        if migrated_sizes:
+            summary = ", ".join(f"{k} {old} -> {new}"
+                                for k, (old, new) in migrated_sizes.items())
+            print(f"appearance: migrated legacy sizes ({summary}; "
+                  f"size_version {loam_appearance.SIZE_VERSION})",
+                  file=sys.stderr, flush=True)
+    except Exception as exc:  # noqa: BLE001 - never the reason a broker is down
+        print(f"appearance: size migration failed ({exc!r})",
+              file=sys.stderr, flush=True)
     # Recover persisted member inputs before accepting new thread work.
     try:
         counts = server.threads.resume_inputs()

@@ -132,10 +132,10 @@ own `thread.*` rows cover the same things.
 | `composer.send_key` | The chat send shortcut. `enter` by default, or `modifier` for Command or Control + Enter. | PATCH /api/settings/composer | persona | no |
 | `appearance.phone.mode` | The account's mode: light, dark, sun or system | PATCH /api/settings/appearance | persona | no |
 | `appearance.phone.transition` | The phone's Sun mode transition: fast (3 s), normal (10 s) or long (20 s) | PATCH /api/settings/appearance | persona | no |
-| `appearance.phone.size` | The phone's page size, 75–150 % in 5s | PATCH /api/settings/appearance | persona | no |
+| `appearance.phone.size` | The phone's page size, 60–200 % in 5s | PATCH /api/settings/appearance | persona | no |
 | `appearance.desktop.mode` | Alias for the account's mode | PATCH /api/settings/appearance | persona | no |
 | `appearance.desktop.transition` | The desktop's Sun mode transition: fast (3 s), normal (10 s) or long (20 s) | PATCH /api/settings/appearance | persona | no |
-| `appearance.desktop.size` | The desktop's page size, 75–150 % in 5s | PATCH /api/settings/appearance | persona | no |
+| `appearance.desktop.size` | The desktop's page size, 60–200 % in 5s | PATCH /api/settings/appearance | persona | no |
 | `appearance.phone.theme` | The account's active theme (Latte, Plain or any installed theme) | PATCH /api/settings/appearance | persona | no |
 | `appearance.desktop.theme` | Alias for the account's active theme | PATCH /api/settings/appearance | persona | no |
 | `appearance.location` | The saved place Sun mode times sunrise and sunset by, one for both kinds: `{latitude, longitude, source, timeZone}` rounded to 0.1°, or null | PATCH /api/settings/appearance | persona | no |
@@ -275,6 +275,22 @@ handoff; anything else is a 400, and a stored id outside them reads as
 persona's keys are `appearance.<kind>.transition`. Until this landed the
 host refused the field and the page kept it only in that browser's
 `loam.appearance.sun`; the page clears that once a reading carries it.
+
+**Page size and the 0.9-base relabel** (2026-11-27; app commit `f6312f4`,
+`app/public/scale.js`). Each device kind (`phone`, `desktop`) stores its own
+`size`, a whole percent from 60 to 200 in steps of 5, default 100. The app maps
+`100%` to CSS `zoom: 0.9` (10% smaller than the original 1.0 default), so 60–200%
+spans CSS zoom 0.54–1.80. Stored appearance records from before this relabel
+carry no `appearance.size_version`; once (on broker startup, first read, or
+first write), `lib/loam_appearance.py` converts each stored non-100 legacy size
+(75–150 in 5s) with the same formula as `migrateLegacySize()` in
+`app/public/scale.js` (`clamp(60, 200, round(old / 0.9 / 5) * 5)`: 75 → 85,
+85 → 95, 90 → 100, 125 → 140, 150 → 165) while keeping `100` at `100` so default
+installs adopt the smaller default, and records `appearance.size_version: 2` on
+disk so the conversion never runs twice. Extended sizes cached locally in
+`loam.appearance.size` (`app/public/size-local.js`) while a host still validated
+75–150 hand off to `PATCH /v1/settings/appearance` and clear automatically once
+accepted.
 
 Seeded 2026-11-11: desktop size 90 (the owner: "I really enjoy it at a 90%
 zoom"), both modes `system`, phone size 100. The browser theme they used before

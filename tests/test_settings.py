@@ -448,7 +448,8 @@ async def main():
               stored["appearance"]["account"]
               == {"mode": "light", "theme": "latte", "options": {}}
               and stored["appearance"]["phone"]["size"] == 125
-              and stored["appearance"]["desktop"]["size"] == 90,
+              and stored["appearance"]["desktop"]["size"] == 90
+              and stored["appearance"]["size_version"] == 2,
               stored)
         for patch, says in (({}, "name what"),
                             ({"tablet": {"size": 90}}, "not a device kind"),
@@ -458,8 +459,8 @@ async def main():
                             ({"desktop": {"size": True}}, "whole percent"),
                             ({"desktop": {"size": 92}}, "whole percent"),
                             ({"desktop": {"size": 90.0}}, "whole percent"),
-                            ({"desktop": {"size": 70}}, "whole percent"),
-                            ({"desktop": {"size": 155}}, "whole percent"),
+                            ({"desktop": {"size": 55}}, "from 60 to 200 in steps of 5"),
+                            ({"desktop": {"size": 205}}, "from 60 to 200 in steps of 5"),
                             ({"desktop": {"size": 95}, "phone": {"mode": "x"}},
                              "light, dark, sun or system"),
                             ({"desktop": {"theme": "mocha"}}, "installed theme"),
@@ -502,19 +503,20 @@ async def main():
                                   {"phone": {"theme": "midnight"}})
         check("a theme in the Yours layer is settable",
               status == 200 and body["phone"]["theme"] == "midnight", body)
-        # The record as it was before themes: no `theme` in either kind.
+        # The record as it was before themes: no `theme` in either kind (and no
+        # `size_version`, so legacy desktop 90 converts once to 100 while 100 stays 100).
         settings_file = Path(os.environ["LOAM_HOST_SETTINGS"])
         settings_file.write_text(json.dumps({"appearance": {
             "phone": {"mode": "system", "size": 100},
             "desktop": {"mode": "light", "size": 90}}, "other": {"kept": True}}))
         status, body = await http(port, "GET", "/v1/settings/appearance")
         check("a record from before themes reads as Latte with shared desktop mode",
-              body == full(("light", 100, "latte"), ("light", 90, "latte")), body)
+              body == full(("light", 100, "latte"), ("light", 100, "latte")), body)
         status, body = await http(port, "PATCH", "/v1/settings/appearance",
                                   {"phone": {"theme": "plain"}})
         stored = json.loads(settings_file.read_text())
         check("its first theme write merges in; the file's other sections kept",
-              base(body) == base(full(("light", 100, "plain"), ("light", 90, "plain")))
+              base(body) == base(full(("light", 100, "plain"), ("light", 100, "plain")))
               and stored.get("other") == {"kept": True}, stored)
         # A theme removed from the folders after it was chosen: kept on read
         # (the page draws Latte), so it comes back with the folder.
@@ -695,13 +697,13 @@ async def main():
         check("...the table restored: Latte's four options are back",
               list(appearance.catalog().get("latte", {}))
               == [o["id"] for o in LATTE_OPTIONS], appearance.catalog())
-        # A record from before options: the defaults.
+        # A record from before options: the defaults (legacy sizes 110/90 convert to 120/100).
         settings_file.write_text(json.dumps({"appearance": {
             "phone": {"mode": "dark", "size": 110, "theme": "latte"},
             "desktop": {"mode": "light", "size": 90, "theme": "latte"}}}))
         status, body = await http(port, "GET", "/v1/settings/appearance")
         check("a record from before options: every default, the rest as stored",
-              body == full(("light", 110, "latte"), ("light", 90, "latte")), body)
+              body == full(("light", 120, "latte"), ("light", 100, "latte")), body)
 
         legacy_phone = {"mode": "dark", "size": 110, "theme": "plain",
                         "options": {"latte": {"agent-colours": "latte-tones", "agent-shapes": "cleo"}}}
@@ -712,7 +714,7 @@ async def main():
         status, body = await http(port, "GET", "/v1/settings/appearance")
         migrated = opts("latte-tones", "rounded-square")
         check("legacy migration merges phone-only fields and prefers desktop on conflict",
-              status == 200 and body == full(("dark", 110, "latte"), ("dark", 90, "latte"),
+              status == 200 and body == full(("dark", 120, "latte"), ("dark", 100, "latte"),
                                              popts=migrated, dopts=migrated), body)
         await http(port, "PATCH", "/v1/settings/appearance", {"phone": {"mode": "light"}})
         stored = json.loads(settings_file.read_text())
@@ -757,6 +759,20 @@ async def main():
         out = await cli(port, "set", "appearance.desktop.size", "110")
         check("set appearance.desktop.size 110 as a persona: read back as 110",
               out.get("ok") and out.get("value") == 110, out)
+        out = await cli(port, "describe", "appearance.desktop.size")
+        check("describe appearance.desktop.size states 60 to 200 in steps of 5",
+              out.get("ok") and "60 to 200 in steps of 5; default 100"
+              in (out.get("setting") or {}).get("values", ""), out)
+        for sz in (60, 70, 155, 200):
+            out = await cli(port, "set", "appearance.phone.size", str(sz))
+            check(f"set appearance.phone.size {sz} (extended range): read back",
+                  out.get("ok") and out.get("value") == sz, out)
+        for bad_sz in (55, 205):
+            out = await cli(port, "set", "appearance.phone.size", str(bad_sz))
+            check(f"set appearance.phone.size {bad_sz}: refused",
+                  out.get("ok") is False and "60 to 200 in steps of 5" in out.get("error", ""),
+                  out)
+        await cli(port, "set", "appearance.phone.size", "100")
         out = await cli(port, "get", "appearance.desktop.mode")
         check("get appearance.desktop.mode: untouched", out.get("value") == "light", out)
         out = await cli(port, "set", "appearance.phone.mode", "system")
@@ -767,6 +783,96 @@ async def main():
         out = await cli(port, "set", "appearance.desktop.size", "90", lane="cron:watch")
         check("a cron may set appearance (it is a setting, not an end)",
               out.get("value") == 90, out)
+
+        # -- One-time legacy size migration (0.9-base relabel, size_version 2) --
+        saved_settings = settings_file.read_text(encoding="utf-8")
+        try:
+            expected_map = {
+                75: 85, 80: 90, 85: 95, 90: 100, 95: 105, 100: 100,
+                105: 115, 110: 120, 115: 130, 120: 135, 125: 140,
+                130: 145, 135: 150, 140: 155, 145: 160, 150: 165,
+            }
+            got_map = {k: appearance.migrate_legacy_size(k) for k in expected_map}
+            check("migrate_legacy_size matches scale.js across every legacy stop",
+                  got_map == expected_map, (got_map, expected_map))
+            # 1. Existing install with non-100 saved sizes (phone 85, desktop 90)
+            settings_file.write_text(json.dumps({
+                "appearance": {
+                    "phone": {"mode": "sun", "transition": "normal", "size": 85, "theme": "latte"},
+                    "desktop": {"mode": "sun", "transition": "normal", "size": 90, "theme": "latte"},
+                    "account": {"mode": "sun", "theme": "latte", "options": {}},
+                },
+                "other": {"preserved": True},
+            }))
+            changes = appearance.migrate()
+            stored = json.loads(settings_file.read_text(encoding="utf-8"))
+            check("migrate() converts legacy 85/90 to 95/100 and marks size_version 2",
+                  changes == {"phone": (85, 95), "desktop": (90, 100)}
+                  and stored["appearance"]["phone"]["size"] == 95
+                  and stored["appearance"]["desktop"]["size"] == 100
+                  and stored["appearance"]["size_version"] == 2
+                  and stored["other"] == {"preserved": True},
+                  (changes, stored))
+            check("migrate() is idempotent and never runs twice",
+                  appearance.migrate() == {}, appearance.migrate())
+            # Setting back to 85/90 after migration stays 85/90 across reads and migrate()
+            status, body = await http(port, "PATCH", "/v1/settings/appearance",
+                                      {"phone": {"size": 85}, "desktop": {"size": 90}})
+            check("setting 85/90 after migration stores 85/90 and keeps size_version 2",
+                  status == 200 and body["phone"]["size"] == 85 and body["desktop"]["size"] == 90
+                  and appearance.migrate() == {},
+                  body)
+            status, body = await http(port, "GET", "/v1/settings/appearance")
+            check("subsequent GET keeps post-migration 85/90 untouched (no size_version leak)",
+                  status == 200 and body["phone"]["size"] == 85 and body["desktop"]["size"] == 90
+                  and "size_version" not in body,
+                  body)
+            # 2. Existing default install (100/100) stays 100/100 and records size_version 2
+            settings_file.write_text(json.dumps({
+                "appearance": {
+                    "phone": {"size": 100},
+                    "desktop": {"size": 100},
+                },
+            }))
+            status, body = await http(port, "GET", "/v1/settings/appearance")
+            stored = json.loads(settings_file.read_text(encoding="utf-8"))
+            check("default legacy 100/100 stays 100/100 and marks size_version 2",
+                  status == 200 and body["phone"]["size"] == 100 and body["desktop"]["size"] == 100
+                  and stored["appearance"]["size_version"] == 2,
+                  (body, stored))
+            # 3. Unmigrated install receiving an extended-size PATCH (e.g. from size-local.js)
+            #    before any GET: untouched kind migrates once, patched v2 size is kept verbatim.
+            settings_file.write_text(json.dumps({
+                "appearance": {
+                    "phone": {"size": 85},
+                    "desktop": {"size": 90},
+                },
+            }))
+            status, body = await http(port, "PATCH", "/v1/settings/appearance",
+                                      {"phone": {"size": 65}})
+            stored = json.loads(settings_file.read_text(encoding="utf-8"))
+            check("PATCH before GET migrates untouched desktop (90->100) and keeps patched phone (65)",
+                  status == 200 and body["phone"]["size"] == 65 and body["desktop"]["size"] == 100
+                  and stored["appearance"]["size_version"] == 2,
+                  (body, stored))
+            # 4. Fresh install (no settings.json): GET/migrate do not create file;
+            #    first PATCH writes size_version 2 without converting v2 sizes.
+            settings_file.unlink()
+            check("fresh install: migrate() is a no-op and does not create settings.json",
+                  appearance.migrate() == {} and not settings_file.exists())
+            status, body = await http(port, "GET", "/v1/settings/appearance")
+            check("fresh install: GET returns 100/100 without creating settings.json",
+                  status == 200 and body["phone"]["size"] == 100 and body["desktop"]["size"] == 100
+                  and not settings_file.exists(), body)
+            status, body = await http(port, "PATCH", "/v1/settings/appearance",
+                                      {"desktop": {"size": 85}})
+            stored = json.loads(settings_file.read_text(encoding="utf-8"))
+            check("fresh install: first PATCH saves 85 verbatim with size_version 2",
+                  status == 200 and body["desktop"]["size"] == 85
+                  and stored["appearance"]["size_version"] == 2,
+                  (body, stored))
+        finally:
+            settings_file.write_text(saved_settings, encoding="utf-8")
 
         # Sun mode and saved location
         home = {"latitude": 37.8, "longitude": -122.4, "source": "geolocation",
