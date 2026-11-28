@@ -354,7 +354,18 @@ body { overflow-x: clip; overflow-y: hidden; }
 :where(svg) {
   display: block;
   color: var(--paper-ink, CanvasText);
+}
+:where(svg:not(svg svg):not([font-family])) {
   font-family: var(--font-body, system-ui, sans-serif);
+}
+:where(svg:not(svg svg):not([font-size])) {
+  font-size: 14px;
+}
+:where(svg:not(svg svg):not([fill])) {
+  fill: var(--paper-ink, CanvasText);
+}
+:where(svg foreignObject) {
+  font-size: var(--type-body, 15px);
 }
 :where(svg[viewBox]:not([width])) {
   width: min(100%, var(--loam-vb-w, 100%));
@@ -373,16 +384,7 @@ body { overflow-x: clip; overflow-y: hidden; }
   width: var(--loam-vb-w, 100%);
   max-width: none;
 }
-:where(svg text:not([fill])) {
-  fill: var(--paper-ink, CanvasText);
-}
-:where(svg text) {
-  font-family: var(--font-body, system-ui, sans-serif);
-}
-:where(svg text:not([font-size])) {
-  font-size: 14px;
-}
-:where(svg line:not([stroke]), svg polyline:not([stroke])) {
+:where(svg line[data-loam-default-stroke], svg polyline[data-loam-default-stroke]) {
   stroke: var(--paper-rule-strong);
 }
 :where(svg [data-tip], svg [data-loam-tip]) {
@@ -508,6 +510,9 @@ main.loam-visual-standalone {
   max-width: 780px;
   margin: 0 auto;
   padding: 24px 20px 40px;
+}
+:where(svg:not([stroke]) line:not([stroke], [stroke] *), svg:not([stroke]) polyline:not([stroke], [stroke] *)) {
+  stroke: var(--paper-rule-strong);
 }
 `.trim()
   return [

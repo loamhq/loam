@@ -3492,9 +3492,14 @@ listener for immediate notification in an open page.
     paired with `:where(svg[viewBox]:not([width])) { width: min(100%, var(--loam-vb-w, 100%)); height: auto; }`.
     Desktop charts stay at their natural `viewBox` width while narrow phones shrink cleanly,
     and deliberate `width="100%"` or agent CSS still overrides zero-specificity `:where()`.
-  - SVG presentation attributes (`fill`, `font-size`, `stroke`) sit before author rules even
-    at `(0,0,0)` specificity, so base rules guard them with `:not([fill])`, `:not([font-size])`
-    (default `14px`), and `:not([stroke])`.
+  - SVG presentation attributes (`fill`, `font-size`, `font-family`, `stroke`) sit before
+    author rules even at `(0,0,0)` specificity, and rules targeting `<text>` or `<line>`
+    directly also override inherited attributes/styles from ancestor `<g>` elements. Text
+    defaults (`14px`, `--paper-ink`, `--font-body`) therefore live on the root
+    `:where(svg:not(svg svg):not([...]))` so any `<g>` or element attribute/style wins via
+    inheritance, while `enhanceStage()` marks only unstroked `<line>`/`<polyline>` elements
+    (where neither the element nor any ancestor inside the `<svg>` set `stroke` by attribute,
+    inline style, or stylesheet) with `data-loam-default-stroke`.
   - Bare visual `<table>` defaults match `.md table` (`15px` body, `12.5px` header, `700` bold,
     `tbody tr + tr td` rules, `overflow-wrap: break-word`, and `data-loam-col`/`data-loam-nowrap`
     short-value protection so values like `$345` never break mid-token on 390 px phones).

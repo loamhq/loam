@@ -140,6 +140,14 @@ const BOOTSTRAP_JS = `(() => {
     return parts[2] > 0 && parts[3] > 0 ? parts[2] : 0;
   }
 
+  function hasExplicitSvgStroke(el, rootSvg) {
+    for (let cur = el; cur; cur = cur.parentElement) {
+      if (cur.hasAttribute('stroke') || (cur.style && cur.style.stroke)) return true;
+      if (cur === rootSvg) break;
+    }
+    return false;
+  }
+
   function enhanceStage() {
     // Convert direct SVG <title> children to instant Loam tooltips.
     for (const titleNode of [...stage.querySelectorAll('svg title')]) {
@@ -149,6 +157,19 @@ const BOOTSTRAP_JS = `(() => {
         if (!parent.hasAttribute('data-tip')) parent.setAttribute('data-loam-tip', text);
         if (!parent.hasAttribute('aria-label')) parent.setAttribute('aria-label', text);
         titleNode.remove();
+      }
+    }
+    // Apply default hairline stroke only to lines/polylines where neither the
+    // element nor any ancestor inside the SVG set stroke by attribute or style.
+    for (const el of stage.querySelectorAll('svg line, svg polyline')) {
+      let rootSvg = el.closest('svg');
+      while (rootSvg && rootSvg.parentElement?.closest('svg')) {
+        rootSvg = rootSvg.parentElement.closest('svg');
+      }
+      if (!rootSvg || hasExplicitSvgStroke(el, rootSvg)) continue;
+      const stroke = getComputedStyle(el).stroke;
+      if (!stroke || stroke === 'none') {
+        el.setAttribute('data-loam-default-stroke', '');
       }
     }
     // Keep bare viewBox SVGs at their natural viewBox width on desktop while

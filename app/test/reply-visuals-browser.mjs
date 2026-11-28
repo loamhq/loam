@@ -4,6 +4,7 @@
 //   3. live_theme_mode_and_plugin_theme_recolouring
 //   4. layout_no_chrome_hover_tooltip_and_save_to_files
 //   5. polish_svg_scale_table_parity_and_meaningful_expand
+//   6. svg_group_attributes_and_styles_survive_base_defaults
 //
 // Run:
 //   LOAM_PLAYWRIGHT=.../playwright-core/index.mjs LOAM_CHROME=/usr/bin/chromium-headless-shell \
@@ -104,6 +105,40 @@ const POLISH_REPLY = [
   '```',
 ].join('\n')
 
+const SVG_GROUPS_REPLY = [
+  'SVG group attribute and style inheritance check:',
+  '',
+  '```visual SVG group inheritance',
+  '<style>',
+  '  .styled-text-group { font-size: 10.5px; fill: var(--persona-teal); }',
+  '  .styled-line-group { stroke: var(--persona-plum); }',
+  '</style>',
+  '<svg viewBox="0 0 420 180" role="img" aria-label="Group inheritance">',
+  '  <line id="bare-line" x1="10" y1="16" x2="200" y2="16" />',
+  '  <g stroke="var(--signal-crema)" stroke-width="2">',
+  '    <line id="group-attr-line" x1="10" y1="32" x2="200" y2="32" />',
+  '    <polyline id="group-attr-poly" points="10,48 100,40 200,48" fill="none" />',
+  '  </g>',
+  '  <g style="stroke: var(--persona-rust)">',
+  '    <line id="group-style-line" x1="10" y1="64" x2="200" y2="64" />',
+  '  </g>',
+  '  <g class="styled-line-group">',
+  '    <line id="group-css-line" x1="10" y1="80" x2="200" y2="80" />',
+  '  </g>',
+  '  <text id="bare-text" x="10" y="104">Default 14px</text>',
+  '  <g font-size="11" fill="var(--paper-ink-3)">',
+  '    <text id="group-attr-text" x="10" y="124">Group attr 11px</text>',
+  '  </g>',
+  '  <g style="font-size: 11.5px; fill: var(--persona-olive)">',
+  '    <text id="group-style-text" x="10" y="144">Group inline style 11.5px</text>',
+  '  </g>',
+  '  <g class="styled-text-group">',
+  '    <text id="group-css-text" x="10" y="164">Group CSS class 10.5px</text>',
+  '  </g>',
+  '</svg>',
+  '```',
+].join('\n')
+
 function makeFixture({ evilOrigin, udpPort }) {
   const savedFiles = []
   const streamClients = new Set()
@@ -178,6 +213,17 @@ function makeFixture({ evilOrigin, udpPort }) {
       archived: false,
       created: '2026-11-27T17:01:00Z',
     },
+    {
+      id: 't-svg-groups',
+      title: 'SVG group attributes',
+      default: 'iris',
+      members: [{ persona: 'iris', engine: 'claude-code', model: null, running: false, busy: false }],
+      last: { author: 'iris', text: 'Visual: SVG group inheritance', at: '2026-11-27T17:03:00Z' },
+      unread: 0,
+      pinned: false,
+      archived: false,
+      created: '2026-11-27T17:02:30Z',
+    },
   ]
 
   const messagesByThread = {
@@ -195,6 +241,10 @@ function makeFixture({ evilOrigin, udpPort }) {
     't-polish': [
       { id: 'm1', author: 'you', kind: 'message', text: 'Check table parity, SVG scale, and Expand.', at: '2026-11-27T17:01:30Z' },
       { id: 'm2', author: 'iris', kind: 'message', text: POLISH_REPLY, at: '2026-11-27T17:02:00Z' },
+    ],
+    't-svg-groups': [
+      { id: 'm1', author: 'you', kind: 'message', text: 'Check SVG group attributes.', at: '2026-11-27T17:02:45Z' },
+      { id: 'm2', author: 'iris', kind: 'message', text: SVG_GROUPS_REPLY, at: '2026-11-27T17:03:00Z' },
     ],
   }
 
@@ -785,6 +835,76 @@ try {
       await context.close()
     }
     console.log('PASS  polish_svg_scale_table_parity_and_meaningful_expand')
+  }
+
+  // ------------------------------------------------------------------ Test 6
+  {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' })
+    const page = await context.newPage()
+    page.setDefaultTimeout(12000)
+    await page.goto(`${appOrigin}/threads/t-svg-groups`)
+    await waitVisualReady(page, '.reply-visual-frame', 0)
+    await page.waitForTimeout(150)
+
+    const vf = page.frames().find((f) => f.url().includes('/visual-frame.html'))
+    assert.ok(vf, 'svg group frame mounted')
+    const styles = await vf.evaluate(() => {
+      const resolveColor = (cssVal) => {
+        const probe = document.createElement('span')
+        probe.style.color = cssVal
+        document.body.appendChild(probe)
+        const c = getComputedStyle(probe).color
+        probe.remove()
+        return c
+      }
+      const pick = (id) => {
+        const s = getComputedStyle(document.getElementById(id))
+        return { fontSize: s.fontSize, fill: s.fill, stroke: s.stroke }
+      }
+      return {
+        tokens: {
+          ink: resolveColor('var(--paper-ink)'),
+          ink3: resolveColor('var(--paper-ink-3)'),
+          ruleStrong: resolveColor('var(--paper-rule-strong)'),
+          crema: resolveColor('var(--signal-crema)'),
+          olive: resolveColor('var(--persona-olive)'),
+          teal: resolveColor('var(--persona-teal)'),
+          rust: resolveColor('var(--persona-rust)'),
+          plum: resolveColor('var(--persona-plum)'),
+        },
+        bareText: pick('bare-text'),
+        groupAttrText: pick('group-attr-text'),
+        groupStyleText: pick('group-style-text'),
+        groupCssText: pick('group-css-text'),
+        bareLine: pick('bare-line'),
+        groupAttrLine: pick('group-attr-line'),
+        groupAttrPoly: pick('group-attr-poly'),
+        groupStyleLine: pick('group-style-line'),
+        groupCssLine: pick('group-css-line'),
+      }
+    })
+
+    // Unsized bare text keeps 14px & --paper-ink; unstroked bare line gets --paper-rule-strong.
+    assert.equal(styles.bareText.fontSize, '14px')
+    assert.equal(styles.bareText.fill, styles.tokens.ink)
+    assert.equal(styles.bareLine.stroke, styles.tokens.ruleStrong)
+
+    // Group-level font-size & fill survive via attribute, inline style, and <style> class.
+    assert.equal(styles.groupAttrText.fontSize, '11px')
+    assert.equal(styles.groupAttrText.fill, styles.tokens.ink3)
+    assert.equal(styles.groupStyleText.fontSize, '11.5px')
+    assert.equal(styles.groupStyleText.fill, styles.tokens.olive)
+    assert.equal(styles.groupCssText.fontSize, '10.5px')
+    assert.equal(styles.groupCssText.fill, styles.tokens.teal)
+
+    // Group-level stroke survives on <line> and <polyline> via attribute, inline style, and <style> class.
+    assert.equal(styles.groupAttrLine.stroke, styles.tokens.crema)
+    assert.equal(styles.groupAttrPoly.stroke, styles.tokens.crema)
+    assert.equal(styles.groupStyleLine.stroke, styles.tokens.rust)
+    assert.equal(styles.groupCssLine.stroke, styles.tokens.plum)
+
+    await context.close()
+    console.log('PASS  svg_group_attributes_and_styles_survive_base_defaults')
   }
 } finally {
   await browser.close()

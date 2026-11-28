@@ -267,10 +267,13 @@ test('bare table base CSS matches Markdown reply tables and SVG viewBox defaults
   assert.match(VISUAL_BASE_CSS, /:where\(thead th\)\s*\{[^}]*font-size:\s*12\.5px/)
   assert.match(VISUAL_BASE_CSS, /:where\(strong,\s*b\)\s*\{\s*font-weight:\s*700;\s*\}/)
   assert.match(VISUAL_BASE_CSS, /:where\(tbody tr \+ tr td\)\s*\{\s*border-top:\s*1px solid var\(--paper-rule\);\s*\}/)
-  // SVG defaults cap bare viewBox SVGs to natural viewBox width and keep text readable while respecting SVG attributes.
+  // SVG defaults cap bare viewBox SVGs to natural viewBox width and apply text
+  // defaults on root <svg> so ancestor <g> attributes/styles inherit cleanly.
   assert.match(VISUAL_BASE_CSS, /:where\(svg\[viewBox\]:not\(\[width\]\)\)\s*\{[^}]*width:\s*min\(100%,\s*var\(--loam-vb-w,\s*100%\)\)/)
-  assert.match(VISUAL_BASE_CSS, /:where\(svg text:not\(\[font-size\]\)\)\s*\{\s*font-size:\s*14px;\s*\}/)
-  assert.match(VISUAL_BASE_CSS, /:where\(svg text:not\(\[fill\]\)\)\s*\{/)
+  assert.match(VISUAL_BASE_CSS, /:where\(svg:not\(svg svg\):not\(\[font-size\]\)\)\s*\{\s*font-size:\s*14px;\s*\}/)
+  assert.match(VISUAL_BASE_CSS, /:where\(svg:not\(svg svg\):not\(\[fill\]\)\)\s*\{/)
+  assert.doesNotMatch(VISUAL_BASE_CSS, /:where\(svg text\b/, 'base CSS must not set font-size/fill/font-family directly on svg text (would clobber ancestor <g> attributes)')
+  assert.match(VISUAL_BASE_CSS, /:where\(svg line\[data-loam-default-stroke\],\s*svg polyline\[data-loam-default-stroke\]\)\s*\{/)
 
   assert.equal(parseSvgViewBoxWidth('0 0 440 152'), 440)
   assert.equal(parseSvgViewBoxWidth('0,0,520,180'), 520)
