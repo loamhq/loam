@@ -1205,6 +1205,11 @@ def main() -> int:
                                  f"Run bin/provision --antigravity {name}."))
         except (OSError, ValueError) as exc:
             findings.append((f"{name} Antigravity hooks", str(hook_path), str(exc)))
+        for issue in agy.rule_file_issues(ws):
+            findings.append((
+                f"{name} Antigravity rules", str(ws / agy.RULES_DIR),
+                f"{issue}. Run bin/provision --antigravity {name}.",
+            ))
 
         # agent.json against what provision renders. The display name and
         # the default provider, model and thinking level are the profile's

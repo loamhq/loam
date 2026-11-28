@@ -2980,9 +2980,10 @@ class AntigravitySession(Session):
         self._agy.model = self.model
         try:
             await asyncio.to_thread(agy.write_instructions, self.workspace)
+            extra_dirs = await asyncio.to_thread(agy.skill_dirs, self.workspace)
             self.proc = await asyncio.create_subprocess_exec(
                 *first_to_go(agy.argv(prompt, self.thread_id, self.model,
-                                      self.effort)),
+                                      self.effort, extra_dirs=extra_dirs)),
                 cwd=str(self.workspace), stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 env=env, start_new_session=True, limit=16 * 1024 * 1024)

@@ -53,13 +53,14 @@ file.
 
 The providers disagree on two same-named skills, so Loam decides which one
 an agent sees rather than leaving it to them. Each line below was measured
-on 2026-11-14 (Claude Code 2.1.325, Codex 0.169.0):
+live (Claude Code 2.1.325 and Codex 0.169.0 on 2026-11-14; Antigravity 1.5.12
+on 2026-11-27):
 
 | Provider | Reads | Two of one name |
 |---|---|---|
 | Claude Code | `.claude/skills` in the working directory and every parent above it, and `--add-dir` folders. **Not** `permissions.additionalDirectories`. | The closer one, alone. Through `--add-dir` the other is listed too, renamed `<dir>:<name>`. |
 | Codex | `.codex/skills` and `.agents/skills` in the working directory, `$CODEX_HOME/skills`; parents only when `project_root_markers` finds a root (the broker sets none) | **Both, side by side.** One skill reached by two links is listed once. |
-| Antigravity | `.agents/skills` in the workspace, and its own global folder | Not observable: no signed-in Antigravity on the box it was built on. |
+| Antigravity | `.agents/skills` in the workspace (and `.agents/skills.json`), but rejects any symlink target or `skills.json` path that resolves outside `workspaceDirs` (`escapes workspace root`). Passing `--add-dir` for each existing shared shelf lets `.agents/skills` symlinks load natively without scanning unlinked skills directly from the shelf roots. | Shadowing is pre-resolved in `.agents/skills` (personal > shared shelf > Loam's shelf), so each skill name appears once with zero duplicates. |
 
 So:
 
@@ -71,7 +72,10 @@ So:
   Loam renders: a link per personal skill (`../../skills/<name>`) and a
   link per shared skill no personal one shadows. `.codex/skills` stays a
   link to `../skills`, so a personal skill made during a Codex thread shows
-  at once.
+  at once. On Antigravity, each persona turn passes `--add-dir` for the
+  existing shared shelves (and any externally symlinked skill directories,
+  via `loam_antigravity.skill_dirs`) so `agy` accepts the out-of-workspace
+  symlinks in `.agents/skills` on both fresh and resumed conversations.
 
 A skill's name, for shadowing, is its folder's name and its `SKILL.md`'s
 `name`; a single-file skill (`skills/<name>.md`) takes its stem.

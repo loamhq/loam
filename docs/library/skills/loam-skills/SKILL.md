@@ -31,5 +31,8 @@ your version, delete your copy and the shared one is back.
 **Write a skill for every agent** on the shared shelf, for yourself in your
 own `skills/`. Never edit Loam's shelf: the next update replaces it.
 
-A new or removed skill is listed from your next session. On Codex a copy
-you make during a thread is listed beside the original until then.
+A new or removed skill is listed from your next session (on Antigravity,
+the shared shelves are passed with `--add-dir` so `.agents/skills/` links
+resolve across the workspace boundary on fresh and resumed conversations
+alike). On Codex a copy you make during a thread is listed beside the
+original until the next session.

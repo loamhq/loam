@@ -69,12 +69,12 @@ SECRET_NAME = re.compile(
 SPACES_PRIVATE = {"logs", "cache", "scratch", "__pycache__", "venv",
                   "node_modules"}
 SPACES_PRIVATE_SUFFIX = (".pyc", ".log", ".swp", ".swo")
-# The three dotted names inside a persona's workspace that are its rendered
+# The four dotted names inside a persona's workspace that are its rendered
 # configuration, shown read-only so the owner can see what a persona runs on.
-SPACES_DOTTED = {".claude", ".codex", ".mcp.json"}
+SPACES_DOTTED = {".claude", ".codex", ".agents", ".mcp.json"}
 # Rendered into every workspace by bin/provision: an edit here is drift that
 # the next provision reverts, so they are the runtime's and read-only.
-RUNTIME_RENDERED = {"CLAUDE.md", "agent.json", ".mcp.json", ".claude", ".codex"}
+RUNTIME_RENDERED = {"CLAUDE.md", "agent.json", ".mcp.json", ".claude", ".codex", ".agents"}
 # Operator-authored, per the role file: the owner's to edit, never the persona's.
 USER_AUTHORED = {"soul.md", "config.md"}
 # Schedule saves record their author through loam_schedule.

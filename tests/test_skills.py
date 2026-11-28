@@ -163,6 +163,7 @@ def main() -> int:
     own = lc.VAULT / "System" / "skills"
     skill(own / "essay")
     skill(own / "loam-skills", text="the person's version")
+    skill(own / "custom-visuals-dir", name="loam-inline-visuals", text="owner override by frontmatter")
     ada = agent("ada")
     skill(ada / "skills" / "essay")                       # shadows by folder name
     skill(ada / "skills" / "my-plans", name="loam-how-it-works")    # by frontmatter name
@@ -170,13 +171,17 @@ def main() -> int:
     seen = sk.seen_by(ada)
     check("the person's shelf wins a name over Loam's",
           sk.shared_skills()["loam-skills"][0], "shared")
+    check("the person's shelf also shadows Loam's by frontmatter name without duplicating",
+          ("custom-visuals-dir" in sk.shared_skills(),
+           "loam-inline-visuals" in sk.shared_skills()), (True, False))
     check("a personal skill wins by folder name", seen["essay"][0], "personal")
     check("...by its SKILL.md's name, and by a single-file skill's stem",
           ("loam-how-it-works" in seen, "loam-building-a-plugin" in seen), (False, False))
     check("...and everything else shared is seen",
           sorted(n for n, (shelf, _f) in seen.items() if shelf != "personal"),
-          sorted({d.name for d in (sk.LIBRARY / "skills").iterdir() if d.is_dir()}
-                 - {"loam-how-it-works", "loam-building-a-plugin"}))
+          sorted(({d.name for d in (sk.LIBRARY / "skills").iterdir() if d.is_dir()}
+                  - {"loam-how-it-works", "loam-building-a-plugin", "loam-inline-visuals"})
+                 | {"custom-visuals-dir"}))
 
     # -- the view (.agents/skills) -----------------------------------------------------
     view = sk.view_dir(ada)

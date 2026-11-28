@@ -5,6 +5,7 @@ Render workspace instructions in the format this provider loads.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 import json
 import math
 import os
@@ -49,9 +50,21 @@ SIGN_IN_RE = re.compile(r"sign in|log in|authenticat", re.I)
 
 # Where the persona's instructions are rendered, inside its workspace,
 # because Antigravity loads rule files from the workspace and ``~/.gemini``
-# only and the latter is shared. Generated on every session start; a
-# hand-edit is overwritten.
-RULES_FILE = Path(".agents") / "rules" / "loam-persona.md"
+# only and the latter is shared. Antigravity 1.5.12 ignores ``.agents/rules/``
+# files without ``trigger: always_on`` YAML frontmatter and truncates each rule
+# file at 24,000 bytes (on line boundaries), so instructions are split across
+# numbered ``always_on`` parts under ``RULE_MAX_BYTES`` and refreshed before
+# every turn (resumed ``--conversation`` turns reload updated rules too).
+RULES_DIR = Path(".agents") / "rules"
+RULES_PREFIX = "loam-persona"
+LEGACY_RULES_FILE = RULES_DIR / f"{RULES_PREFIX}.md"
+RULES_FILE = RULES_DIR / f"{RULES_PREFIX}-01.md"
+RULE_PART_RE = re.compile(rf"^{re.escape(RULES_PREFIX)}(?:-\d+)?\.md$")
+RULE_TRIGGER_RE = re.compile(
+    r"\A---\r?\n(?:[^\n]*\r?\n)*?trigger:\s*always_on\s*\r?\n(?:[^\n]*\r?\n)*?---(?:\r?\n|\Z)"
+)
+AGY_RULE_LIMIT_BYTES = 24_000
+RULE_MAX_BYTES = 20_000
 MCP_FILE = Path(".agents") / "mcp_config.json"
 HOOKS_FILE = Path(".agents") / "hooks.json"
 IMAGES_HOOK = "loam-images"
@@ -658,22 +671,254 @@ def instructions(workspace: Path) -> str:
     return text.replace(codex.PROVIDER_LINE, PROVIDER_LINE, 1)
 
 
-def write_instructions(workspace: Path) -> Path:
-    path = workspace / RULES_FILE
-    text = ("<!-- Rendered by Loam's broker before each Antigravity turn "
-            "from CLAUDE.md and its imports. Generated file. -->\n\n"
-            + instructions(workspace))
+def _utf8_len(text: str) -> int:
+    return len(text.encode("utf-8"))
+
+
+def _rule_header(part: int, total: int) -> str:
+    return (
+        "---\n"
+        "trigger: always_on\n"
+        "---\n\n"
+        "<!-- Rendered by Loam's broker before each Antigravity turn "
+        f"from CLAUDE.md and its imports (part {part} of {total}). "
+        "Generated file. -->\n\n"
+    )
+
+
+def _split_by_bytes(text: str, limit: int) -> list[str]:
+    out: list[str] = []
+    buf: list[str] = []
+    size = 0
+    for ch in text:
+        ch_bytes = len(ch.encode("utf-8"))
+        if buf and size + ch_bytes > limit:
+            out.append("".join(buf))
+            buf = [ch]
+            size = ch_bytes
+        else:
+            buf.append(ch)
+            size += ch_bytes
+    if buf:
+        out.append("".join(buf))
+    return out
+
+
+def _pack_units(units: list[str], sep: str, limit: int) -> list[str]:
+    sep_bytes = _utf8_len(sep)
+    chunks: list[str] = []
+    current = ""
+    current_bytes = 0
+    for unit in units:
+        unit_bytes = _utf8_len(unit)
+        if not current:
+            current, current_bytes = unit, unit_bytes
+        elif current_bytes + sep_bytes + unit_bytes <= limit:
+            current = current + sep + unit
+            current_bytes += sep_bytes + unit_bytes
+        else:
+            chunks.append(current)
+            current, current_bytes = unit, unit_bytes
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _split_piece(piece: str, limit: int) -> list[str]:
+    if _utf8_len(piece) <= limit:
+        return [piece]
+    para_units: list[str] = []
+    for para in piece.split("\n\n"):
+        if _utf8_len(para) <= limit:
+            para_units.append(para)
+            continue
+        line_units: list[str] = []
+        for line in para.split("\n"):
+            if _utf8_len(line) <= limit:
+                line_units.append(line)
+            else:
+                line_units.extend(_split_by_bytes(line, limit))
+        para_units.extend(_pack_units(line_units, "\n", limit))
+    return _pack_units(para_units, "\n\n", limit)
+
+
+def _instruction_sections(text: str) -> list[str]:
+    stripped = text.strip()
+    if not stripped:
+        return [""]
+    marker = "\n\nContents of "
+    raw = stripped.split(marker)
+    sections = [raw[0]] + [f"Contents of {part}" for part in raw[1:]]
+    return sections
+
+
+def split_rules(text: str, max_bytes: int = RULE_MAX_BYTES) -> list[tuple[Path, str]]:
+    """Split rendered instructions into one or more ``always_on`` rule files,
+    each guaranteed to fit within ``max_bytes`` UTF-8 bytes."""
+    overhead = _utf8_len(_rule_header(999, 999)) + 1
+    body_limit = max_bytes - overhead
+    if body_limit <= 0:
+        raise ValueError(f"max_bytes ({max_bytes}) is too small for the rule header")
+    sep_bytes = 2  # "\n\n"
+    chunks: list[str] = []
+    current = ""
+    current_bytes = 0
+    for section in _instruction_sections(text):
+        sec_bytes = _utf8_len(section)
+        if sec_bytes <= body_limit:
+            if not current:
+                current, current_bytes = section, sec_bytes
+            elif current_bytes + sep_bytes + sec_bytes <= body_limit:
+                current = current + "\n\n" + section
+                current_bytes += sep_bytes + sec_bytes
+            else:
+                chunks.append(current)
+                current, current_bytes = section, sec_bytes
+        else:
+            if current:
+                chunks.append(current)
+                current, current_bytes = "", 0
+            parts = _split_piece(section, body_limit)
+            chunks.extend(parts[:-1])
+            current = parts[-1]
+            current_bytes = _utf8_len(current)
+    if current or not chunks:
+        chunks.append(current)
+    total = len(chunks)
+    width = max(2, len(str(total)))
+    out: list[tuple[Path, str]] = []
+    for index, body in enumerate(chunks, 1):
+        rel = RULES_DIR / f"{RULES_PREFIX}-{index:0{width}d}.md"
+        content = _rule_header(index, total) + (body + "\n" if body else "")
+        out.append((rel, content))
+    return out
+
+
+def render_rule_files(workspace: Path,
+                      max_bytes: int = RULE_MAX_BYTES) -> list[tuple[Path, str]]:
+    return split_rules(instructions(workspace), max_bytes=max_bytes)
+
+
+def managed_rule_files(workspace: Path) -> list[Path]:
+    rules_dir = workspace / RULES_DIR
     try:
-        if path.read_text(encoding="utf-8") == text:
-            return path
+        entries = sorted(rules_dir.iterdir())
     except OSError:
-        pass
-    _write_workspace_file(path, text)
-    return path
+        return []
+    return [p for p in entries
+            if (p.is_file() or p.is_symlink()) and RULE_PART_RE.match(p.name)]
+
+
+def has_instructions(workspace: Path) -> bool:
+    return bool(managed_rule_files(workspace))
+
+
+def sync_instructions(workspace: Path,
+                      max_bytes: int = RULE_MAX_BYTES) -> tuple[list[Path], bool]:
+    """Write the split ``always_on`` rule files and remove obsolete
+    ``loam-persona.md`` or stale extra parts. Returns ``(paths, changed)``."""
+    rendered = render_rule_files(workspace, max_bytes=max_bytes)
+    wanted_names = {rel.name for rel, _ in rendered}
+    changed = False
+    paths: list[Path] = []
+    for rel, text in rendered:
+        path = workspace / rel
+        paths.append(path)
+        try:
+            if path.read_text(encoding="utf-8") == text:
+                continue
+        except OSError:
+            pass
+        _write_workspace_file(path, text)
+        changed = True
+    for entry in managed_rule_files(workspace):
+        if entry.name not in wanted_names:
+            entry.unlink(missing_ok=True)
+            changed = True
+    return paths, changed
+
+
+def write_instructions(workspace: Path) -> Path:
+    paths, _ = sync_instructions(workspace)
+    return paths[0]
+
+
+def rule_file_issues(workspace: Path) -> list[str]:
+    """Check Antigravity's rendered persona rule files for obsolete files,
+    missing frontmatter, or oversized parts without diffing dynamic persona
+    content."""
+    issues: list[str] = []
+    legacy = workspace / LEGACY_RULES_FILE
+    if legacy.exists() or legacy.is_symlink():
+        issues.append(f"obsolete {LEGACY_RULES_FILE} (missing trigger frontmatter) is still present")
+    parts = [p for p in managed_rule_files(workspace) if p.name != LEGACY_RULES_FILE.name]
+    if (workspace / "CLAUDE.md").is_file() and not parts:
+        issues.append(f"missing {RULES_FILE}")
+    for part in parts:
+        rel = part.relative_to(workspace)
+        try:
+            raw = part.read_bytes()
+            text = raw.decode("utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            issues.append(f"{rel} unreadable ({exc})")
+            continue
+        if not RULE_TRIGGER_RE.match(text):
+            issues.append(f"{rel} is missing `trigger: always_on` frontmatter")
+        if len(raw) > AGY_RULE_LIMIT_BYTES:
+            issues.append(
+                f"{rel} is {len(raw)} bytes (over Antigravity's "
+                f"{AGY_RULE_LIMIT_BYTES}-byte per-file cap)")
+    return issues
+
+
+def _within(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def skill_dirs(workspace: Path | None = None,
+               vault: Path | None = None) -> list[Path]:
+    """Existing resolved directories outside ``workspace`` that Antigravity
+    needs via ``--add-dir`` so symlinks in ``.agents/skills/`` pass its
+    workspace-root containment check (agy 1.5.12 rejects targets outside
+    ``workspaceDirs`` with ``escapes workspace root``)."""
+    import loam_skills  # noqa: PLC0415
+    ws_root = workspace.resolve() if workspace is not None else None
+    dirs: list[Path] = []
+
+    def add(candidate: Path) -> None:
+        try:
+            resolved = candidate.resolve(strict=True)
+        except OSError:
+            return
+        if not resolved.is_dir():
+            return
+        if ws_root is not None and _within(resolved, ws_root):
+            return
+        if any(_within(resolved, existing) for existing in dirs):
+            return
+        dirs[:] = [existing for existing in dirs if not _within(existing, resolved)]
+        dirs.append(resolved)
+
+    for _label, shelf in loam_skills.shelves(vault):
+        add(shelf)
+    if workspace is not None:
+        view = loam_skills.view_dir(workspace)
+        try:
+            entries = sorted(view.iterdir())
+        except OSError:
+            entries = []
+        for entry in entries:
+            if entry.is_symlink():
+                add(entry)
+    return dirs
 
 
 def argv(prompt: str, conversation: str | None, model: str | None,
-         effort: str | None) -> list[str]:
+         effort: str | None, extra_dirs: Iterable[Path] = ()) -> list[str]:
     """Build a headless turn with the configured permission mode. This invocation has no
     interactive approval channel.
     """
@@ -686,6 +931,8 @@ def argv(prompt: str, conversation: str | None, model: str | None,
     if effort and not carries_level(model):
         # An id that ends in its level carries it (LEVEL_RE above).
         out += ["--effort", effort]
+    for d in extra_dirs:
+        out += ["--add-dir", str(d)]
     return out
 
 

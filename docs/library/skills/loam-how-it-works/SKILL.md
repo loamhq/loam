@@ -48,7 +48,10 @@ automatic choice stays empty until a provider connects. Models and
 thinking levels belong to their provider. Loam uses the selected provider's
 defaults when a different provider's settings do not apply. Each CLI gets
 the same agent files in its own format and stays on the version pinned by
-the Loam release.
+the Loam release: Antigravity loads rendered `trigger: always_on` rule parts
+under `.agents/rules/loam-persona-*.md` (split below its 24 KB per-file rule
+cap and refreshed before every turn, including resumed conversations) and
+reads `.agents/skills/` with the shared skill shelves passed via `--add-dir`.
 
 **Threads.** The owner talks with agents in threads. Loam writes each
 thread's record into the vault as it happens (never edit one). A message

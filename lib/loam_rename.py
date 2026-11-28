@@ -347,9 +347,9 @@ def _rerender_runtime_files(old_id: str, new_id: str, old_ws: Path, new_ws: Path
             agy.sync_images_hook(new_ws, "images" in mcp["mcpServers"])
             agy.sync_loading_size_hook(new_ws)
         updated.append(".agents/mcp_config.json")
-    if (new_ws / agy.RULES_FILE).is_file() and (new_ws / "CLAUDE.md").is_file():
-        agy.write_instructions(new_ws)
-        updated.append(agy.RULES_FILE)
+    if agy.has_instructions(new_ws) and (new_ws / "CLAUDE.md").is_file():
+        written, _ = agy.sync_instructions(new_ws)
+        updated.extend(str(p.relative_to(new_ws)) for p in written)
     if (new_ws / ".agents" / "skills").exists():
         loam_skills.render_view(new_ws, vault)
         updated.append(".agents/skills")

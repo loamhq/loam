@@ -551,11 +551,13 @@ def provision_antigravity(names: list[str], dry: bool = False) -> None:
         # A personal skill takes precedence over a shared skill with the same name.
         if loam_skills.render_view(workspace):
             changed = True
-        agy_instr = workspace / agy.RULES_FILE
-        if agy_instr.is_file() and (workspace / "CLAUDE.md").is_file():
-            before = agy_instr.read_text(encoding="utf-8")
-            agy.write_instructions(workspace)
-            if agy_instr.read_text(encoding="utf-8") != before:
+        if (workspace / "CLAUDE.md").is_file():
+            _paths, rules_changed = agy.sync_instructions(workspace)
+            changed = rules_changed or changed
+        else:
+            legacy = workspace / agy.LEGACY_RULES_FILE
+            if legacy.exists() or legacy.is_symlink():
+                legacy.unlink(missing_ok=True)
                 changed = True
         print(f"  {name}: .agents/ {'written' if changed else 'unchanged'}")
 

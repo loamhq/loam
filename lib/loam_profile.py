@@ -160,7 +160,7 @@ def sync_display_instructions(agent: str, workspace: Path, config: dict) -> bool
         loam_codex.write_instructions(agent, workspace)
         changed = True
     import loam_antigravity  # noqa: PLC0415
-    if (workspace / loam_antigravity.RULES_FILE).is_file():
+    if loam_antigravity.has_instructions(workspace):
         loam_antigravity.write_instructions(workspace)
         changed = True
     return changed

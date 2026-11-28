@@ -88,11 +88,153 @@ def test_argv() -> None:
     assert line[1] == "--print=hi there"
     assert "--dangerously-skip-permissions" in line
     assert "--conversation" not in line
-    line = agy.argv("-p looks like a flag", "c9", "m", "high")
+    assert "--add-dir" not in line
+    line = agy.argv("-p looks like a flag", "c9", "m", "high",
+                    extra_dirs=[Path("/s/one"), Path("/s/two")])
     assert line[1] == "--print=-p looks like a flag"
     assert line[line.index("--conversation") + 1] == "c9"
     assert line[line.index("--model") + 1] == "m"
     assert line[line.index("--effort") + 1] == "high"
+    add_dirs = [line[i + 1] for i, tok in enumerate(line) if tok == "--add-dir"]
+    assert add_dirs == ["/s/one", "/s/two"], add_dirs
+
+
+def test_split_rules_and_sync_instructions() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        ws = Path(tmp) / "alpha"
+        ws.mkdir()
+        (ws / "agent.json").write_text('{"name": "alpha", "display": "Alpha"}\n')
+        (ws / "soul.md").write_text("# Soul\n\nSTART_CANARY\n" + ("s" * 7000 + "\n\n") * 2)
+        (ws / "map.md").write_text("# Map\n\n" + ("é" * 500 + "\n") * 25 + "TAIL_CANARY\n")
+        (ws / "CLAUDE.md").write_text("You are Alpha.\n\n@soul.md\n\n@map.md\n")
+
+        # Plant obsolete untriggered rule file, a stale extra part, and an unrelated rule file.
+        rules_dir = ws / agy.RULES_DIR
+        rules_dir.mkdir(parents=True)
+        legacy = ws / agy.LEGACY_RULES_FILE
+        legacy.write_text("old untriggered rule\n")
+        stale = rules_dir / "loam-persona-99.md"
+        stale.write_text("---\ntrigger: always_on\n---\nstale\n")
+        custom = rules_dir / "custom.md"
+        custom.write_text("---\ntrigger: always_on\n---\ncustom\n")
+
+        issues_before = agy.rule_file_issues(ws)
+        assert any("obsolete" in i for i in issues_before), issues_before
+
+        paths, changed = agy.sync_instructions(ws)
+        assert changed is True
+        assert len(paths) >= 2, paths
+        assert paths[0] == ws / agy.RULES_FILE
+        assert not legacy.exists()
+        assert not stale.exists()
+        assert custom.is_file()
+        assert agy.rule_file_issues(ws) == []
+
+        combined = ""
+        for p in paths:
+            raw = p.read_bytes()
+            text = raw.decode("utf-8")
+            assert len(raw) <= agy.RULE_MAX_BYTES < agy.AGY_RULE_LIMIT_BYTES, (p, len(raw))
+            assert agy.RULE_TRIGGER_RE.match(text), (p, text[:120])
+            combined += text
+        assert "You are Alpha." in combined
+        assert "START_CANARY" in combined
+        assert "TAIL_CANARY" in combined
+        assert "Your current name in Loam is “Alpha”." in combined
+
+        # Second sync is a no-op.
+        paths2, changed2 = agy.sync_instructions(ws)
+        assert paths2 == paths and changed2 is False
+
+        # Shrinking back down removes excess parts.
+        (ws / "soul.md").write_text("# Soul\n\nshort\n")
+        (ws / "map.md").write_text("# Map\n\nshort\n")
+        paths3, changed3 = agy.sync_instructions(ws)
+        assert changed3 is True and len(paths3) == 1
+        assert [p.name for p in agy.managed_rule_files(ws)] == ["loam-persona-01.md"]
+        assert custom.is_file()
+
+        # Oversized single line splits safely on UTF-8 boundaries.
+        long_parts = agy.split_rules("€" * 1000, max_bytes=600)
+        assert len(long_parts) > 1
+        for _rel, body in long_parts:
+            assert len(body.encode("utf-8")) <= 600
+            assert agy.RULE_TRIGGER_RE.match(body)
+
+        # rule_file_issues catches missing frontmatter and oversized files.
+        paths3[0].write_text("no frontmatter\n")
+        assert any("always_on" in i for i in agy.rule_file_issues(ws))
+        paths3[0].write_text("---\ntrigger: always_on\n---\n" + ("x" * (agy.AGY_RULE_LIMIT_BYTES + 1)))
+        assert any("per-file cap" in i for i in agy.rule_file_issues(ws))
+
+
+def test_skill_dirs() -> None:
+    import loam_skills as sk  # noqa: PLC0415
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        vault = root / "vault"
+        sys_dir = vault / lc.vault_folder("system")
+        own_shelf = sys_dir / sk.OWN_DIR
+        loam_shelf = sys_dir / sk.LOAM_DIR / "skills"
+        external = root / "external-skill"
+        ws = root / "ai-labs" / "alpha"
+        for d in (own_shelf / "shared-one", loam_shelf / "loam-one",
+                  external, ws / "skills" / "mine", ws / ".agents" / "skills"):
+            d.mkdir(parents=True)
+            (d / "SKILL.md").write_text(f"---\nname: {d.name}\ndescription: d\n---\n")
+        (ws / ".agents" / "skills" / "mine").symlink_to("../../skills/mine")
+        (ws / ".agents" / "skills" / "shared-one").symlink_to(str(own_shelf / "shared-one"))
+        (ws / ".agents" / "skills" / "loam-one").symlink_to(str(loam_shelf / "loam-one"))
+        (ws / ".agents" / "skills" / "ext").symlink_to(str(external))
+
+        dirs = agy.skill_dirs(ws, vault=vault)
+        assert dirs == [own_shelf.resolve(), loam_shelf.resolve(), external.resolve()], dirs
+
+        # Missing shelves are omitted cleanly.
+        empty_vault = root / "empty-vault"
+        assert agy.skill_dirs(vault=empty_vault) == []
+
+
+def test_provision_antigravity_and_files_authority() -> None:
+    import loam_files  # noqa: PLC0415
+    assert loam_files.visible("spaces", ["alpha"], ".agents") is True
+    assert loam_files.authority("spaces", ["alpha", ".agents", "rules", "loam-persona-01.md"]) == "runtime"
+
+    loader = importlib.machinery.SourceFileLoader(
+        "provision_agy_test", str(ROOT / "bin" / "provision"))
+    spec = importlib.util.spec_from_loader("provision_agy_test", loader)
+    provision = importlib.util.module_from_spec(spec)
+    loader.exec_module(provision)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        labs = root / "ai-labs"
+        ws = labs / "beta"
+        (ws / "skills").mkdir(parents=True)
+        (ws / "agent.json").write_text(json.dumps({
+            "name": "beta", "display": "Beta", "workspace": str(ws),
+            "vault": str(root / "vault"),
+        }))
+        (ws / "soul.md").write_text("# Soul\n\n" + ("word " * 4000) + "\n")
+        (ws / "map.md").write_text("# Map\n\n" + ("item " * 2500) + "\nEND_MARKER\n")
+        (ws / "CLAUDE.md").write_text("You are Beta.\n\n@soul.md\n\n@map.md\n")
+        (ws / ".agents" / "rules").mkdir(parents=True)
+        legacy = ws / agy.LEGACY_RULES_FILE
+        legacy.write_text("stale untriggered file\n")
+
+        saved_labs = provision.AI_LABS
+        provision.AI_LABS = labs
+        try:
+            provision.provision_antigravity(["beta"])
+        finally:
+            provision.AI_LABS = saved_labs
+
+        assert not legacy.exists()
+        parts = agy.managed_rule_files(ws)
+        assert len(parts) >= 2, parts
+        assert agy.rule_file_issues(ws) == []
+        joined = "\n".join(p.read_text(encoding="utf-8") for p in parts)
+        assert "You are Beta." in joined and "END_MARKER" in joined
 
 
 def test_instructions_same_sources() -> None:

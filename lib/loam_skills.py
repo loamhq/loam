@@ -36,7 +36,12 @@ both, side by side, with nothing to tell them apart (verified with
   Codex lists a skill reached by two links once.
 - Antigravity reads ``.agents/skills`` in the workspace, which becomes a
   folder this module renders (``render_view``): a link per personal skill and
-  a link per shared skill no personal one shadows.
+  a link per shared skill no personal one shadows. Because ``agy`` 1.5.12
+  rejects skill symlinks (and ``.agents/skills.json`` paths) that resolve
+  outside ``workspaceDirs`` (``escapes workspace root``),
+  ``loam_antigravity.argv`` passes ``--add-dir`` for the shared shelves
+  (``loam_antigravity.skill_dirs``) on every persona turn so those links load
+  natively with exact shadowing and zero duplicates.
 
 The view is rendered at provisioning, at every session start in the broker
 and in a wake, and by ``bin/library refresh``. Between two renders a skill
@@ -140,11 +145,17 @@ def shelf_skills(shelf: Path) -> dict[str, Path]:
 
 def shared_skills(vault: Path | None = None) -> dict[str, tuple[str, Path]]:
     """Every shared skill by name: ``{name: (shelf, folder)}``, the person's
-    shelf winning a name over Loam's."""
+    shelf winning a name over Loam's (by folder name or frontmatter ``name``)."""
     out: dict[str, tuple[str, Path]] = {}
+    taken: set[str] = set()
     for label, shelf in shelves(vault):
         for name, folder in shelf_skills(shelf).items():
-            out.setdefault(name, (label, folder))
+            fm = skill_name(folder) or name
+            if name in out or name in taken or fm in taken:
+                continue
+            out[name] = (label, folder)
+            taken.add(name)
+            taken.add(fm)
     return out
 
 

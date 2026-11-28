@@ -3507,3 +3507,27 @@ listener for immediate notification in an open page.
     shrinking, or tall height; when shown, the dialog sizes from the visual's overflowing
     `naturalWidth` (never starting from `viewportW`, which would ratchet wide) with no
     `min-height: 240px` dead band on `.reply-visual-frame.large`.
+
+## Antigravity persona rules & shared skills (`agy 1.5.12`, 2026-11-27)
+
+- **`.agents/rules/*.md` requires YAML frontmatter `trigger: always_on`.** Without it,
+  `agy 1.5.12` logs `Invalid rule trigger: CORTEX_MEMORY_TRIGGER_UNSPECIFIED` and silently
+  skips the file (so the old untriggered `.agents/rules/loam-persona.md` never loaded at all).
+- **Per-file 24,000-byte truncation cap:** `agy 1.5.12` silently truncates any single rule
+  file past 24,000 bytes (on line boundaries), while loading multiple `.agents/rules/*.md`
+  files in alphabetical order up to its aggregate 20,000-token rules budget.
+  `loam_antigravity.sync_instructions()` splits rendered instructions into numbered
+  `.agents/rules/loam-persona-01.md`, `loam-persona-02.md`, ... (each `<= 20,000` UTF-8 bytes
+  including `trigger: always_on` frontmatter) and deletes obsolete `loam-persona.md` and
+  excess parts.
+- **Resumed `--conversation` reloads both rules and skills:** verified empirically on
+  `agy 1.5.12` that editing/adding `.agents/rules/loam-persona-*.md` or updating
+  `.agents/skills/` symlinks takes effect on the very next `--conversation <id>` turn.
+- **Out-of-workspace skill symlinks and `.agents/skills.json` paths are rejected unless
+  whitelisted by `--add-dir`:** `agy 1.5.12` enforces workspace-root containment
+  (`customization.go:604: path ... escapes workspace root ...`) on both `.agents/skills/`
+  symlinks AND `.agents/skills.json` entries. Passing `--add-dir` for the existing shared
+  skill shelves (and any externally symlinked skill directories) via
+  `loam_antigravity.skill_dirs()` lets the existing `.agents/skills/` symlink view load
+  natively with exact shadowing (personal > shared > Loam), zero duplicates, and without
+  exposing unlinked shadowed skills from the shelf directories.
