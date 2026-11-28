@@ -3480,3 +3480,9 @@ listener for immediate notification in an open page.
   thread stay stuck at `min-height` and jump when scrolled up. `app/src/visual-frame.js`
   therefore measures synchronously on `renderHtml` and pairs `rAF` with a 40 ms timer in
   `scheduleMeasure()`.
+- **Iframe transparency requires matching `color-scheme`:** Chromium paints an opaque
+  canvas backdrop (`#121212` / `#fff`) behind an `<iframe>` whenever the parent `<iframe>`
+  element's used `color-scheme` differs from the inner document's `color-scheme` (for
+  example switching Loam to dark mode on a light-OS browser). `.reply-visual-frame` sets
+  `color-scheme: light` and `:root[data-theme="dark"] .reply-visual-frame` sets
+  `color-scheme: dark` (matching `.fs-iframe` / `.apps-embed`).
