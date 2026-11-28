@@ -3411,7 +3411,8 @@ html.image-view-open, html.image-view-open body { overflow:hidden; }
 .tt-prose-content > .reply-visual:first-child { margin-top:2px; }
 .tt-prose-content > .reply-visual:last-child { margin-bottom:2px; }
 .reply-visual-slot { width:100%; min-width:0; }
-.reply-visual-frame { display:block; width:100%; height:48px; border:0; background:transparent; overflow:hidden; transition:opacity var(--motion-fast) var(--ease-standard); }
+.reply-visual-frame { display:block; width:100%; height:48px; border:0; background:transparent; color-scheme:light; overflow:hidden; transition:opacity var(--motion-fast) var(--ease-standard); }
+:root[data-theme="dark"] .reply-visual-frame { color-scheme:dark; }
 .reply-visual-frame.loading { opacity:0; }
 .reply-visual-frame.large { min-height:240px; }
 .reply-visual-tools { display:flex; align-items:center; justify-content:flex-end; gap:2px; margin-top:2px; min-height:24px; }

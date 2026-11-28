@@ -496,6 +496,13 @@ try {
     assert.equal(afterDark.crema.toLowerCase(), '#d89a5b')
     assert.notEqual(afterDark.ink, beforeLight.ink)
     assert.equal(await page.locator('.reply-visual-frame').first().getAttribute('src'), srcBefore, 'theme switch updates in-place without iframe reload')
+    // Parent <iframe> element must match the inner document's color-scheme so
+    // Chromium keeps the iframe backdrop transparent even on a light OS.
+    assert.equal(
+      await page.evaluate(() => getComputedStyle(document.querySelector('.reply-visual-frame')).colorScheme),
+      'dark',
+      'iframe element color-scheme tracks dark mode so backdrop stays transparent',
+    )
 
     // Switch to non-default built-in theme `plain`.
     await page.evaluate(() => { document.documentElement.dataset.look = 'plain'; document.documentElement.dataset.theme = 'light' })
