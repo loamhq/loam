@@ -2,6 +2,7 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 import { loadThemes } from '../src/themes.js'
+import { SIZE_MIN, SIZE_MAX, SIZE_STEP, SIZE_DEFAULT } from '../public/scale.js'
 export function appearanceRegistry(themes) {
   const settings = [
     { key: 'appearance.location', type: ['object', 'null'], default: null, additionalProperties: false,
@@ -16,7 +17,7 @@ export function appearanceRegistry(themes) {
     settings.push(
       { key: key('mode'), type: 'string', enum: ['light', 'dark', 'sun', 'system'], default: 'system' },
       { key: key('transition'), type: 'string', enum: ['fast', 'normal', 'long'], default: 'normal' },
-      { key: key('size'), type: 'integer', minimum: 75, maximum: 150, multipleOf: 5, default: 100 },
+      { key: key('size'), type: 'integer', minimum: SIZE_MIN, maximum: SIZE_MAX, multipleOf: SIZE_STEP, default: SIZE_DEFAULT },
       { key: key('theme'), type: 'string', enum: themes.map(t => t.id), default: 'latte' },
     )
     for (const theme of themes) for (const option of theme.options || []) settings.push({

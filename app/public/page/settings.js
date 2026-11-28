@@ -20,6 +20,7 @@ import { themePreview } from '../theme-preview.js'
 import { shownOptions } from '../theme-options.js'
 import { fileShortcuts, toggleFileShortcut } from '../store.js'
 import { createApiKeys } from '../api-keys.js'
+import { SIZE_MIN, SIZE_MAX, SIZE_STEP, SIZE_DEFAULT, stepSize } from '../scale.js'
 
 // About Loam's server card, in words.
 const GB = 1024 ** 3
@@ -174,7 +175,10 @@ function settingsAppearance({ back = true } = {}) {
   const options = [{ id: 'light', label: 'Light' }, { id: 'dark', label: 'Dark' }, { id: 'sun', label: 'Sun' }, { id: 'system', label: 'System' }]
   const transitions = [{ id: 'fast', label: 'Fast · 3 s' }, { id: 'normal', label: 'Normal · 10 s' }, { id: 'long', label: 'Long · 20 s' }]
   const solar = mode === 'sun' ? host.theme.solar : null
-  const feedback = h('div', { class: `appearance-status${status.error ? ' err' : ''}`, role: 'status' }, status.error || (status.saving ? 'Saving…' : status.localOnly ? 'Sun saved on this device until the host supports it.' : 'Changes saved'),
+  const localNotice = status.sunLocalOnly && status.sizeLocalOnly ? 'Sun and size saved on this device until the host supports them.'
+    : status.sizeLocalOnly ? 'Size saved on this device until the host supports 60%–200%.'
+      : 'Sun saved on this device until the host supports it.'
+  const feedback = h('div', { class: `appearance-status${status.error ? ' err' : ''}`, role: 'status' }, status.error || (status.saving ? 'Saving…' : status.localOnly ? localNotice : 'Changes saved'),
     status.error ? h('button', { class: 'quietlink', type: 'button', text: 'Try again', onclick: () => status.saving ? host.theme.save() : host.theme.refresh() }) : null)
   return [
     back ? settingsBack('Settings', 'root') : null,
@@ -225,11 +229,11 @@ function settingsAppearance({ back = true } = {}) {
       h('div', { class: 'appearance-label' }, h('h3', { class: 'kicker', id: 'appearance-size', text: 'Size' }), h('output', { for: 'appearance-zoom', 'aria-label': 'Current size', text: `${size}%` })),
       h('p', { class: 'note', text: 'Adjust text and controls together.' }),
       h('div', { class: 'appearance-stepper', role: 'group', 'aria-label': 'App size' },
-        h('button', { class: 'roundbtn', type: 'button', 'aria-label': 'Zoom out', disabled: size <= 75, onclick: () => host.theme.set({ size: size - 5 }), text: '−' }),
-        h('input', { id: 'appearance-zoom', type: 'range', min: 75, max: 150, step: 5, value: size, 'aria-label': 'App zoom', 'aria-valuetext': `${size}%`, oninput: (e) => host.theme.set({ size: Number(e.target.value) }), onchange: () => host.theme.save() }),
-        h('button', { class: 'roundbtn', type: 'button', 'aria-label': 'Zoom in', disabled: size >= 150, onclick: () => host.theme.set({ size: size + 5 }), text: '+' })),
-      h('div', { class: 'appearance-limits' }, h('span', { text: '75%' }), h('span', { text: '150%' })),
-      h('button', { class: 'quietlink appearance-reset', type: 'button', disabled: size === 100, text: 'Reset to 100%', onclick: () => host.theme.set({ size: 100 }) }),
+        h('button', { class: 'roundbtn', type: 'button', 'aria-label': 'Zoom out', disabled: size <= SIZE_MIN, onclick: () => host.theme.set({ size: stepSize(size, -1) }), text: '−' }),
+        h('input', { id: 'appearance-zoom', type: 'range', min: SIZE_MIN, max: SIZE_MAX, step: SIZE_STEP, value: size, 'aria-label': 'App zoom', 'aria-valuetext': `${size}%`, oninput: (e) => host.theme.set({ size: Number(e.target.value) }), onchange: () => host.theme.save() }),
+        h('button', { class: 'roundbtn', type: 'button', 'aria-label': 'Zoom in', disabled: size >= SIZE_MAX, onclick: () => host.theme.set({ size: stepSize(size, 1) }), text: '+' })),
+      h('div', { class: 'appearance-limits' }, h('span', { text: `${SIZE_MIN}%` }), h('span', { text: `${SIZE_MAX}%` })),
+      h('button', { class: 'quietlink appearance-reset', type: 'button', disabled: size === SIZE_DEFAULT, text: 'Reset to 100%', onclick: () => host.theme.set({ size: SIZE_DEFAULT }) }),
       host.state.wide ? h('p', { class: 'note', text: 'Ctrl / ⌘ + or − to resize · 0 to reset' }) : null),
     !status.error ? feedback : null,
   ]

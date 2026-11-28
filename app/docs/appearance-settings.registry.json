@@ -66,8 +66,8 @@
     {
       "key": "appearance.phone.size",
       "type": "integer",
-      "minimum": 75,
-      "maximum": 150,
+      "minimum": 60,
+      "maximum": 200,
       "multipleOf": 5,
       "default": 100
     },
@@ -142,8 +142,8 @@
     {
       "key": "appearance.desktop.size",
       "type": "integer",
-      "minimum": 75,
-      "maximum": 150,
+      "minimum": 60,
+      "maximum": 200,
       "multipleOf": 5,
       "default": 100
     },

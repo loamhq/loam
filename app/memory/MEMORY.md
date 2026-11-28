@@ -329,3 +329,22 @@ have never met.
   `52 px` top band while desktop keeps the hover Copy pill. See
   `test/markdown.test.js`, `test/style.test.js`, `test/chat-tables-browser.mjs`,
   and `docs/evidence/chat-tables/README.md`.
+- **App size (0.9-base default, 60%–200% range, full-width `#app`)**
+  (`public/scale.js`, `public/size-local.js`, `public/theme-boot.js`,
+  `public/theme.js`, `public/page/settings.js`, `public/style.css`,
+  `src/appearance.js`, `tools/appearance-registry.js`): `#app` uses `width: 100%`
+  with no `460px` ceiling so zoomed-out phone surfaces stay edge-to-edge. UI
+  size `60%`–`200%` (slider step 5, `−`/`+` and keyboard steps 5% up to `150%`
+  and 10% above `150%`) maps to `--ui-scale = Math.round(size * 9) / 1000`
+  (`0.54`–`1.80`, with `100%` = `0.9`), and `uiScale()` accepts `0.5`–`2` so
+  `layoutPixels()` stays accurate for popovers, anchors, and sheets across the
+  full range. On narrow high-zoom phone canvases (`<= 240px` layout width),
+  `.nav` compacts inside `@container`, `.appearance-card[aria-labelledby="appearance-size"]`
+  stacks the slider full-width above `−`/`+`, and `.composer-actions` wraps
+  with `.composer-box .modelbtn { max-width: calc(100% - 48px) }` (keeping
+  `.composer-actions` free of `@media`/`@container` rules per `test/style.test.js`).
+  Extended sizes (`60`–`70` and `155`–`200`) cache locally under
+  `loam.appearance.size` when an older host rejects them and migrate once the
+  host accepts `60`–`200`. See `test/appearance.test.js`,
+  `test/appearance-browser.mjs`, `test/app-size-browser.mjs`, and
+  `docs/evidence/app-size/README.md`.

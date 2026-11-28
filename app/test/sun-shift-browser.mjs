@@ -201,7 +201,7 @@ try {
       }))
       assert.equal(finalState.theme, 'dark')
       assert.equal(finalState.shifting, false)
-      assert.equal(finalState.styleAttr, '--ui-scale: 1;')
+      assert.equal(finalState.styleAttr, '--ui-scale: 0.9;')
       assert.equal(finalState.meta, '#1A1917')
       await page.screenshot({ path: path.join(out, `shift-${width}-after.png`) })
       assert.deepEqual(errors, [])
@@ -236,7 +236,7 @@ try {
       assert.match(await coverSrc(), /cover-dark\.webp$/)
       await page.clock.runFor(1500) // done
       assert.equal(await page.evaluate(() => __shiftTest.theme.shifting), false)
-      assert.equal(await page.evaluate(() => document.documentElement.getAttribute('style')), '--ui-scale: 1;')
+      assert.equal(await page.evaluate(() => document.documentElement.getAttribute('style')), '--ui-scale: 0.9;')
       console.log('PASS plugin theme (autumn): tokens shift, dark cover switches at midpoint, clean end state')
     } finally {
       await ctx.close()
@@ -257,7 +257,7 @@ try {
       await page.clock.runFor(150)
       assert.equal(await page.evaluate(() => __shiftTest.theme.shifting), false)
       assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'dark')
-      assert.equal(await page.evaluate(() => document.documentElement.getAttribute('style')), '--ui-scale: 1;')
+      assert.equal(await page.evaluate(() => document.documentElement.getAttribute('style')), '--ui-scale: 0.9;')
     } finally {
       await ctx.close()
     }
@@ -277,7 +277,7 @@ try {
       await page2.evaluate(() => __shiftTest.theme.set({ mode: 'light' }))
       assert.equal(await page2.evaluate(() => __shiftTest.theme.shifting), false)
       assert.equal(await page2.evaluate(() => document.documentElement.dataset.theme), 'light')
-      assert.equal(await page2.evaluate(() => document.documentElement.getAttribute('style')), '--ui-scale: 1;')
+      assert.equal(await page2.evaluate(() => document.documentElement.getAttribute('style')), '--ui-scale: 0.9;')
       await page2.clock.resume()
 
       // Older host refuses transition: saves locally without error and migrates later.

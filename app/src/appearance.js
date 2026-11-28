@@ -1,11 +1,12 @@
 import { optionValues } from '../public/theme-options.js'
+import { isValidSize, SIZE_DEFAULT } from '../public/scale.js'
 import '../public/sun.js'
 // Only these public preference fields may be embedded in the boot script.
 export function appearanceValues(value, themes = [{ id: 'latte' }, { id: 'plain' }]) {
   const clean = (v) => ({
     mode: ['light', 'dark', 'sun', 'system'].includes(v?.mode) ? v.mode : 'system',
     transition: ['fast', 'normal', 'long'].includes(v?.transition) ? v.transition : 'normal',
-    size: Number.isInteger(v?.size) && v.size >= 75 && v.size <= 150 && v.size % 5 === 0 ? v.size : 100,
+    size: isValidSize(v?.size) ? v.size : SIZE_DEFAULT,
     theme: themes.some(t => t.id === v?.theme) ? v.theme : 'latte',
     ...(themes.some(t => t.options?.length) ? { options: optionValues(v?.options, themes) } : {}),
   })

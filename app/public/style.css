@@ -34,11 +34,10 @@ button, select, input:not([type="checkbox"]):not([type="radio"]):not([type="file
 button, [role="button"], .pillbtn[href] { min-width: 44px; }
 :is(button, input, textarea, select, a, summary, [role="button"]):focus-visible { outline: 2px solid var(--signal-crema); outline-offset: 2px; }
 
-/* The phone the design was drawn for, centred on anything wider. */
+/* The app fills the viewport at every width and zoom level. */
 #app {
   --reading-ground: var(--paper-page);
-  max-width: 460px;
-  margin: 0 auto;
+  width: 100%;
   height: 100%;
   /* The phone's viewport as it actually is with the browser's own bars in the
    * way. `100%` is the fallback for anything that has not met `dvh`.
@@ -1225,7 +1224,7 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
   border-radius: 6px; padding: 1px 5px;
 }
 /* Scope the composer actions separately from the action sheet, whose actions stack vertically. */
-.composer-actions { display: flex; flex-direction: row; align-items: center; gap: 4px; }
+.composer-actions { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px; }
 .composer-gap { flex: 1; min-width: 8px; }
 
 /* The design's round button is 40px, which is also the touch target the rest of
@@ -1262,9 +1261,10 @@ button, [role="button"], .pillbtn[href] { min-width: 44px; }
  * the row runs out of room — it clips to an ellipsis and the chevron, the mic
  * and the send keep their targets. */
 .modelbtn {
-  height: 40px; min-width: 0; flex: 0 1 auto; display: flex; align-items: center; gap: 6px;
+  height: 40px; min-width: 0; max-width: 100%; flex: 0 1 auto; display: flex; align-items: center; gap: 6px; overflow: hidden;
   border: 0; border-radius: 999px; background: var(--latte-foam); color: var(--latte-foam-ink); padding: 0 12px; font-size: 13px;
 }
+.composer-box .modelbtn { max-width: calc(100% - 48px); }
 .modelbtn-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .modelbtn > svg { flex: none; }
 /* Primary while its menu is open, as the + is, so it is plain which button the
@@ -1744,12 +1744,7 @@ a.ghline { color: var(--paper-ink-2); font-weight: 600; text-decoration: none; }
  * narrow desktop, they are the same screens.
  *
  * `app.js` decides *which layout is drawn* at the same width; this file styles
- * the one it drew. The only rule here that reaches outside the desktop tree is
- * the one below, because the phone's 460px column is on `#app` itself. */
-
-@media (min-width: 1100px) {
-  #app { max-width: none; }
-}
+ * the one it drew. */
 
 .desk { flex: 1; min-height: 0; display: flex; }
 
@@ -2839,6 +2834,7 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
   .sun-transition-modes { gap:0; padding:0; border-radius:24px; }
   .sun-transition-modes button { padding-inline:6px; font-size:12px; }
 }
+.appearance-card[aria-labelledby="appearance-size"] { container-type:inline-size; }
 .appearance-stepper { display:flex; align-items:center; gap:var(--space-lg); }
 .appearance-stepper input { flex:1; min-width:0; height:44px; accent-color:var(--latte-espresso); cursor:pointer; }
 .appearance-stepper .roundbtn { min-width:44px; min-height:44px; background: var(--latte-foam); font-size:22px;  color:var(--latte-foam-ink); }
@@ -2860,15 +2856,27 @@ a.filelink { color: var(--paper-ink-2); text-decoration: underline; cursor: poin
 @media (pointer: coarse) {
   .appearance-modes button,.appearance-reset { min-height:max(44px, calc(44px / var(--ui-scale, 1))); }
   .appearance-stepper .roundbtn { min-width:max(44px, calc(44px / var(--ui-scale, 1))); min-height:max(44px, calc(44px / var(--ui-scale, 1))); }
+  .appearance-limits { margin:0 calc(max(44px, calc(44px / var(--ui-scale, 1))) + var(--space-lg)); }
+}
+@container (max-width:240px) {
+  .appearance-stepper { flex-wrap:wrap; justify-content:space-between; row-gap:var(--space-xs); column-gap:var(--space-md); }
+  .appearance-stepper input { order:-1; flex:1 0 100%; width:100%; }
+  .appearance-stepper .roundbtn { width:40px; height:40px; min-width:40px; min-height:40px; }
+  .appearance-limits { margin:0; }
 }
 
 
 /* The phone's three sections share space with Settings, which holds Activity. */
 @media (max-width:1099px) {
-  .nav { left:var(--space-md); right:var(--space-md); gap:var(--space-md); }
+  .nav { left:var(--space-md); right:var(--space-md); gap:var(--space-md); container-type:inline-size; }
   .navpill { flex:1; min-width:0; max-width:260px; padding:var(--space-xs); }
   .navpill .navbtn { flex:1; min-width:0; min-height:44px; padding:10px 6px; }
   .nav > .roundbtn { width:52px; height:52px; flex:none; }
+  @container (max-width:240px) {
+    .navpill { padding:3px; }
+    .navpill .navbtn { min-height:36px; padding:8px 2px; font-size:12px; }
+    .nav > .roundbtn { width:40px; height:40px; min-width:40px; min-height:40px; }
+  }
 }
 .settings-section { display:flex; flex-direction:column; gap:var(--space-lg); margin:0; }
 .settings-place { margin-bottom:0; }
