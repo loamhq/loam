@@ -134,6 +134,12 @@ const BOOTSTRAP_JS = `(() => {
     for (const node of remove) node.remove();
   }
 
+  function parseViewBoxWidth(vb) {
+    const parts = String(vb || '').trim().split(/[\\s,]+/).map(Number);
+    if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) return 0;
+    return parts[2] > 0 && parts[3] > 0 ? parts[2] : 0;
+  }
+
   function enhanceStage() {
     // Convert direct SVG <title> children to instant Loam tooltips.
     for (const titleNode of [...stage.querySelectorAll('svg title')]) {
@@ -145,8 +151,75 @@ const BOOTSTRAP_JS = `(() => {
         titleNode.remove();
       }
     }
-    // Wrap bare wide tables in an isolated horizontal scroller for 390px phones.
+    // Keep bare viewBox SVGs at their natural viewBox width on desktop while
+    // still shrinking to fit narrow screens (zero-specificity CSS rule lets
+    // explicit width="100%" or agent CSS override cleanly).
+    const isExpanded = document.documentElement.dataset.expanded === '1';
+    for (const svg of [...stage.querySelectorAll('svg')]) {
+      if (svg.parentElement?.closest('svg')) continue;
+      const vbW = parseViewBoxWidth(svg.getAttribute('viewBox'));
+      if (!svg.hasAttribute('width')) {
+        if (vbW > 0) {
+          svg.style.setProperty('--loam-vb-w', vbW + 'px');
+          svg.dataset.loamVbW = String(vbW);
+          if (isExpanded) {
+            const p = svg.parentElement;
+            if (p && !p.classList.contains('loam-svg-wrap')) {
+              const wrap = document.createElement('div');
+              wrap.className = 'loam-svg-wrap';
+              p.insertBefore(wrap, svg);
+              wrap.appendChild(svg);
+            }
+          }
+        }
+      } else {
+        const rawW = (svg.getAttribute('width') || '').trim();
+        const m = /^(\\d+(?:\\.\\d+)?)(?:px)?$/i.exec(rawW);
+        if (m) {
+          const numW = Number(m[1]);
+          if (Number.isFinite(numW) && numW > 0) svg.dataset.loamVbW = String(numW);
+        }
+      }
+    }
+    // Match Markdown table column behaviour and wrap bare tables in an isolated
+    // horizontal scroller for narrow screens.
     for (const tbl of [...stage.querySelectorAll('table')]) {
+      for (const th of tbl.querySelectorAll('thead th')) {
+        if ((th.textContent || '').trim().length > 18) th.setAttribute('data-loam-wrap', '');
+      }
+      const rows = [...tbl.querySelectorAll('tbody tr')];
+      const hasSpans = [...tbl.querySelectorAll('th, td')].some((c) => {
+        const cs = Number(c.getAttribute('colspan') || 1);
+        const rs = Number(c.getAttribute('rowspan') || 1);
+        return cs > 1 || rs > 1;
+      });
+      if (rows.length && !hasSpans) {
+        const colMax = [];
+        for (const row of rows) {
+          const cells = [...row.children].filter((c) => c.localName.toLowerCase() === 'td');
+          cells.forEach((cell, idx) => {
+            const len = (cell.textContent || '').trim().length;
+            if (len > (colMax[idx] || 0)) colMax[idx] = len;
+          });
+        }
+        const cols = colMax.map((maxLen) => {
+          if (!maxLen) return null;
+          if (maxLen <= 14) return 'compact';
+          if (maxLen <= 28) return 'medium';
+          return 'prose';
+        });
+        for (const row of rows) {
+          const cells = [...row.children].filter((c) => c.localName.toLowerCase() === 'td');
+          cells.forEach((cell, idx) => {
+            const kind = cols[idx];
+            if (kind && !cell.hasAttribute('data-loam-col')) cell.setAttribute('data-loam-col', kind);
+            if (kind !== 'compact') {
+              const len = (cell.textContent || '').trim().length;
+              if (len > 0 && len <= 14) cell.setAttribute('data-loam-nowrap', '');
+            }
+          });
+        }
+      }
       const p = tbl.parentElement;
       if (!p || p.classList.contains('loam-table-wrap')) continue;
       if (p !== stage) {
@@ -160,7 +233,7 @@ const BOOTSTRAP_JS = `(() => {
     }
   }
 
-  let lastHeight = 0;
+  let lastSizeKey = '';
   let measureQueued = false;
   let measureTimer = null;
   function send(payload) {
@@ -169,15 +242,50 @@ const BOOTSTRAP_JS = `(() => {
   function measureNow() {
     measureQueued = false;
     if (measureTimer) { clearTimeout(measureTimer); measureTimer = null; }
+    const viewportW = document.documentElement.clientWidth || window.innerWidth || 0;
+    if (document.documentElement.dataset.expanded === '1' && viewportW > 0) {
+      for (const wrap of stage.querySelectorAll('.loam-svg-wrap')) {
+        const svg = wrap.querySelector('svg');
+        const vbW = Number(svg?.dataset?.loamVbW || 0);
+        wrap.classList.toggle('loam-svg-pan', vbW > viewportW * 1.25);
+      }
+    }
     const sh = Math.max(
       stage.getBoundingClientRect().height,
       document.body.getBoundingClientRect().height,
       stage.scrollHeight,
     );
     const height = Math.max(1, Math.min(6000, Math.ceil(sh)));
-    if (height !== lastHeight) {
-      lastHeight = height;
-      send({ type: 'size', height });
+    let overflowX = false;
+    let naturalWidth = 0;
+    for (const wrap of stage.querySelectorAll('.loam-table-wrap')) {
+      if (wrap.scrollWidth > wrap.clientWidth + 2) {
+        overflowX = true;
+        if (wrap.scrollWidth > naturalWidth) naturalWidth = Math.ceil(wrap.scrollWidth);
+      }
+    }
+    if (viewportW > 0 && stage.scrollWidth > viewportW + 2) {
+      overflowX = true;
+      if (stage.scrollWidth > naturalWidth) naturalWidth = Math.ceil(stage.scrollWidth);
+    }
+    let shrunkSvg = false;
+    for (const svg of stage.querySelectorAll('svg')) {
+      if (svg.parentElement?.closest('svg')) continue;
+      const vbW = Number(svg.dataset.loamVbW || 0);
+      if (vbW > 0) {
+        const renderedW = svg.getBoundingClientRect().width;
+        if (vbW > renderedW + 8) {
+          shrunkSvg = true;
+          if (vbW > naturalWidth) naturalWidth = Math.ceil(vbW);
+        }
+      }
+    }
+    const tall = height >= (viewportW > 0 && viewportW <= 500 ? 340 : 420);
+    const canExpand = overflowX || shrunkSvg || tall;
+    const sizeKey = height + '|' + (canExpand ? 1 : 0) + '|' + naturalWidth;
+    if (sizeKey !== lastSizeKey) {
+      lastSizeKey = sizeKey;
+      send({ type: 'size', height, canExpand, naturalWidth });
     }
   }
   function scheduleMeasure() {
@@ -228,7 +336,7 @@ const BOOTSTRAP_JS = `(() => {
     }
     stage.replaceChildren(frag);
     enhanceStage();
-    lastHeight = 0;
+    lastSizeKey = '';
     measureNow();
     setTimeout(scheduleMeasure, 60);
     document.fonts?.ready?.then(scheduleMeasure);
@@ -308,6 +416,7 @@ const BOOTSTRAP_JS = `(() => {
     if (!data || data.loamVisual !== true || data.id !== frameId) return;
     if (data.type === 'theme') applyTheme(data);
     else if (data.type === 'render') {
+      document.documentElement.dataset.expanded = data.expanded ? '1' : '0';
       if (data.tokens || data.mode || typeof data.fontsCss === 'string') applyTheme(data);
       renderHtml(data.html);
     }

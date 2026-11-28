@@ -219,7 +219,14 @@ function ensureGlobalListeners() {
       ctrl.onReady()
     } else if (data.type === 'size') {
       const hPx = Number(data.height)
-      if (Number.isFinite(hPx) && hPx >= 1 && hPx <= 6000) ctrl.onSize(Math.ceil(hPx))
+      if (Number.isFinite(hPx) && hPx >= 1 && hPx <= 6000) {
+        const naturalWidth = Number(data.naturalWidth)
+        ctrl.onSize({
+          height: Math.ceil(hPx),
+          canExpand: Boolean(data.canExpand),
+          naturalWidth: Number.isFinite(naturalWidth) && naturalWidth > 0 ? Math.ceil(naturalWidth) : 0,
+        })
+      }
     }
   })
   const root = globalThis.document?.documentElement
@@ -315,7 +322,7 @@ export function visualFallbackNode(lang, html, note = 'Shown inline in threads')
   )
 }
 
-function mountSealedFrame({ html, title, hostEl, onFail, large = false }) {
+function mountSealedFrame({ html, title, hostEl, onFail, onMetrics = null, large = false }) {
   ensureGlobalListeners()
   const id = nextFrameId()
   const iframe = h('iframe', {
@@ -349,6 +356,7 @@ function mountSealedFrame({ html, title, hostEl, onFail, large = false }) {
           id,
           type: 'render',
           html,
+          expanded: Boolean(large),
           tokens: snap.tokens,
           mode: snap.mode,
         }, '*')
@@ -359,10 +367,11 @@ function mountSealedFrame({ html, title, hostEl, onFail, large = false }) {
         }
       })
     },
-    onSize(height) {
+    onSize(info) {
       ctrl.mountedOnce = true
-      dress(iframe, { height: `${height}px` })
+      dress(iframe, { height: `${info.height}px` })
       iframe.classList?.remove?.('loading')
+      onMetrics?.(info)
     },
   }
   liveFrames.set(id, ctrl)
@@ -405,10 +414,11 @@ export function closeVisualView() {
   if (before?.isConnected) before.focus?.({ preventScroll: true })
 }
 
-export function openVisualView({ html, lang = 'visual', title = '', api = null, openRef = null } = {}) {
+export function openVisualView({ html, lang = 'visual', title = '', api = null, openRef = null, naturalWidth = 0 } = {}) {
   closeVisualView()
   const heading = title || visualTitle(lang, html) || 'Visual'
   const stage = h('div', { class: 'visual-view-stage' })
+  let bestWidth = Number.isFinite(Number(naturalWidth)) && Number(naturalWidth) > 0 ? Math.ceil(Number(naturalWidth)) : 0
   let savedPath = null
   let saving = false
   let saveError = ''
@@ -479,11 +489,22 @@ export function openVisualView({ html, lang = 'visual', title = '', api = null, 
     },
     surface,
   )
+  const applySheetWidth = (w) => {
+    const sheetW = w > 0 ? Math.min(1440, Math.max(840, Math.ceil(w) + 160)) : 880
+    surface.style?.setProperty?.('--visual-view-w', `${sheetW}px`)
+  }
+  applySheetWidth(bestWidth)
   const mounted = mountSealedFrame({
     html,
     title: heading,
     hostEl: stage,
     large: true,
+    onMetrics: (info) => {
+      if (info.naturalWidth > bestWidth) {
+        bestWidth = info.naturalWidth
+        applySheetWidth(bestWidth)
+      }
+    },
     onFail: () => {
       stage.replaceChildren(visualFallbackNode(lang, html, 'Visual couldn’t be drawn'))
     },
@@ -523,7 +544,7 @@ export function replyVisuals(message, key = null, { streaming = false, api = nul
       return cached.stub
     }
 
-    const record = { api, openRef, savedPath: null, saving: false }
+    const record = { api, openRef, savedPath: null, saving: false, naturalWidth: 0 }
     const container = h('div', {
       class: 'reply-visual',
       key: `visual:${++visualSerial}`,
@@ -538,11 +559,12 @@ export function replyVisuals(message, key = null, { streaming = false, api = nul
       {
         class: 'reply-visual-action',
         type: 'button',
+        hidden: true,
         title: 'Expand visual',
         'aria-label': title ? `Expand ${title}` : 'Expand visual',
         onclick: (e) => {
           e.stopPropagation()
-          openVisualView({ html, lang, title, api: record.api, openRef: record.openRef })
+          openVisualView({ html, lang, title, api: record.api, openRef: record.openRef, naturalWidth: record.naturalWidth })
         },
       },
       icon.expand(13),
@@ -591,6 +613,10 @@ export function replyVisuals(message, key = null, { streaming = false, api = nul
       html,
       title: title || 'Visual',
       hostEl: container,
+      onMetrics: ({ canExpand, naturalWidth }) => {
+        record.naturalWidth = naturalWidth
+        expandBtn.hidden = !canExpand
+      },
       onFail: () => {
         container.classList?.add?.('failed')
         slot.replaceChildren(visualFallbackNode(lang, html, 'Visual couldn’t be drawn'))
