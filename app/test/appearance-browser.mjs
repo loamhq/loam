@@ -1,4 +1,5 @@
 import { mergeAppearance } from '../public/theme-options.js'
+import { sizeToScale } from '../public/scale.js'
 // Local page and relay, synthetic host settings and conversations. No live host.
 import assert from 'node:assert/strict'
 import { mkdir, writeFile, readFile } from 'node:fs/promises'
@@ -57,6 +58,7 @@ try {
       await settle(page)
       const g = await geometry(page)
       assert.equal(g.overflow, false, JSON.stringify(g))
+      assert.ok(Math.abs(g.app.width - g.width) < 2 && Math.abs(g.app.x) < 1.5, JSON.stringify(g))
       assert.ok(Math.abs(g.app.height - g.height) < 2, JSON.stringify(g))
       await page.screenshot({ path: path.join(out, `${label}-${width}-${mode}-${size}.png`), animations: 'disabled' })
       return g
@@ -65,9 +67,10 @@ try {
       await page.goto(app.url); await page.locator('.tt-row').first().waitFor(); await page.waitForFunction(() => globalThis.__appearanceTest); await settle(page)
       assert.equal(await page.evaluate(() => __appearanceTest.theme.kind), kind)
       await page.waitForFunction(() => globalThis.__firstAppearance)
-      assert.deepEqual(await page.evaluate(() => __firstAppearance), { theme: mode, scale: String(size / 100) })
+      const scale = sizeToScale(size)
+      assert.deepEqual(await page.evaluate(() => __firstAppearance), { theme: mode, scale: String(scale) })
       const heights = await page.locator('.tt-row').evaluateAll((nodes) => nodes.map((n) => n.getBoundingClientRect().height))
-      assert.ok(heights.every((height) => Math.abs(height - 80 * size / 100) < 1), JSON.stringify(heights))
+      assert.ok(heights.every((height) => Math.abs(height - 80 * scale) < 1), JSON.stringify(heights))
       assert.equal(await page.locator('.tt-quiet .srow-name').count(), 0)
       assert.equal(await page.locator('.tt-row:not(.tt-quiet) .srow-name').count(), 1)
       const short = await page.locator('[title="Room to think"]').evaluate((n) => {
@@ -150,17 +153,18 @@ try {
         await page.evaluate(() => __appearanceTest.closeSheet())
         assert.equal(await page.getByTitle('Appearance', { exact: true }).count(), 0, 'the duplicate rail toggle was removed')
       }
-      for (const edge of [75, 150]) {
+      for (const edge of [60, 200]) {
         await page.evaluate((size) => __appearanceTest.theme.set({ size }), edge)
         await page.evaluate(() => __appearanceTest.goSettings('appearance'))
         await settle(page)
         const edgeGeometry = await geometry(page)
         assert.equal(edgeGeometry.overflow, false, JSON.stringify({ edge, edgeGeometry }))
+        assert.ok(Math.abs(edgeGeometry.app.width - edgeGeometry.width) < 2 && Math.abs(edgeGeometry.app.x) < 1.5, JSON.stringify({ edge, edgeGeometry }))
         assert.ok(Math.abs(edgeGeometry.app.height - edgeGeometry.height) < 2)
         // Cards intentionally scroll horizontally at high zoom; their viewport
         // and the active card must fit, along with all non-scrolling controls.
-        const controls = await page.locator('.appearance-card button:not(.theme-choice), .appearance-card input, .theme-picker, .theme-choice.on').evaluateAll((nodes) => nodes.map((n) => { const r = n.getBoundingClientRect(); return { left: r.left, right: r.right } }))
-        assert.ok(controls.every((r) => r.left >= 0 && r.right <= width + 1), JSON.stringify({ edge, controls }))
+        const controls = await page.locator('.appearance-card button:not(.theme-choice), .appearance-card input, .theme-picker, .theme-choice.on').evaluateAll((nodes) => nodes.map((n) => { const r = n.getBoundingClientRect(); return { tag: n.tagName, left: r.left, right: r.right, width: r.width } }))
+        assert.ok(controls.every((r) => r.left >= 0 && r.right <= width + 1 && r.width >= 20), JSON.stringify({ edge, controls }))
         await page.getByRole('button', { name: 'Reset to 100%', exact: true }).click()
         await page.waitForFunction(() => !__appearanceTest.theme.status.saving)
         assert.equal(values[kind].size, 100)

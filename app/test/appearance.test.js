@@ -5,6 +5,7 @@ import vm from 'node:vm'
 import { appearanceRegistry } from '../tools/appearance-registry.js'
 import { loadThemes } from '../src/themes.js'
 import { createTheme } from '../public/theme.js'
+import { SIZE_MIN, SIZE_MAX, SIZE_STEP, SIZE_DEFAULT, sizeToScale, stepSize, migrateLegacySize, uiScale } from '../public/scale.js'
 import { appearanceBoot, appearanceValues } from '../src/appearance.js'
 import { fakeBroker, appAgainst, closing, TOKEN } from './harness.js'
 import { installDom } from './fakedom.js'
@@ -56,7 +57,7 @@ test('system mode follows media; the quick toggle writes an explicit host mode',
   media.matches = false; change(); assert.equal(theme.current, 'light')
 })
 
-test('desktop modifier shortcuts use 5% steps, enforce bounds, and reset; phone keys pass through', async () => {
+test('desktop modifier shortcuts use natural steps, enforce 60–200% bounds, and reset; phone keys pass through', async () => {
   page()
   const theme = createTheme(null, { kind: 'desktop', request: async () => ({}) })
   const key = (key, over = {}, desktop = true) => {
@@ -67,10 +68,14 @@ test('desktop modifier shortcuts use 5% steps, enforce bounds, and reset; phone 
   }
   assert.equal(key('+'), true); assert.equal(theme.value.size, 105)
   assert.equal(key('-', { ctrlKey: false, metaKey: true }), true); assert.equal(theme.value.size, 100)
-  for (let i = 0; i < 20; i++) key('=')
+  for (let i = 0; i < 10; i++) key('=')
   assert.equal(theme.value.size, 150)
+  key('='); assert.equal(theme.value.size, 160)
+  for (let i = 0; i < 10; i++) key('=')
+  assert.equal(theme.value.size, 200)
+  key('-'); assert.equal(theme.value.size, 190)
   for (let i = 0; i < 30; i++) key('-')
-  assert.equal(theme.value.size, 75)
+  assert.equal(theme.value.size, 60)
   key('0'); assert.equal(theme.value.size, 100)
   for (const over of [{ altKey: true }, { isComposing: true }, { ctrlKey: false }]) assert.equal(key('+', over), false)
   assert.equal(key('+', {}, false), false)
@@ -113,7 +118,7 @@ test('host boot runs before styles/app, ignores browser theme storage, and selec
     vm.runInContext(state, context); vm.runInContext(boot, context)
     assert.equal(root.dataset.deviceKind, coarse ? 'phone' : 'desktop')
     assert.equal(root.dataset.theme, coarse ? 'dark' : 'light')
-    assert.equal(properties['--ui-scale'], coarse ? 1.25 : 0.9)
+    assert.equal(properties['--ui-scale'], coarse ? 1.125 : 0.81)
   }
 })
 
@@ -164,10 +169,10 @@ test('the registry handoff covers every manifest option and the UI limits', asyn
     assert.equal(mode.default, 'system')
     assert.deepEqual(transition.enum, ['fast', 'normal', 'long'])
     assert.equal(transition.default, 'normal')
-    assert.deepEqual([size.minimum, size.maximum, size.multipleOf, size.default], [75, 150, 5, 100])
+    assert.deepEqual([size.minimum, size.maximum, size.multipleOf, size.default], [SIZE_MIN, SIZE_MAX, SIZE_STEP, SIZE_DEFAULT])
   }
   const source = await readFile(new URL('../public/page/settings.js', import.meta.url), 'utf8')
-  assert.match(source, /id: 'appearance-zoom', type: 'range', min: 75, max: 150, step: 5/)
+  assert.match(source, /id: 'appearance-zoom', type: 'range', min: SIZE_MIN, max: SIZE_MAX, step: SIZE_STEP/)
 })
 
 test('a delayed host refresh cannot roll back a newer saved edit', async () => {
@@ -181,4 +186,83 @@ test('a delayed host refresh cannot roll back a newer saved edit', async () => {
   theme.set({ mode: 'dark', size: 125 }); await theme.save()
   finish(values()); await refreshing
   assert.deepEqual(theme.value, { mode: 'dark', transition: 'normal', size: 125, theme: 'latte' })
+})
+
+test('new 0.9-base scale, step sizes, legacy migration formula, and uiScale bounds', () => {
+  assert.equal(sizeToScale(60), 0.54)
+  assert.equal(sizeToScale(85), 0.765)
+  assert.equal(sizeToScale(100), 0.9)
+  assert.equal(sizeToScale(150), 1.35)
+  assert.equal(sizeToScale(200), 1.8)
+  assert.equal(stepSize(60, -1), 60)
+  assert.equal(stepSize(60, 1), 65)
+  assert.equal(stepSize(145, 1), 150)
+  assert.equal(stepSize(150, 1), 160)
+  assert.equal(stepSize(155, 1), 160)
+  assert.equal(stepSize(155, -1), 150)
+  assert.equal(stepSize(200, 1), 200)
+  assert.equal(stepSize(200, -1), 190)
+  assert.equal(migrateLegacySize(75), 85)
+  assert.equal(migrateLegacySize(90), 100)
+  assert.equal(migrateLegacySize(100), 100)
+  assert.equal(migrateLegacySize(125), 140)
+  assert.equal(migrateLegacySize(150), 165)
+  const doc = page()
+  doc.documentElement.style.setProperty('--ui-scale', '0.54')
+  assert.equal(uiScale(), 0.54)
+  doc.documentElement.style.setProperty('--ui-scale', '1.8')
+  assert.equal(uiScale(), 1.8)
+  doc.documentElement.style.setProperty('--ui-scale', '0.2')
+  assert.equal(uiScale(), 1)
+})
+
+test('older host refusing extended sizes falls back to device-local cache and migrates once accepted', async () => {
+  const store = new Map()
+  const prevStorage = globalThis.localStorage
+  globalThis.localStorage = {
+    getItem: (k) => store.has(k) ? store.get(k) : null,
+    setItem: (k, v) => { store.set(k, String(v)) },
+    removeItem: (k) => { store.delete(k) },
+  }
+  try {
+    page()
+    let refuseExtended = true
+    const held = { phone: { mode: 'light', size: 100, theme: 'latte' }, desktop: { mode: 'light', size: 100, theme: 'latte' } }
+    const request = async (method, body) => {
+      if (method === 'PATCH') {
+        const s = body?.phone?.size
+        if (refuseExtended && s !== undefined && (s < 75 || s > 150)) {
+          throw new Error('phone size is a whole percent from 75 to 150 in steps of 5')
+        }
+        if (body?.phone) Object.assign(held.phone, body.phone)
+      }
+      return structuredClone(held)
+    }
+    const phone = createTheme(null, { kind: 'phone', boot: { values: structuredClone(held), available: true }, request })
+    phone.set({ size: 60 }); await phone.save()
+    assert.equal(phone.value.size, 60)
+    assert.equal(phone.status.error, null)
+    assert.equal(phone.status.localOnly, true)
+    assert.equal(phone.status.sizeLocalOnly, true)
+    assert.equal(JSON.parse(store.get('loam.appearance.size')).phone, 60)
+    // Boot overlays the cached extended size before first paint.
+    const boot = await readFile(new URL('../public/theme-boot.js', import.meta.url), 'utf8')
+    const sizeLocal = await readFile(new URL('../public/size-local.js', import.meta.url), 'utf8')
+    const state = await appearanceBoot({ json: async () => ({ status: 200, body: JSON.stringify(held) }) })
+    const properties = {}, root = { dataset: {}, style: { setProperty: (k, v) => { properties[k] = v } } }
+    const ctx = vm.createContext({ document: { documentElement: root }, matchMedia: (q) => ({ matches: q === '(pointer: coarse)' }), localStorage: globalThis.localStorage })
+    vm.runInContext(state, ctx); vm.runInContext(sizeLocal, ctx); vm.runInContext(boot, ctx)
+    assert.equal(properties['--ui-scale'], 0.54)
+    // Once the host supports 60–200%, the next session migrates and clears the cache.
+    refuseExtended = false
+    page()
+    const migrated = createTheme(null, { kind: 'phone', boot: { values: structuredClone(held), available: true }, request })
+    assert.equal(migrated.value.size, 60)
+    await migrated.save()
+    assert.equal(held.phone.size, 60)
+    assert.equal(migrated.status.localOnly, false)
+    assert.equal(store.has('loam.appearance.size'), false)
+  } finally {
+    globalThis.localStorage = prevStorage
+  }
 })

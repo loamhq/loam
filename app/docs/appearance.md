@@ -11,7 +11,7 @@ palette stylesheet fetch. A new display face loads on first selection. Latte & N
 shapes (Each its own, Circle, Rounded square or Latte art). Circle is the
 default; Latte art reveals its Inside and In a mug controls. Mode offers Light, Dark, Sun and
 System; the duplicate rail toggle is removed. Size changes
-live from 75% to 150%, in 5% steps; Reset restores 100%. Desktop Ctrl/Cmd plus,
+live from 60% to 200%, in 5% slider steps (with `−`/`+` and keyboard steps of 5% up to 150% and 10% above 150%); Reset restores 100% (calibrated to `0.9` of the original unscaled layout, so CSS `zoom` spans `0.54`–`1.80`). Desktop Ctrl/Cmd plus,
 minus and zero use the same setting, including while composing. The installed
 theme's page in Settings › Plugins also saves mode and theme options.
 
@@ -152,7 +152,7 @@ device rows read back the same shared fields. A PATCH may name either row for a
 shared field. If both rows name different values for a shared field or option,
 the desktop value wins. Reject unknown device
 kinds/fields, an empty patch, modes outside `light|dark|sun|system`, theme IDs outside the installed catalog, booleans or
-non-integer sizes, and sizes outside 75–150 or not divisible by 5 with 400 and
+non-integer sizes, and sizes outside 60–200 or not divisible by 5 with 400 and
 `{"error":"a sentence"}`. Both routes use bearer authentication and no-store.
 Defaults are filled on GET. Persist in the host's existing durable settings
 store and expose these **same base keys** through its persona settings tool:
@@ -161,10 +161,10 @@ store and expose these **same base keys** through its persona settings tool:
 | --- | --- | --- |
 | `appearance.phone.mode` | `light`, `dark`, `sun`, `system` | `system` |
 | `appearance.phone.transition` | `fast`, `normal`, `long` | `normal` |
-| `appearance.phone.size` | integer 75–150, step 5 | 100 |
+| `appearance.phone.size` | integer 60–200, step 5 | 100 |
 | `appearance.desktop.mode` | `light`, `dark`, `sun`, `system` | `system` |
 | `appearance.desktop.transition` | `fast`, `normal`, `long` | `normal` |
-| `appearance.desktop.size` | integer 75–150, step 5 | 100 |
+| `appearance.desktop.size` | integer 60–200, step 5 | 100 |
 | `appearance.phone.theme` | installed theme ID (Latte, Plain and any installed theme) | `latte` |
 | `appearance.desktop.theme` | installed theme ID (Latte, Plain and any installed theme) | `latte` |
 | `appearance.location` | shared rounded location object described below, or `null` | `null` |
@@ -277,12 +277,26 @@ browsers. With browser storage blocked it lasts only for the current page.
 ## Scaling and row layout
 
 CSS `zoom` on the app's body scales fonts, icons, spacing and hit areas together,
-without raster transforms. The app's viewport height and keyboard offset divide
+without raster transforms. The 100% default applies `--ui-scale: 0.9` (so 60%–200%
+maps to CSS `zoom` `0.54`–`1.80` via `sizeToScale()` in `public/scale.js`). `#app`
+fills `100%` of the viewport width at every scale (no 460px ceiling), so zoomed-out
+phone surfaces reach both edges. The app's viewport height and keyboard offset divide
 by the scale; DOM-rectangle calculations for thread popovers, reading anchors
-and sheet dragging convert screen pixels back into layout pixels. Sticky author
-labels and the composer retain native CSS layout. Appearance's touch controls
-retain at least 44 screen CSS pixels at the small end. Narrow scaled thread-list
+and sheet dragging convert screen pixels back into layout pixels (`uiScale()` accepts
+`0.5`–`2`). Sticky author labels and the composer retain native CSS layout, with
+`.composer-actions` wrapping cleanly and `.composer-box .modelbtn` capping at
+`calc(100% - 48px)` so 200% on a 390px phone stays compact and free of overlap.
+Appearance's touch controls retain at least 44 screen CSS pixels at the small end,
+and at narrow container widths (`<= 240px`) the Size slider stacks above `−`/`+` and
+the phone bottom tab bar compacts so tab labels never clip. Narrow scaled thread-list
 headers compact, then wrap their actions rather than losing a button offscreen.
+
+An older host that still enforces 75–150 rejects extended sizes (`60`–`70` and
+`155`–`200`). Those pending extended choices apply immediately and are cached under
+`loam.appearance.size` (`public/size-local.js`) until the host accepts `60`–`200`,
+mirroring `loam.appearance.sun`. One-time migration of pre-relabel stored sizes in
+the host's settings file uses `migrateLegacySize()` (`old === 100 ? 100 : clampSize(old / 0.9)`).
+See [app size captures and verification](evidence/app-size/README.md).
 
 Only thread rows whose existing subtitle resolver returns Quiet omit the subtitle
 and let the title clamp to two lines. Their 80px base height matches active rows,

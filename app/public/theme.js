@@ -2,6 +2,8 @@
 import { authenticatedFetch as fetch } from './auth.js'
 import { optionValues, mergeAppearance, applyOptions } from './theme-options.js'
 import './sun.js'
+import './size-local.js'
+import { SIZE_DEFAULT, isValidSize, clampSize, sizeToScale, stepSize } from './scale.js'
 import { createShift, transitionMs } from './sun-shift.js'
 import { formatTime, browserTimeZone } from './time.js'
 
@@ -29,11 +31,12 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
   const themeId = id => installed.some(t => t.id === id) ? id : 'latte'
   const transitionId = id => ['fast', 'normal', 'long'].includes(id) ? id : 'normal'
   const sun = globalThis.LoamSun
-  let draft = sun.local(kind), localOnly = false, sunUnsupported = false, locating = false, sunTimer, activeMode = null
-  let value = { mode: 'system', transition: 'normal', size: 100, ...boot?.values?.[kind], ...(sun.location(boot?.values?.location) ? { location: sun.location(boot.values.location) } : {}), ...draft, theme: themeId(boot?.values?.[kind]?.theme), transition: transitionId(draft.transition ?? boot?.values?.[kind]?.transition) }
+  const sizeLocal = globalThis.LoamSize
+  let draft = sun.local(kind), sizeDraft = sizeLocal?.local(kind), localOnly = false, sunUnsupported = false, sizeLocalOnly = false, sizeUnsupported = false, locating = false, sunTimer, activeMode = null
+  let value = { mode: 'system', transition: 'normal', size: SIZE_DEFAULT, ...boot?.values?.[kind], ...(sun.location(boot?.values?.location) ? { location: sun.location(boot.values.location) } : {}), ...draft, ...(sizeDraft !== undefined ? { size: sizeDraft } : {}), theme: themeId(boot?.values?.[kind]?.theme), transition: transitionId(draft.transition ?? boot?.values?.[kind]?.transition) }
   let withOptions = installed.some(t => t.options?.length)
   if (withOptions) value.options = optionValues(value.options, installed)
-  let pending = { ...draft }, timer, saving = false, revision = 0, reading = 0
+  let pending = { ...draft, ...(sizeDraft !== undefined ? { size: sizeDraft } : {}) }, timer, saving = false, revision = 0, reading = 0
   // The Market's Try it (2026-11-18): a look worn until it is stopped; `value`
   // and what is saved are untouched, so stopping is the theme as it was.
   let trying = null
@@ -45,11 +48,15 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
     if (ground) globalThis.document?.querySelector?.('meta[name="theme-color"]')?.setAttribute('content', ground)
   }
   const shift = customShift ?? createShift({ root, setThemeColor: updateThemeColor })
-  const status = () => ({ saving: saving || Object.keys(pending).length > 0, error: localOnly && !error?.includes('until saved') ? null : error, localOnly, locating })
+  const status = () => ({ saving: saving || Object.keys(pending).length > 0, error: (localOnly || sizeLocalOnly) && !error?.includes('until saved') ? null : error, localOnly: localOnly || sizeLocalOnly, sunLocalOnly: localOnly, sizeLocalOnly, locating })
   function cache(patch) { draft = { ...draft, ...patch }; sun.local(kind, draft) }
+  function cacheSize(size) { sizeDraft = sizeLocal?.isExtended(size) ? size : undefined; sizeLocal?.local(kind, sizeDraft) }
   function acknowledge(patch) {
     for (const key of ['mode', 'location', 'transition']) if (JSON.stringify(draft[key]) === JSON.stringify(patch[key])) delete draft[key]
     sun.local(kind, draft); localOnly = Object.keys(draft).length > 0
+    if (patch.size !== undefined && (sizeDraft === patch.size || !sizeLocal?.isExtended(patch.size))) {
+      cacheSize(undefined); sizeLocalOnly = false
+    }
   }
   function solarPatch(patch) {
     return { ...(patch.mode === 'sun' ? { mode: 'sun' } : {}), ...(patch.location ? { location: patch.location } : {}), ...(patch.transition ? { transition: patch.transition } : {}) }
@@ -75,7 +82,7 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
     const optKey = optionsSignature()
     const currentShift = shift.active
     if (keepActiveShift && currentShift && value.mode === 'sun' && currentShift.toMode === chosen && currentShift.look === look && currentShift.optionsKey === optKey && !isHidden() && !isReducedMotion()) {
-      root.style.setProperty('--ui-scale', value.size / 100)
+      root.style.setProperty('--ui-scale', sizeToScale(value.size))
       activeMode = chosen
       return chosen
     }
@@ -84,7 +91,7 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
       root.dataset.look = look
       globalThis.LoamThemeFonts?.(look)
       applyOptions(root, value.options, installed, look)
-      root.style.setProperty('--ui-scale', value.size / 100)
+      root.style.setProperty('--ui-scale', sizeToScale(value.size))
       if (shift.start({
         fromMode,
         toMode: chosen,
@@ -104,7 +111,7 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
     root.dataset.look = look
     globalThis.LoamThemeFonts?.(look)
     applyOptions(root, value.options, installed, look)
-    root.style.setProperty('--ui-scale', value.size / 100)
+    root.style.setProperty('--ui-scale', sizeToScale(value.size))
     updateThemeColor()
     return chosen
   }
@@ -118,6 +125,9 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
       const local = solarPatch(patch)
       if (Object.keys(local).length) { cache(local); localOnly = true; for (const key of Object.keys(local)) delete patch[key] }
     }
+    if (sizeUnsupported && sizeLocal?.isExtended(patch.size)) {
+      cacheSize(patch.size); sizeLocalOnly = true; delete patch.size
+    }
     try {
       if (!Object.keys(patch).length) return
       const { location, ...device } = patch
@@ -125,6 +135,9 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
       const solar = solarPatch(patch)
       for (const key of Object.keys(solar)) if (JSON.stringify(key === 'location' ? sun.location(out?.location) : out?.[kind]?.[key]) !== JSON.stringify(solar[key])) {
         throw new Error('The host has not saved Sun yet.')
+      }
+      if (out?.[kind] && patch.size !== undefined && sizeLocal?.isExtended(patch.size) && out[kind].size !== patch.size) {
+        throw new Error('The host has not saved this size yet.')
       }
       if (out?.[kind] && patch.options) for (const [id, options] of Object.entries(patch.options)) {
         for (const [key, chosen] of Object.entries(options)) if (out[kind].options?.[id]?.[key] !== chosen) {
@@ -139,9 +152,14 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
         cache({ ...local, ...draft }); localOnly = true; sunUnsupported = true
         for (const key of Object.keys(local)) delete patch[key]
       }
+      const extendedSize = sizeLocal?.isExtended(patch.size) ? patch.size : undefined
+      if (extendedSize !== undefined) {
+        cacheSize(extendedSize); sizeLocalOnly = true; sizeUnsupported = true
+        delete patch.size
+      }
       if (Object.keys(patch).length) {
         pending = mergeAppearance(patch, pending)
-        if (!Object.keys(local).length) error = `${e.message} Changes apply here until saved.`
+        if (!Object.keys(local).length && extendedSize === undefined) error = `${e.message} Changes apply here until saved.`
       }
     }
     finally { saving = false; changed() }
@@ -172,13 +190,17 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
     }
     if (patch.size !== undefined) {
       if (!Number.isFinite(patch.size)) return
-      patch.size = Math.max(75, Math.min(150, Math.round(patch.size / 5) * 5))
+      patch.size = clampSize(patch.size)
     }
     revision++
     const firstSun = patch.mode === 'sun' && !sun.location(value.location)
     if (firstSun) patch.location = sun.fallback()
     if (patch.mode === 'sun' || draft.mode !== undefined || patch.location || patch.transition !== undefined || draft.transition !== undefined) {
       cache({ ...(patch.mode ? { mode: patch.mode } : {}), ...(patch.location ? { location: patch.location } : {}), ...(patch.transition ? { transition: patch.transition } : {}) })
+    }
+    if (patch.size !== undefined) {
+      if (sizeLocal?.isExtended(patch.size)) cacheSize(patch.size)
+      else if (sizeDraft !== undefined || sizeLocalOnly) { cacheSize(undefined); sizeLocalOnly = false }
     }
     value = mergeAppearance(value, patch); pending = mergeAppearance(pending, patch)
     const keepActiveShift = !('mode' in patch || 'theme' in patch || 'options' in patch || 'transition' in patch)
@@ -202,8 +224,8 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
       const out = await request('GET')
       if (at !== revision || read !== reading || saving || Object.keys(pending).length || !out?.[kind]) return
       const next = out[kind]
-      if (!['light', 'dark', 'sun', 'system'].includes(next.mode) || !Number.isInteger(next.size) || next.size < 75 || next.size > 150 || next.size % 5) return
-      value = { mode: next.mode, transition: transitionId(next.transition), size: next.size, theme: themeId(next.theme), ...(sun.location(out.location) ? { location: sun.location(out.location) } : {}), ...draft, ...(withOptions ? { options: optionValues(next.options, installed) } : {}) }; error = null; apply({ keepActiveShift: true }); changed()
+      if (!['light', 'dark', 'sun', 'system'].includes(next.mode) || !isValidSize(next.size)) return
+      value = { mode: next.mode, transition: transitionId(next.transition), size: sizeDraft !== undefined ? sizeDraft : next.size, theme: themeId(next.theme), ...(sun.location(out.location) ? { location: sun.location(out.location) } : {}), ...draft, ...(withOptions ? { options: optionValues(next.options, installed) } : {}) }; error = null; apply({ keepActiveShift: true }); changed()
     } catch (e) { if (at === revision && read === reading) { error = e.message; changed() } }
   }
   media?.addEventListener?.('change', () => { if (value.mode === 'system') { apply(); changed() } })
@@ -238,7 +260,7 @@ export function createTheme(media = globalThis.matchMedia?.('(prefers-color-sche
     toggle() { set({ mode: this.current === 'dark' ? 'light' : 'dark' }); return this.current },
     key(event, desktop) {
       if (!desktop || event.altKey || event.isComposing || !(event.ctrlKey || event.metaKey)) return false
-      const size = event.key === '0' ? 100 : ['+', '='].includes(event.key) ? value.size + 5 : event.key === '-' ? value.size - 5 : null
+      const size = event.key === '0' ? SIZE_DEFAULT : ['+', '='].includes(event.key) ? stepSize(value.size, 1) : event.key === '-' ? stepSize(value.size, -1) : null
       if (size === null) return false
       event.preventDefault(); set({ size }); return true
     },
